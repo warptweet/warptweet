@@ -1,0 +1,18 @@
+---
+const cases = [
+  ["DB", "Databases", "PostgreSQL, MySQL, Redis, and other data services through a named local port."],
+  ["API", "Private APIs", "Connect applications and tools to APIs running on another machine."],
+  ["DEV", "Development services", "Use remote dashboards, test environments, build systems, and package services locally."],
+  ["M2M", "Machine services", "Create an authenticated path from one machine to one declared service on another."]
+];
+---
+
+<div class="use-case-grid">
+  {cases.map(([label, title, body]) => (
+    <article>
+      <span>{label}</span>
+      <h3>{title}</h3>
+      <p>{body}</p>
+    </article>
+  ))}
+</div>

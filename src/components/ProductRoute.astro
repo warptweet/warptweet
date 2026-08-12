@@ -1,0 +1,39 @@
+<figure class="product-route" aria-labelledby="product-route-title" aria-describedby="product-route-caption">
+  <header class="product-route__header">
+    <p>Live route</p>
+    <strong id="product-route-title">database-primary</strong>
+    <span>Profile v1</span>
+  </header>
+
+  <div class="product-route__canvas">
+    <article class="machine-node machine-node--local">
+      <span>Machine A</span>
+      <strong>Your application</strong>
+      <code>127.0.0.1:15432</code>
+    </article>
+
+    <div class="route-span" role="group" aria-label="WarpTweet hybrid tunnel">
+      <div class="route-span__line" aria-hidden="true"><i></i></div>
+      <div class="route-span__identity">
+        <span>WarpTweet</span>
+        <strong>Hybrid tunnel</strong>
+        <small>authenticated · named · supervised</small>
+      </div>
+      <div class="route-span__crypto" aria-hidden="true">
+        <span>ML-KEM + X25519</span>
+        <span>ML-DSA + Ed25519</span>
+      </div>
+    </div>
+
+    <article class="machine-node machine-node--remote">
+      <span>Machine B</span>
+      <strong>Remote service</strong>
+      <code>127.0.0.1:5432</code>
+    </article>
+  </div>
+
+  <figcaption id="product-route-caption">
+    An application on Machine A connects to a local WarpTweet port. WarpTweet carries the
+    connection through a hybrid tunnel to the declared service on Machine B.
+  </figcaption>
+</figure>

@@ -1,0 +1,61 @@
+[Unit]
+Description=WarpTweet restricted post-quantum tunnel server
+Documentation=man:sshd(8) man:sshd_config(5)
+After=network.target
+AssertFileIsExecutable=/opt/warptweet/bin/warptweet
+AssertFileIsExecutable=/opt/warptweet/libexec/openssh/sbin/sshd
+AssertPathExists=/etc/warptweet/server.wt
+AssertPathExists=/opt/warptweet/etc/sshd_config
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStartPre=/opt/warptweet/bin/warptweet doctor-server --config /etc/warptweet/server.wt
+ExecStart=/opt/warptweet/libexec/openssh/sbin/sshd -D -e -f /opt/warptweet/etc/sshd_config
+ExecReload=/opt/warptweet/bin/warptweet doctor-server --config /etc/warptweet/server.wt
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=15s
+KillMode=control-group
+RuntimeDirectory=warptweet/server
+RuntimeDirectoryMode=0750
+UMask=0077
+UnsetEnvironment=LD_AUDIT LD_LIBRARY_PATH LD_PRELOAD OPENSSL_CONF OPENSSL_CONF_INCLUDE OPENSSL_MODULES
+
+# sshd retains only the privileges required to bind, separate privileges,
+# authenticate the dedicated account, and enter its pre-authentication jail.
+CapabilityBoundingSet=CAP_AUDIT_WRITE CAP_CHOWN CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH CAP_FOWNER CAP_KILL CAP_NET_BIND_SERVICE CAP_SETGID CAP_SETUID CAP_SYS_CHROOT
+AmbientCapabilities=
+NoNewPrivileges=yes
+KeyringMode=private
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+PrivateDevices=yes
+PrivateMounts=yes
+PrivateTmp=yes
+ProcSubset=pid
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectHome=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectProc=invisible
+ProtectSystem=strict
+ReadOnlyPaths=/opt/warptweet /etc/warptweet
+ReadWritePaths=/run/warptweet/server -/run/utmp -/var/log/btmp -/var/log/lastlog
+RemoveIPC=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+TasksMax=512
+
+[Install]
+WantedBy=multi-user.target

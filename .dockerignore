@@ -1,0 +1,14 @@
+**
+!package.json
+!package-lock.json
+!.npmrc
+!astro.config.mjs
+!tsconfig.json
+!Dockerfile
+!Caddyfile
+!public/
+!public/**
+!schemas/
+!schemas/**
+!src/
+!src/**

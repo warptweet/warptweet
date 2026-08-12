@@ -1,0 +1,139 @@
+package enrollment
+
+import (
+	"net/netip"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestCreateParseConsumeInviteLifecycle(t *testing.T) {
+	t.Parallel()
+
+	secret, err := GenerateSecret()
+	if err != nil {
+		t.Fatalf("GenerateSecret: %v", err)
+	}
+	now := time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC)
+	invite, record, err := Create(CreateInput{
+		ClientName:        "laptop-1",
+		ServerAddress:     netip.MustParseAddr("192.0.2.10"),
+		ServerPort:        2222,
+		TargetAddress:     netip.MustParseAddr("198.51.100.20"),
+		TargetPort:        5432,
+		Principal:         "warptweet",
+		ProfileID:         "profile-v1",
+		ArtifactProfileID: "linux-amd64",
+		HostPublicKey:     "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		TTL:               DefaultTTL,
+		Now:               now,
+		Secret:            secret,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if record.Status != StatusIssued || invite.MAC == "" || invite.InviteID == "" {
+		t.Fatalf("unexpected invite: %+v record=%+v", invite, record)
+	}
+
+	raw, err := Encode(invite)
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	if strings.Contains(string(raw), "BEGIN") || strings.Contains(strings.ToLower(string(raw)), "private") {
+		t.Fatal("invite encoding contains private-key markers")
+	}
+
+	parsed, err := ParseAndVerify(raw, secret, now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("ParseAndVerify: %v", err)
+	}
+	if parsed.InviteID != invite.InviteID {
+		t.Fatalf("parsed id = %q", parsed.InviteID)
+	}
+	if _, err := ParseAndVerify(raw, secret, now.Add(DefaultTTL+time.Second)); err == nil {
+		t.Fatal("ParseAndVerify accepted expired invite")
+	}
+	tampered := append([]byte(nil), raw...)
+	tampered[len(tampered)/2] ^= 0x01
+	if _, err := ParseAndVerify(tampered, secret, now.Add(time.Minute)); err == nil {
+		t.Fatal("ParseAndVerify accepted tampered invite")
+	}
+
+	directory := t.TempDir()
+	if err := Store(directory, record); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	consumed, err := Consume(directory, invite.InviteID, "client-1", now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("Consume: %v", err)
+	}
+	if consumed.Status != StatusConsumed || consumed.ClientID != "client-1" {
+		t.Fatalf("unexpected consumed record: %+v", consumed)
+	}
+	if _, err := Consume(directory, invite.InviteID, "client-2", now.Add(3*time.Minute)); err == nil {
+		t.Fatal("Consume allowed invite reuse")
+	}
+}
+
+func TestRevokeInvite(t *testing.T) {
+	t.Parallel()
+
+	secret, err := GenerateSecret()
+	if err != nil {
+		t.Fatalf("GenerateSecret: %v", err)
+	}
+	now := time.Date(2026, 8, 12, 13, 0, 0, 0, time.UTC)
+	invite, record, err := Create(CreateInput{
+		ClientName:        "laptop-2",
+		ServerAddress:     netip.MustParseAddr("192.0.2.10"),
+		ServerPort:        2222,
+		TargetAddress:     netip.MustParseAddr("198.51.100.20"),
+		TargetPort:        5432,
+		Principal:         "warptweet",
+		ProfileID:         "profile-v1",
+		ArtifactProfileID: "linux-amd64",
+		HostPublicKey:     "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		Now:               now,
+		Secret:            secret,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	directory := filepath.Join(t.TempDir(), "invites")
+	if err := Store(directory, record); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	revoked, err := Revoke(directory, invite.InviteID, now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	if revoked.Status != StatusRevoked {
+		t.Fatalf("status = %q", revoked.Status)
+	}
+	if _, err := Consume(directory, invite.InviteID, "client", now.Add(2*time.Minute)); err == nil {
+		t.Fatal("Consume accepted revoked invite")
+	}
+}
+
+func TestCreateRejectsUnsafeInputs(t *testing.T) {
+	t.Parallel()
+
+	secret := make([]byte, InviteSecretBytes)
+	_, _, err := Create(CreateInput{
+		ClientName:        "../evil",
+		ServerAddress:     netip.MustParseAddr("192.0.2.10"),
+		ServerPort:        2222,
+		TargetAddress:     netip.MustParseAddr("198.51.100.20"),
+		TargetPort:        5432,
+		Principal:         "warptweet",
+		ProfileID:         "profile",
+		ArtifactProfileID: "linux-amd64",
+		HostPublicKey:     "key",
+		Secret:            secret,
+	})
+	if err == nil {
+		t.Fatal("Create accepted unsafe client name")
+	}
+}

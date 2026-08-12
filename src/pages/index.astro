@@ -1,0 +1,179 @@
+---
+import BaseLayout from "../layouts/BaseLayout.astro";
+import CLIShowcase from "../components/CLIShowcase.astro";
+import CryptoProfile from "../components/CryptoProfile.astro";
+import FeatureGrid from "../components/FeatureGrid.astro";
+import Footer from "../components/Footer.astro";
+import Header from "../components/Header.astro";
+import ManifestPanel from "../components/ManifestPanel.astro";
+import ProductRoute from "../components/ProductRoute.astro";
+import ProtocolStack from "../components/ProtocolStack.astro";
+import UseCases from "../components/UseCases.astro";
+
+const title = "WarpTweet | Quantum-safe hybrid tunneling amongst machines";
+const description = "Open named tunnels among machines with hybrid post-quantum cryptography, endpoint identities, versioned .wt routes, and one focused CLI.";
+
+const productFacts = [
+  "Hybrid key exchange",
+  "Composite machine identities",
+  "Named TCP routes",
+  "Open source"
+];
+---
+
+<BaseLayout {title} {description}>
+  <div id="top"></div>
+  <Header />
+
+  <main id="main-content">
+    <section class="product-hero frame" aria-labelledby="hero-title">
+      <div class="product-hero__copy">
+        <p class="section-kicker">WarpTweet protocol</p>
+        <h1 id="hero-title">Quantum-safe hybrid tunneling <em>amongst machines.</em></h1>
+        <p class="product-hero__deck">
+          Open a named, authenticated tunnel between two machines. WarpTweet carries database,
+          API, development, and private-service traffic through a hybrid post-quantum connection,
+          managed from one focused CLI.
+        </p>
+        <div class="hero__actions">
+          <a class="button button--primary" href="#cli">Use WarpTweet <span aria-hidden="true">↓</span></a>
+          <a class="button button--text" href="#protocol">Explore the protocol</a>
+        </div>
+      </div>
+      <ProductRoute />
+      <ul class="product-facts" aria-label="WarpTweet highlights">
+        {productFacts.map((fact) => <li>{fact}</li>)}
+      </ul>
+    </section>
+
+    <section class="section frame" id="features" aria-labelledby="features-title">
+      <div class="section-heading section-heading--split">
+        <div>
+          <p class="section-kicker">Features</p>
+          <h2 id="features-title">Tunneling that fits the software you already run.</h2>
+        </div>
+        <p>
+          WarpTweet brings a service on another machine to a named local port while it manages the
+          route, machine identities, cryptographic profile, and connection lifecycle.
+        </p>
+      </div>
+      <FeatureGrid />
+    </section>
+
+    <section class="section protocol-section" id="protocol" aria-labelledby="protocol-title">
+      <div class="frame">
+        <div class="protocol-intro">
+          <div>
+            <p class="section-kicker section-kicker--light">WarpTweet protocol</p>
+            <h2 id="protocol-title">A complete contract for the route.</h2>
+          </div>
+          <p>
+            WarpTweet binds who the machines are, where the connection goes, which cryptography
+            protects it, and how the tunnel behaves throughout its lifecycle.
+          </p>
+        </div>
+        <ProtocolStack />
+        <p class="implementation-note">
+          <strong>Profile v1 implementation.</strong> WarpTweet currently carries its protocol over
+          a pinned OpenSSH 10.4p1 and OpenSSL 3.5.7 transport engine. The WarpTweet CLI owns the
+          profile, manifests, identity lifecycle, route policy, readiness, and supervision.
+        </p>
+      </div>
+    </section>
+
+    <section class="section frame cli-section" id="cli" aria-labelledby="cli-title">
+      <div class="section-heading section-heading--split">
+        <div>
+          <p class="section-kicker">One command surface</p>
+          <h2 id="cli-title">Run both ends with <code>warptweet</code>.</h2>
+        </div>
+        <p>
+          Initialize the server, invite a machine, enroll the client, and control the named tunnel
+          from the same focused command line.
+        </p>
+      </div>
+      <CLIShowcase />
+      <div class="cli-flow" aria-label="WarpTweet command lifecycle">
+        <span>initialize</span><i aria-hidden="true">→</i>
+        <span>invite</span><i aria-hidden="true">→</i>
+        <span>enroll</span><i aria-hidden="true">→</i>
+        <span>up</span><i aria-hidden="true">→</i>
+        <span>status</span><i aria-hidden="true">→</i>
+        <span>down</span>
+      </div>
+    </section>
+
+    <section class="section format-section" id="format" aria-labelledby="format-title">
+      <div class="frame">
+        <div class="section-heading section-heading--split">
+          <div>
+            <p class="section-kicker">The .wt format</p>
+            <h2 id="format-title">The route is a file.</h2>
+          </div>
+          <p>
+            A <code>.wt</code> manifest declares its cryptographic profile, machine endpoint, named
+            tunnels, local listeners, destination services, and supervision policy.
+            Composite identities live separately in protected endpoint storage.
+          </p>
+        </div>
+        <ManifestPanel />
+      </div>
+    </section>
+
+    <section class="section crypto-section" id="cryptography" aria-labelledby="crypto-title">
+      <div class="frame">
+        <div class="crypto-heading">
+          <p class="section-kicker section-kicker--light">Profile v1</p>
+          <h2 id="crypto-title">Hybrid at connection and identity.</h2>
+          <p>
+            Profile v1 pins the whole combination. The post-quantum and classical components work
+            together for every connection.
+          </p>
+        </div>
+        <CryptoProfile />
+        <p class="standards-line">
+          ML-KEM and ML-DSA are NIST standards. Profile v1 currently uses OpenSSH's
+          vendor-qualified composite authentication binding.
+        </p>
+      </div>
+    </section>
+
+    <section class="section frame" id="use-cases" aria-labelledby="use-cases-title">
+      <div class="section-heading section-heading--split">
+        <div>
+          <p class="section-kicker">Built for TCP</p>
+          <h2 id="use-cases-title">Bring remote services close.</h2>
+        </div>
+        <p>
+          If a service speaks TCP, WarpTweet can give it a named local endpoint on another managed
+          machine.
+        </p>
+      </div>
+      <UseCases />
+    </section>
+
+    <section class="open-source-section" id="open-source" aria-labelledby="open-source-title">
+      <div class="frame open-source-section__inner">
+        <div>
+          <p class="section-kicker section-kicker--light">Open source</p>
+          <h2 id="open-source-title">The protocol belongs in public.</h2>
+        </div>
+        <div>
+          <p>
+            WarpTweet is Apache-2.0 licensed. Its controller, <code>.wt</code> schemas,
+            cryptographic profile, package recipes, and system design are open for inspection and
+            contribution.
+          </p>
+          <dl class="open-source-stats">
+            <div><dt>License</dt><dd>Apache 2.0</dd></div>
+            <div><dt>Protocol</dt><dd>Profile v1</dd></div>
+            <div><dt>Source</dt><dd>Go + public schemas</dd></div>
+          </dl>
+          <a class="button button--paper" href="#cli">See the command flow</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <Footer />
+</BaseLayout>

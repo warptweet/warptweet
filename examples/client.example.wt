@@ -1,0 +1,28 @@
+{
+  "kind": "warptweet.client-tunnels",
+  "schema_version": 1,
+  "profile_id": "warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519",
+  "ssh_binary_sha256": "REPLACE_WITH_64_LOWERCASE_HEXADECIMAL_CHARACTERS",
+  "server": {
+    "address": "192.0.2.10",
+    "port": 2222,
+    "user": "warptweet"
+  },
+  "tunnels": [
+    {
+      "id": "database-primary",
+      "listen": {
+        "address": "127.0.0.1",
+        "port": 15432
+      },
+      "target": {
+        "address": "198.51.100.20",
+        "port": 5432
+      }
+    }
+  ],
+  "supervision": {
+    "initial_backoff": "1s",
+    "max_backoff": "30s"
+  }
+}

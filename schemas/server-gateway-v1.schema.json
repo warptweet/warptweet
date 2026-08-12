@@ -1,0 +1,108 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://warptweet.com/schemas/server-gateway-v1.schema.json",
+  "title": "WarpTweet server gateway manifest v1",
+  "description": "Machine-readable shape for the warptweet.server-gateway v1 member of the WarpTweet Tunnel Manifest family.",
+  "$comment": "Runtime validation remains authoritative for canonical path semantics and path-to-user correspondence, numeric IP semantics and address safety, duration bounds where applicable to the manifest family, and duplicate JSON object member names.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "profile_id",
+    "sshd_binary_sha256",
+    "openssh_bundle_manifest_sha256",
+    "listen",
+    "target",
+    "dedicated_user",
+    "host_key_path",
+    "authorized_keys_path"
+  ],
+  "properties": {
+    "kind": {
+      "const": "warptweet.server-gateway"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "profile_id": {
+      "const": "warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519"
+    },
+    "sshd_binary_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "openssh_bundle_manifest_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "listen": {
+      "$ref": "#/$defs/endpoint"
+    },
+    "target": {
+      "$ref": "#/$defs/endpoint"
+    },
+    "dedicated_user": {
+      "$ref": "#/$defs/dedicated_user"
+    },
+    "host_key_path": {
+      "const": "/opt/warptweet/etc/ssh_host_mldsa44_ed25519_key",
+      "description": "Filesystem reference only. Private-key material must never be embedded in a manifest."
+    },
+    "authorized_keys_path": {
+      "$ref": "#/$defs/authorized_keys_path"
+    }
+  },
+  "$defs": {
+    "address": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 45,
+      "pattern": "^[0-9A-Fa-f:.]+$",
+      "$comment": "Runtime validation is authoritative for numeric IPv4 or IPv6 parsing, zone rejection, canonical rendering, and address-class safety."
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "dedicated_user": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32,
+      "pattern": "^[a-z_][a-z0-9_-]{0,31}$",
+      "not": {
+        "enum": [
+          "root",
+          "daemon",
+          "nobody",
+          "sshd",
+          "_sshd"
+        ]
+      }
+    },
+    "authorized_keys_path": {
+      "type": "string",
+      "pattern": "^/opt/warptweet/etc/authorized_keys/[a-z_][a-z0-9_-]{0,31}$",
+      "$comment": "Runtime validation requires the final path component to equal dedicated_user exactly."
+    },
+    "endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "address",
+        "port"
+      ],
+      "properties": {
+        "address": {
+          "$ref": "#/$defs/address"
+        },
+        "port": {
+          "$ref": "#/$defs/port"
+        }
+      }
+    }
+  }
+}

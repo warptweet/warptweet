@@ -1,0 +1,48 @@
+name: warptweet-site
+
+services:
+  website:
+    image: warptweet-website:local
+    build:
+      context: .
+      dockerfile: Dockerfile
+      pull: true
+    init: true
+    user: "10001:10001"
+    ports:
+      - target: 8080
+        published: "${WARPTWEET_SITE_PORT:-4322}"
+        host_ip: 127.0.0.1
+        protocol: tcp
+    networks:
+      - website
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 64
+    mem_limit: 128m
+    cpus: "0.50"
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - --silent
+        - --show-error
+        - --max-time
+        - "2"
+        - http://127.0.0.1:8080/healthz
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
+    stop_signal: SIGTERM
+    stop_grace_period: 10s
+
+networks:
+  website: {}

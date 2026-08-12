@@ -1,0 +1,52 @@
+# frozen_string_literal: true
+
+cask "warptweet" do
+  version "{{VERSION}}"
+
+  on_arm do
+    sha256 "{{SHA256_ARM64}}"
+
+    url "https://github.com/{{GITHUB_OWNER_REPO}}/releases/download/v#{version}/warptweet-#{version}-darwin-arm64.pkg",
+        verified: "github.com/{{GITHUB_OWNER_REPO}}/"
+
+    pkg "warptweet-#{version}-darwin-arm64.pkg"
+  end
+  on_intel do
+    sha256 "{{SHA256_AMD64}}"
+
+    url "https://github.com/{{GITHUB_OWNER_REPO}}/releases/download/v#{version}/warptweet-#{version}-darwin-amd64.pkg",
+        verified: "github.com/{{GITHUB_OWNER_REPO}}/"
+
+    pkg "warptweet-#{version}-darwin-amd64.pkg"
+  end
+
+  name "WarpTweet"
+  desc "Open-source managed-endpoint post-quantum TCP tunnelling"
+  homepage "https://warptweet.com/"
+
+  depends_on macos: ">= :ventura"
+
+  uninstall launchctl: "com.warptweet.client",
+            pkgutil:   "com.warptweet.client",
+            script:    {
+              executable: "/Library/Application Support/WarpTweet/share/uninstall.sh",
+              args:       [],
+              sudo:       true,
+            }
+
+  zap trash: [
+    "/Library/Application Support/WarpTweet/state",
+    "/Library/Caches/wt",
+    "/Library/Logs/WarpTweet",
+  ]
+
+  caveats <<~EOS
+    WarpTweet installs a package-owned layout under:
+      /Library/Application Support/WarpTweet
+
+    Identity material is preserved across uninstall unless you run:
+      sudo "/Library/Application Support/WarpTweet/share/uninstall.sh" --destroy-identity
+
+    Enrollment and tunnel lifecycle commands are required before traffic flows.
+  EOS
+end

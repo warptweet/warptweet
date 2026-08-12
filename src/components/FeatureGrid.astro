@@ -1,0 +1,44 @@
+---
+const features = [
+  {
+    number: "01",
+    title: "Hybrid by design",
+    body: "Post-quantum and classical cryptography establish every tunnel and authenticate both machines together."
+  },
+  {
+    number: "02",
+    title: "Endpoint identities",
+    body: "Server initialization and client enrollment create distinct composite identities on the machines that use them."
+  },
+  {
+    number: "03",
+    title: "Named routes",
+    body: "Give each tunnel a memorable ID with an exact local listener, machine endpoint, and destination service."
+  },
+  {
+    number: "04",
+    title: "Any TCP application",
+    body: "Connect databases, APIs, development tools, dashboards, and machine services through a local port."
+  },
+  {
+    number: "05",
+    title: "One CLI, both ends",
+    body: "Initialize, invite, enroll, open, inspect, and stop routes through the warptweet command."
+  },
+  {
+    number: "06",
+    title: "Open infrastructure",
+    body: "The controller, schemas, cryptographic profile, packaging, and system design are available in public source."
+  }
+];
+---
+
+<div class="feature-grid">
+  {features.map((feature) => (
+    <article class="feature-card">
+      <span>{feature.number}</span>
+      <h3>{feature.title}</h3>
+      <p>{feature.body}</p>
+    </article>
+  ))}
+</div>

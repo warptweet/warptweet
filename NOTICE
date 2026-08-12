@@ -1,0 +1,24 @@
+WarpTweet
+Copyright 2026 WarpTweet contributors
+
+WarpTweet is licensed under the Apache License, Version 2.0.
+
+WarpTweet is designed to distribute a pinned OpenSSH 10.4p1 client and server
+as its SSH data-plane engine. That OpenSSH source and binary remain under their
+own upstream copyright and license terms. The Apache License for WarpTweet does
+not relicense OpenSSH.
+
+OpenSSH is not yet vendored in this repository. Before any OpenSSH source or
+binary is added to or distributed with WarpTweet, the distribution must include
+the exact corresponding upstream license and copyright notices. The upstream
+portable OpenSSH license is available at:
+
+https://github.com/openssh/openssh-portable/blob/V_10_4_P1/LICENCE
+
+The Linux production OpenSSH executables statically incorporate OpenSSL 3.5.7
+libcrypto built from authenticated upstream source. OpenSSL is licensed under
+the Apache License, Version 2.0. Distributions must include the corresponding
+OpenSSL LICENSE.txt without modification. The upstream source and license are
+available at:
+
+https://github.com/openssl/openssl/releases/tag/openssl-3.5.7

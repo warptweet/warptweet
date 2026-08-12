@@ -1,0 +1,45 @@
+---
+import {
+  brandEndpointPath,
+  brandPlatePath,
+  brandRoutePath,
+  brandViewBox
+} from "../lib/brand";
+
+interface Props {
+  class?: string;
+}
+
+const { class: className } = Astro.props;
+---
+
+<svg
+  class:list={["brand-mark", className]}
+  aria-hidden="true"
+  focusable="false"
+  viewBox={brandViewBox}
+  fill="none"
+>
+  <path
+    class="brand-mark__plate"
+    d={brandPlatePath}
+    stroke="currentColor"
+    stroke-width="4"
+    stroke-linejoin="miter"
+  />
+  <path
+    class="brand-mark__route"
+    d={brandRoutePath}
+    stroke="currentColor"
+    stroke-width="5"
+    stroke-linecap="square"
+    stroke-linejoin="miter"
+  />
+  <path
+    class="brand-mark__route"
+    d={brandEndpointPath}
+    stroke="currentColor"
+    stroke-width="5"
+    stroke-linecap="square"
+  />
+</svg>

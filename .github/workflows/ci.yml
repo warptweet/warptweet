@@ -1,0 +1,390 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  website:
+    name: Static website checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up pinned Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version-file: .node-version
+          check-latest: false
+          package-manager-cache: false
+
+      - name: Install locked website dependencies
+        run: |
+          set -euo pipefail
+          test "$(npm --version)" = 11.17.0
+          npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Audit website dependency advisories and signatures
+        run: |
+          set -euo pipefail
+          npm audit --audit-level=high
+          npm audit signatures
+
+      - name: Verify Astro and canonical schemas
+        run: |
+          set -euo pipefail
+          npm run verify
+          node <<'WT_SCHEMA_CHECK'
+          const fs = require("node:fs");
+          for (const name of ["client-tunnels-v1.schema.json", "server-gateway-v1.schema.json"]) {
+            const source = JSON.parse(fs.readFileSync(`schemas/${name}`, "utf8"));
+            const built = JSON.parse(fs.readFileSync(`dist/schemas/${name}`, "utf8"));
+            if (JSON.stringify(source) !== JSON.stringify(built)) {
+              throw new Error(`built schema drift: ${name}`);
+            }
+          }
+          WT_SCHEMA_CHECK
+
+      - name: Validate Compose model
+        run: docker compose config --quiet
+
+      - name: Build hardened website image
+        run: docker compose build website
+
+      - name: Run website image gate
+        run: |
+          set -euo pipefail
+          docker compose up --detach --wait website
+          trap 'docker compose down --remove-orphans' EXIT
+          curl --fail --silent --show-error http://127.0.0.1:4322/healthz | grep -Fx ok
+          curl --fail --silent --show-error \
+            http://127.0.0.1:4322/schemas/client-tunnels-v1.schema.json >/dev/null
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            --request POST http://127.0.0.1:4322/)" = 405
+          test "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+            http://127.0.0.1:4322/.git/config)" = 404
+          curl --fail --silent --show-error --dump-header site-headers.txt \
+            http://127.0.0.1:4322/ >/dev/null
+          ! grep -qi '^Server:' site-headers.txt
+          grep -qi '^Content-Security-Policy:' site-headers.txt
+          for missing_path in /not-found /_astro/not-found.css; do
+            curl --silent --show-error --dump-header missing-headers.txt \
+              "http://127.0.0.1:4322${missing_path}" >/dev/null
+            grep -q '^HTTP/1.1 404' missing-headers.txt
+            ! grep -qi '^Server:' missing-headers.txt
+            ! grep -qi '^Cache-Control:' missing-headers.txt
+            grep -qi '^Content-Security-Policy:' missing-headers.txt
+          done
+          asset_path="$(find dist/_astro -type f | head -n 1)"
+          test -n "${asset_path}"
+          curl --fail --silent --show-error --dump-header asset-headers.txt \
+            "http://127.0.0.1:4322/${asset_path#dist/}" >/dev/null
+          grep -qi '^Cache-Control: public, max-age=31536000, immutable' asset-headers.txt
+          docker compose exec -T website sh -eu -c '
+            test "$(id -u)" = 10001
+            test "$(id -g)" = 10001
+            test "$(id -un)" = warptweet-site
+            test "$(id -gn)" = warptweet-site
+            caddy version | grep -F "v2.11.4"
+            test -z "$(getcap /usr/bin/caddy)"
+            test ! -w /var/www/warptweet
+            test ! -w /etc/caddy/Caddyfile
+            ! curl --fail --silent --max-time 1 http://127.0.0.1:2019/config/
+          '
+
+  go:
+    name: Go checks (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-24.04
+          - macos-15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go from go.mod
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          check-latest: false
+          cache: false
+
+      - name: Run checks
+        env:
+          GOCACHE: ${{ runner.temp }}/warptweet-go-build
+        run: make check-go
+
+      - name: Build WarpTweet CLI
+        env:
+          GOCACHE: ${{ runner.temp }}/warptweet-go-build
+        run: make build
+
+      - name: Run race tests
+        env:
+          GOCACHE: ${{ runner.temp }}/warptweet-go-build
+        run: make test-race
+
+  openssh-darwin:
+    name: macOS client OpenSSH and static OpenSSL build (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - macos-15
+          - macos-14
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Authenticate and fetch pinned OpenSSH and OpenSSL sources
+        run: |
+          set -euo pipefail
+          WT_BUILD_HOME="${RUNNER_TEMP}/warptweet-build"
+          mkdir -m 0700 "$WT_BUILD_HOME" "$WT_BUILD_HOME/tmp"
+          ./scripts/fetch-openssh.sh "$WT_BUILD_HOME/warptweet-openssh-source"
+          ./scripts/fetch-openssl.sh "$WT_BUILD_HOME/warptweet-openssl-source"
+
+      - name: Build and test macOS client OpenSSH engine
+        run: |
+          set -euo pipefail
+          . ./third_party/openssh/source.env
+          . ./third_party/openssl/source.env
+          WT_BUILD_HOME="${RUNNER_TEMP}/warptweet-build"
+          ./scripts/build-openssh-darwin.sh \
+            "$WT_BUILD_HOME/warptweet-openssh-source/$OPENSSH_ARCHIVE" \
+            "$WT_BUILD_HOME/warptweet-openssl-source/$OPENSSL_ARCHIVE" \
+            "$WT_BUILD_HOME/warptweet-openssh-darwin-stage"
+
+      - name: Verify staged macOS client inventory
+        run: |
+          set -euo pipefail
+          WT_STAGE="${RUNNER_TEMP}/warptweet-build/warptweet-openssh-darwin-stage"
+          WT_ROOT="Library/Application Support/WarpTweet"
+          for WT_EXECUTABLE in \
+            "$WT_ROOT/libexec/openssh/bin/ssh" \
+            "$WT_ROOT/libexec/openssh/bin/ssh-keygen"; do
+            test -x "$WT_STAGE/$WT_EXECUTABLE"
+            if otool -L "$WT_STAGE/$WT_EXECUTABLE" | \
+              grep -E 'libcrypto|libssl|@rpath/|@loader_path/|@executable_path/' >/dev/null; then
+              echo "forbidden Mach-O dependency: $WT_EXECUTABLE" >&2
+              exit 1
+            fi
+            if otool -l "$WT_STAGE/$WT_EXECUTABLE" | grep -E 'cmd LC_RPATH' >/dev/null; then
+              echo "forbidden LC_RPATH: $WT_EXECUTABLE" >&2
+              exit 1
+            fi
+          done
+          test ! -e "$WT_STAGE/$WT_ROOT/libexec/openssh/sbin/sshd"
+          test ! -e "$WT_STAGE/$WT_ROOT/libexec/openssh/libexec/sshd-auth"
+          test ! -e "$WT_STAGE/$WT_ROOT/libexec/openssh/libexec/sshd-session"
+          test -f "$WT_STAGE/$WT_ROOT/share/openssh-source.txt"
+          test -f "$WT_STAGE/$WT_ROOT/share/openssl-source.txt"
+          test -f "$WT_STAGE/$WT_ROOT/share/licenses/openssh/LICENCE"
+          test -f "$WT_STAGE/$WT_ROOT/share/licenses/openssl/LICENSE.txt"
+          test -f "$WT_STAGE/$WT_ROOT/share/openssh-bundle.sha256"
+          test "$(wc -l < "$WT_STAGE/$WT_ROOT/share/openssh-bundle.sha256" | tr -d '[:space:]')" = 6
+          grep -Fx 'platform=darwin' "$WT_STAGE/$WT_ROOT/share/openssl-source.txt"
+          grep -Fx 'linkage=static' "$WT_STAGE/$WT_ROOT/share/openssl-source.txt"
+          grep -Fx 'role=macos-client' "$WT_STAGE/$WT_ROOT/share/openssh-source.txt"
+          grep -Fx 'server_helpers=no' "$WT_STAGE/$WT_ROOT/share/openssh-source.txt"
+          (
+            cd "$WT_STAGE"
+            shasum -a 256 -c "$WT_ROOT/share/openssh-bundle.sha256"
+          )
+          WT_VERSION="$("$WT_STAGE/$WT_ROOT/libexec/openssh/bin/ssh" -V 2>&1 >/dev/null || true)"
+          test "$WT_VERSION" = "OpenSSH_10.4p1, OpenSSL 3.5.7 9 Jun 2026"
+
+  openssh:
+    name: Pinned OpenSSH and static OpenSSL build (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-24.04
+          - ubuntu-24.04-arm
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go from go.mod
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          check-latest: false
+          cache: false
+
+      - name: Provision OpenSSH build and test prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            acl \
+            binutils \
+            build-essential \
+            ca-certificates \
+            curl \
+            gpg \
+            gpg-agent \
+            libtext-template-perl \
+            passwd \
+            perl \
+            python3-minimal \
+            sudo
+          sudo useradd \
+            --system \
+            --user-group \
+            --no-create-home \
+            --home-dir /var/empty/warptweet-sshd \
+            --shell /usr/sbin/nologin \
+            warptweet-sshd
+          sudo install -d \
+            -o root \
+            -g root \
+            -m 0755 \
+            /var/empty/warptweet-sshd
+          sudo env WARPTWEET_CI_OPENSSH_BUILD_ACCOUNT=1 \
+            ./scripts/provision-openssh-build-account.sh
+
+      - name: Authenticate and fetch pinned OpenSSH and OpenSSL sources
+        run: |
+          set -euo pipefail
+          WT_BUILD_HOME=/var/lib/warptweet-build
+          sudo -u warptweet-build -H env \
+            HOME="$WT_BUILD_HOME" \
+            TMPDIR="$WT_BUILD_HOME/tmp" \
+            ./scripts/fetch-openssh.sh \
+            "$WT_BUILD_HOME/warptweet-openssh-source"
+          sudo -u warptweet-build -H env \
+            HOME="$WT_BUILD_HOME" \
+            TMPDIR="$WT_BUILD_HOME/tmp" \
+            ./scripts/fetch-openssl.sh \
+            "$WT_BUILD_HOME/warptweet-openssl-source"
+
+      - name: Build and test static OpenSSL and OpenSSH
+        run: |
+          set -euo pipefail
+          . ./third_party/openssh/source.env
+          . ./third_party/openssl/source.env
+          WT_BUILD_HOME=/var/lib/warptweet-build
+          sudo -u warptweet-build -H env \
+            HOME="$WT_BUILD_HOME" \
+            TMPDIR="$WT_BUILD_HOME/tmp" \
+            SUDO=sudo \
+            ./scripts/build-openssh.sh \
+            "$WT_BUILD_HOME/warptweet-openssh-source/$OPENSSH_ARCHIVE" \
+            "$WT_BUILD_HOME/warptweet-openssl-source/$OPENSSL_ARCHIVE" \
+            "$WT_BUILD_HOME/warptweet-openssh-stage"
+
+      - name: Verify staged OpenSSH build contract
+        env:
+          WARPTWEET_OPENSSH_STAGE: /var/lib/warptweet-build/warptweet-openssh-stage
+        run: |
+          set -euo pipefail
+          sudo -u warptweet-build -H env \
+            HOME=/var/lib/warptweet-build \
+            WARPTWEET_OPENSSH_STAGE="$WARPTWEET_OPENSSH_STAGE" \
+            bash -euo pipefail <<'WT_VERIFY_STAGE'
+          for WT_EXECUTABLE in \
+            opt/warptweet/libexec/openssh/bin/ssh \
+            opt/warptweet/libexec/openssh/bin/ssh-keygen \
+            opt/warptweet/libexec/openssh/sbin/sshd \
+            opt/warptweet/libexec/openssh/libexec/sshd-auth \
+            opt/warptweet/libexec/openssh/libexec/sshd-session; do
+            test -x "$WARPTWEET_OPENSSH_STAGE/$WT_EXECUTABLE"
+            if readelf -d --wide "$WARPTWEET_OPENSSH_STAGE/$WT_EXECUTABLE" | \
+              grep -E '\((RPATH|RUNPATH)\)|\(NEEDED\).*(libcrypto|libssl)' >/dev/null; then
+              echo "forbidden dynamic crypto dependency or loader path: $WT_EXECUTABLE" >&2
+              exit 1
+            fi
+          done
+          test -f "$WARPTWEET_OPENSSH_STAGE/opt/warptweet/share/openssh-source.txt"
+          test -f "$WARPTWEET_OPENSSH_STAGE/opt/warptweet/share/openssl-source.txt"
+          test -f "$WARPTWEET_OPENSSH_STAGE/opt/warptweet/share/licenses/openssh/LICENCE"
+          test -f "$WARPTWEET_OPENSSH_STAGE/opt/warptweet/share/licenses/openssl/LICENSE.txt"
+          test -f "$WARPTWEET_OPENSSH_STAGE/opt/warptweet/share/openssh-bundle.sha256"
+          test -d "$WARPTWEET_OPENSSH_STAGE/var/empty/warptweet-sshd"
+          test "$(wc -l < "$WARPTWEET_OPENSSH_STAGE/opt/warptweet/share/openssh-bundle.sha256")" -eq 9
+          grep -Fx 'version=3.5.7' \
+            "$WARPTWEET_OPENSSH_STAGE/opt/warptweet/share/openssl-source.txt"
+          grep -Fx 'linkage=static' \
+            "$WARPTWEET_OPENSSH_STAGE/opt/warptweet/share/openssl-source.txt"
+          (
+            cd "$WARPTWEET_OPENSSH_STAGE"
+            sha256sum --check opt/warptweet/share/openssh-bundle.sha256
+          )
+          WT_VERIFY_STAGE
+
+      - name: Run WarpTweet server and OpenSSH integration tests
+        run: |
+          set -euo pipefail
+          sudo -u warptweet-build -H env \
+            HOME=/var/lib/warptweet-build \
+            GOCACHE=/var/lib/warptweet-build/go-build \
+            PATH="$PATH" \
+            WARPTWEET_OPENSSH_PREFIX=/var/lib/warptweet-build/warptweet-openssh-stage/opt/warptweet/libexec/openssh \
+            make test-openssh-integration
+
+      - name: Build controller for the fixed-layout server gate
+        env:
+          GOCACHE: ${{ runner.temp }}/warptweet-go-build
+          WARPTWEET_CONTROLLER: ${{ runner.temp }}/warptweet-controller
+        run: |
+          set -euo pipefail
+          go build -trimpath -o "$WARPTWEET_CONTROLLER" ./cmd/warptweet
+
+      - name: Run the fixed-layout real server preflight gate
+        env:
+          WARPTWEET_CI_FIXED_LAYOUT: "1"
+          WARPTWEET_CONTROLLER: ${{ runner.temp }}/warptweet-controller
+          WARPTWEET_OPENSSH_STAGE: /var/lib/warptweet-build/warptweet-openssh-stage
+        run: |
+          set -euo pipefail
+          WT_BUNDLE_MANIFEST_SHA256=$(
+            sudo -u warptweet-build -H sha256sum \
+              "$WARPTWEET_OPENSSH_STAGE/opt/warptweet/share/openssh-bundle.sha256" | \
+              awk '{print $1}'
+          )
+          WT_CONTROLLER_SHA256=$(sha256sum "$WARPTWEET_CONTROLLER" | awk '{print $1}')
+          sudo env WARPTWEET_CI_FIXED_LAYOUT="$WARPTWEET_CI_FIXED_LAYOUT" \
+            ./scripts/test-server-preflight.sh \
+            "$WARPTWEET_OPENSSH_STAGE" \
+            "$WARPTWEET_CONTROLLER" \
+            "$WT_BUNDLE_MANIFEST_SHA256" \
+            "$WT_CONTROLLER_SHA256"
+
+      - name: Run the fixed-layout live tunnel release gate
+        env:
+          WARPTWEET_CI_LIVE_TUNNEL: "1"
+        run: |
+          set -euo pipefail
+          sudo env WARPTWEET_CI_LIVE_TUNNEL="$WARPTWEET_CI_LIVE_TUNNEL" \
+            ./scripts/test-live-tunnel.sh

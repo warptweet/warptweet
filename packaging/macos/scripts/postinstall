@@ -1,0 +1,130 @@
+#!/bin/sh
+set -eu
+LC_ALL=C
+export LC_ALL
+
+# postinstall creates the dedicated service identity and fixed directories.
+# It must not contact the network or accept caller-selected paths.
+
+if [ "$(id -u)" != "0" ]; then
+    echo "WarpTweet macOS package postinstall requires root" >&2
+    exit 1
+fi
+
+WT_ROOT="/Library/Application Support/WarpTweet"
+WT_STATE="$WT_ROOT/state"
+WT_IDENTITY_DIR="$WT_STATE/identity"
+WT_TRUST_DIR="$WT_STATE/trust"
+WT_RUNTIME_ROOT="/Library/Caches/wt"
+WT_USER="_warptweet"
+WT_GROUP="_warptweet"
+WT_HOME="/var/empty"
+WT_SHELL="/usr/bin/false"
+
+create_group() {
+    if dscl . -read "/Groups/$WT_GROUP" >/dev/null 2>&1; then
+        return 0
+    fi
+    WT_GID=280
+    while dscl . -list /Groups PrimaryGroupID | awk '{print $2}' | grep -qx "$WT_GID"; do
+        WT_GID=$((WT_GID + 1))
+        if [ "$WT_GID" -gt 400 ]; then
+            echo "unable to allocate WarpTweet service GID" >&2
+            exit 1
+        fi
+    done
+    dscl . -create "/Groups/$WT_GROUP"
+    dscl . -create "/Groups/$WT_GROUP" PrimaryGroupID "$WT_GID"
+    dscl . -create "/Groups/$WT_GROUP" Password '*'
+}
+
+create_user() {
+    if dscl . -read "/Users/$WT_USER" >/dev/null 2>&1; then
+        return 0
+    fi
+    WT_GROUP_ID=$(dscl . -read "/Groups/$WT_GROUP" PrimaryGroupID | awk '{print $2}')
+    WT_UID=280
+    while dscl . -list /Users UniqueID | awk '{print $2}' | grep -qx "$WT_UID"; do
+        WT_UID=$((WT_UID + 1))
+        if [ "$WT_UID" -gt 400 ]; then
+            echo "unable to allocate WarpTweet service UID" >&2
+            exit 1
+        fi
+    done
+    dscl . -create "/Users/$WT_USER"
+    dscl . -create "/Users/$WT_USER" UniqueID "$WT_UID"
+    dscl . -create "/Users/$WT_USER" PrimaryGroupID "$WT_GROUP_ID"
+    dscl . -create "/Users/$WT_USER" UserShell "$WT_SHELL"
+    dscl . -create "/Users/$WT_USER" RealName "WarpTweet Client"
+    dscl . -create "/Users/$WT_USER" NFSHomeDirectory "$WT_HOME"
+    dscl . -create "/Users/$WT_USER" Password '*'
+    dscl . -delete "/Users/$WT_USER" AuthenticationAuthority >/dev/null 2>&1 || true
+}
+
+create_group
+create_user
+
+WT_GROUP_ID=$(dscl . -read "/Groups/$WT_GROUP" PrimaryGroupID | awk '{print $2}')
+
+install -d -o root -g wheel -m 0755 "$WT_ROOT"
+install -d -o root -g wheel -m 0755 "$WT_ROOT/bin"
+install -d -o root -g wheel -m 0755 "$WT_ROOT/libexec"
+install -d -o root -g wheel -m 0755 "$WT_ROOT/libexec/openssh"
+install -d -o root -g wheel -m 0755 "$WT_ROOT/libexec/openssh/bin"
+install -d -o root -g wheel -m 0755 "$WT_ROOT/share"
+install -d -o root -g wheel -m 0755 "$WT_ROOT/share/licenses"
+install -d -o root -g wheel -m 0755 "$WT_STATE"
+install -d -o root -g "$WT_GROUP" -m 0750 "$WT_IDENTITY_DIR"
+install -d -o root -g "$WT_GROUP" -m 0750 "$WT_TRUST_DIR"
+install -d -o root -g wheel -m 0755 "$WT_RUNTIME_ROOT"
+
+# Empty ambient trust file is required and must stay empty.
+if [ ! -e "$WT_TRUST_DIR/known_hosts.empty" ]; then
+    install -o root -g "$WT_GROUP" -m 0440 /dev/null "$WT_TRUST_DIR/known_hosts.empty"
+else
+    if [ -s "$WT_TRUST_DIR/known_hosts.empty" ]; then
+        echo "known_hosts.empty must be empty" >&2
+        exit 1
+    fi
+    chown root:"$WT_GROUP" "$WT_TRUST_DIR/known_hosts.empty"
+    chmod 0440 "$WT_TRUST_DIR/known_hosts.empty"
+fi
+
+# Harden payload ownership without following symlinks.
+if [ -d "$WT_ROOT/bin" ]; then
+    chown -R root:wheel "$WT_ROOT/bin" "$WT_ROOT/libexec" "$WT_ROOT/share" 2>/dev/null || true
+    chmod 0755 "$WT_ROOT/bin" "$WT_ROOT/libexec" "$WT_ROOT/libexec/openssh" "$WT_ROOT/libexec/openssh/bin"
+fi
+for WT_BIN in \
+    "$WT_ROOT/bin/warptweet" \
+    "$WT_ROOT/bin/warptweet-provisioner" \
+    "$WT_ROOT/libexec/openssh/bin/ssh" \
+    "$WT_ROOT/libexec/openssh/bin/ssh-keygen"; do
+    if [ -e "$WT_BIN" ]; then
+        if [ -L "$WT_BIN" ]; then
+            echo "refusing symlink payload path: $WT_BIN" >&2
+            exit 1
+        fi
+        chown root:wheel "$WT_BIN"
+        chmod 0755 "$WT_BIN"
+    fi
+done
+
+# Never install server helpers.
+for WT_FORBIDDEN in \
+    "$WT_ROOT/libexec/openssh/sbin/sshd" \
+    "$WT_ROOT/libexec/openssh/libexec/sshd-auth" \
+    "$WT_ROOT/libexec/openssh/libexec/sshd-session"; do
+    if [ -e "$WT_FORBIDDEN" ]; then
+        echo "refusing server helper in client package: $WT_FORBIDDEN" >&2
+        exit 1
+    fi
+done
+
+# LaunchDaemon label for future supervised tunnels; disabled until enrollment.
+if [ -f "/Library/LaunchDaemons/com.warptweet.client.plist" ]; then
+    chown root:wheel "/Library/LaunchDaemons/com.warptweet.client.plist"
+    chmod 0644 "/Library/LaunchDaemons/com.warptweet.client.plist"
+fi
+
+exit 0

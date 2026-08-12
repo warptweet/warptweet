@@ -1,0 +1,8 @@
+/bin/
+/dist/
+/node_modules/
+/.astro/
+/coverage.out
+*.log
+*.tmp
+.DS_Store

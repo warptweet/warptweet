@@ -1,0 +1,464 @@
+// Package enrollment defines single-use server invite authorizations for
+// managed client bootstrap. Invites never carry private keys or reusable
+// bearer credentials.
+package enrollment
+
+import (
+	"bytes"
+	"crypto/hmac"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/netip"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"warptweet.com/warptweet/internal/strictjson"
+)
+
+const (
+	// KindInvite is the invite document kind.
+	KindInvite = "warptweet.invite"
+	// CurrentSchemaVersion is the only supported invite schema.
+	CurrentSchemaVersion = 1
+	// DefaultTTL is the maximum invite lifetime.
+	DefaultTTL = 15 * time.Minute
+	// MaxInviteBytes bounds invite JSON.
+	MaxInviteBytes = 16 << 10
+	// InviteSecretBytes is the server-local MAC key size.
+	InviteSecretBytes = 32
+	// NonceBytes is the invite nonce size.
+	NonceBytes = 16
+)
+
+// ErrInvalidInvite identifies invite documents that fail closed.
+var ErrInvalidInvite = errors.New("invalid WarpTweet invite")
+
+// Invite is the canonical signed enrollment authorization carried to a client.
+// It contains no private-key material.
+type Invite struct {
+	Kind              string `json:"kind"`
+	SchemaVersion     int    `json:"schema_version"`
+	InviteID          string `json:"invite_id"`
+	ClientName        string `json:"client_name"`
+	ServerAddress     string `json:"server_address"`
+	ServerPort        uint16 `json:"server_port"`
+	TargetAddress     string `json:"target_address"`
+	TargetPort        uint16 `json:"target_port"`
+	Principal         string `json:"principal"`
+	ProfileID         string `json:"profile_id"`
+	ArtifactProfileID string `json:"artifact_profile_id"`
+	HostPublicKey     string `json:"host_public_key"`
+	IssuedAt          string `json:"issued_at"`
+	ExpiresAt         string `json:"expires_at"`
+	Nonce             string `json:"nonce"`
+	MAC               string `json:"mac"`
+}
+
+// Record is durable server-side invite state.
+type Record struct {
+	Invite
+	Status     string `json:"status"`
+	ConsumedAt string `json:"consumed_at,omitempty"`
+	RevokedAt  string `json:"revoked_at,omitempty"`
+	ClientID   string `json:"client_id,omitempty"`
+}
+
+const (
+	StatusIssued   = "issued"
+	StatusConsumed = "consumed"
+	StatusRevoked  = "revoked"
+	StatusExpired  = "expired"
+)
+
+// CreateInput is the operator-facing invite request.
+type CreateInput struct {
+	ClientName        string
+	ServerAddress     netip.Addr
+	ServerPort        uint16
+	TargetAddress     netip.Addr
+	TargetPort        uint16
+	Principal         string
+	ProfileID         string
+	ArtifactProfileID string
+	HostPublicKey     string
+	TTL               time.Duration
+	Now               time.Time
+	Secret            []byte
+}
+
+// Create builds one single-use invite and its durable record.
+func Create(input CreateInput) (Invite, Record, error) {
+	if err := validateCreateInput(input); err != nil {
+		return Invite{}, Record{}, err
+	}
+	ttl := input.TTL
+	if ttl <= 0 {
+		ttl = DefaultTTL
+	}
+	if ttl > DefaultTTL {
+		return Invite{}, Record{}, fmt.Errorf("%w: ttl exceeds %s", ErrInvalidInvite, DefaultTTL)
+	}
+	now := input.Now.UTC()
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	nonce := make([]byte, NonceBytes)
+	if _, err := rand.Read(nonce); err != nil {
+		return Invite{}, Record{}, fmt.Errorf("generate invite nonce: %w", err)
+	}
+	inviteID := make([]byte, 16)
+	if _, err := rand.Read(inviteID); err != nil {
+		return Invite{}, Record{}, fmt.Errorf("generate invite id: %w", err)
+	}
+
+	invite := Invite{
+		Kind:              KindInvite,
+		SchemaVersion:     CurrentSchemaVersion,
+		InviteID:          hex.EncodeToString(inviteID),
+		ClientName:        input.ClientName,
+		ServerAddress:     input.ServerAddress.String(),
+		ServerPort:        input.ServerPort,
+		TargetAddress:     input.TargetAddress.String(),
+		TargetPort:        input.TargetPort,
+		Principal:         input.Principal,
+		ProfileID:         input.ProfileID,
+		ArtifactProfileID: input.ArtifactProfileID,
+		HostPublicKey:     strings.TrimSpace(input.HostPublicKey),
+		IssuedAt:          now.Format(time.RFC3339Nano),
+		ExpiresAt:         now.Add(ttl).Format(time.RFC3339Nano),
+		Nonce:             hex.EncodeToString(nonce),
+	}
+	mac, err := macInvite(input.Secret, invite)
+	if err != nil {
+		return Invite{}, Record{}, err
+	}
+	invite.MAC = mac
+	return invite, Record{Invite: invite, Status: StatusIssued}, nil
+}
+
+// ParseAndVerify authenticates invite JSON against the server-local secret.
+func ParseAndVerify(raw []byte, secret []byte, now time.Time) (Invite, error) {
+	if len(raw) == 0 {
+		return Invite{}, fmt.Errorf("%w: input is empty", ErrInvalidInvite)
+	}
+	if len(raw) > MaxInviteBytes {
+		return Invite{}, fmt.Errorf("%w: input exceeds %d bytes", ErrInvalidInvite, MaxInviteBytes)
+	}
+	var invite Invite
+	if err := decodeStrictJSON(raw, &invite); err != nil {
+		return Invite{}, fmt.Errorf("%w: %v", ErrInvalidInvite, err)
+	}
+	if err := validateInviteShape(invite); err != nil {
+		return Invite{}, err
+	}
+	expected, err := macInvite(secret, invite)
+	if err != nil {
+		return Invite{}, err
+	}
+	if !hmac.Equal([]byte(invite.MAC), []byte(expected)) {
+		return Invite{}, fmt.Errorf("%w: mac mismatch", ErrInvalidInvite)
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	expires, err := time.Parse(time.RFC3339Nano, invite.ExpiresAt)
+	if err != nil {
+		return Invite{}, fmt.Errorf("%w: parse expires_at: %v", ErrInvalidInvite, err)
+	}
+	if !now.Before(expires) {
+		return Invite{}, fmt.Errorf("%w: invite expired", ErrInvalidInvite)
+	}
+	return invite, nil
+}
+
+// Store persists one invite record under the invites directory.
+func Store(directory string, record Record) error {
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return err
+	}
+	path := recordPath(directory, record.InviteID)
+	if _, err := os.Lstat(path); err == nil {
+		return fmt.Errorf("invite %q already exists", record.InviteID)
+	}
+	return writeJSONAtomic(path, record, 0o600)
+}
+
+// Load reads one invite record.
+func Load(directory, inviteID string) (Record, error) {
+	contents, err := os.ReadFile(recordPath(directory, inviteID))
+	if err != nil {
+		return Record{}, err
+	}
+	var record Record
+	if err := decodeStrictJSON(contents, &record); err != nil {
+		return Record{}, err
+	}
+	return record, nil
+}
+
+func decodeStrictJSON(raw []byte, destination any) error {
+	if err := strictjson.RejectDuplicateObjectNames(raw); err != nil {
+		return err
+	}
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return err
+	}
+	if decoder.More() {
+		return errors.New("trailing JSON values")
+	}
+	return nil
+}
+
+// Consume marks an issued invite consumed. Reuse fails closed.
+func Consume(directory, inviteID, clientID string, now time.Time) (Record, error) {
+	record, err := Load(directory, inviteID)
+	if err != nil {
+		return Record{}, err
+	}
+	if record.Status != StatusIssued {
+		return Record{}, fmt.Errorf("%w: invite status is %q", ErrInvalidInvite, record.Status)
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	expires, err := time.Parse(time.RFC3339Nano, record.ExpiresAt)
+	if err != nil {
+		return Record{}, err
+	}
+	if !now.Before(expires) {
+		record.Status = StatusExpired
+		_ = writeJSONAtomic(recordPath(directory, inviteID), record, 0o600)
+		return Record{}, fmt.Errorf("%w: invite expired", ErrInvalidInvite)
+	}
+	record.Status = StatusConsumed
+	record.ConsumedAt = now.Format(time.RFC3339Nano)
+	record.ClientID = clientID
+	if err := writeJSONAtomic(recordPath(directory, inviteID), record, 0o600); err != nil {
+		return Record{}, err
+	}
+	return record, nil
+}
+
+// Revoke marks an invite revoked.
+func Revoke(directory, inviteID string, now time.Time) (Record, error) {
+	record, err := Load(directory, inviteID)
+	if err != nil {
+		return Record{}, err
+	}
+	if record.Status == StatusRevoked {
+		return record, nil
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	record.Status = StatusRevoked
+	record.RevokedAt = now.Format(time.RFC3339Nano)
+	if err := writeJSONAtomic(recordPath(directory, inviteID), record, 0o600); err != nil {
+		return Record{}, err
+	}
+	return record, nil
+}
+
+// List returns invite records in directory order.
+func List(directory string) ([]Record, error) {
+	entries, err := os.ReadDir(directory)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var records []Record
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		record, err := Load(directory, strings.TrimSuffix(entry.Name(), ".json"))
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, record)
+	}
+	return records, nil
+}
+
+// Encode returns canonical invite JSON for operator transfer.
+func Encode(invite Invite) ([]byte, error) {
+	return json.Marshal(invite)
+}
+
+// GenerateSecret returns a fresh server-local invite MAC key.
+func GenerateSecret() ([]byte, error) {
+	secret := make([]byte, InviteSecretBytes)
+	if _, err := rand.Read(secret); err != nil {
+		return nil, err
+	}
+	return secret, nil
+}
+
+// WriteSecret stores the invite MAC key with mode 0600.
+func WriteSecret(path string, secret []byte) error {
+	if len(secret) != InviteSecretBytes {
+		return fmt.Errorf("invite secret must be %d bytes", InviteSecretBytes)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return writeFileAtomic(path, secret, 0o600)
+}
+
+// ReadSecret loads the invite MAC key.
+func ReadSecret(path string) ([]byte, error) {
+	secret, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(secret) != InviteSecretBytes {
+		return nil, fmt.Errorf("invite secret must be %d bytes", InviteSecretBytes)
+	}
+	return secret, nil
+}
+
+func validateCreateInput(input CreateInput) error {
+	if input.ClientName == "" || !isSafeName(input.ClientName) {
+		return fmt.Errorf("%w: client name is required and must be alphanumeric with ._- ", ErrInvalidInvite)
+	}
+	if !input.ServerAddress.IsValid() || input.ServerAddress.IsUnspecified() || input.ServerAddress.Zone() != "" {
+		return fmt.Errorf("%w: server address must be a concrete unzoned IP", ErrInvalidInvite)
+	}
+	if !input.TargetAddress.IsValid() || input.TargetAddress.IsUnspecified() || input.TargetAddress.Zone() != "" {
+		return fmt.Errorf("%w: target address must be a concrete unzoned IP", ErrInvalidInvite)
+	}
+	if input.ServerPort == 0 || input.TargetPort == 0 {
+		return fmt.Errorf("%w: ports must be nonzero", ErrInvalidInvite)
+	}
+	if input.Principal == "" || input.ProfileID == "" || input.ArtifactProfileID == "" {
+		return fmt.Errorf("%w: principal, profile_id, and artifact_profile_id are required", ErrInvalidInvite)
+	}
+	if strings.TrimSpace(input.HostPublicKey) == "" || strings.ContainsAny(input.HostPublicKey, "\r\n\x00") {
+		return fmt.Errorf("%w: host public key is required and must be one line", ErrInvalidInvite)
+	}
+	if len(input.Secret) != InviteSecretBytes {
+		return fmt.Errorf("%w: invite secret must be %d bytes", ErrInvalidInvite, InviteSecretBytes)
+	}
+	return nil
+}
+
+func validateInviteShape(invite Invite) error {
+	if invite.Kind != KindInvite || invite.SchemaVersion != CurrentSchemaVersion {
+		return fmt.Errorf("%w: unsupported kind or schema", ErrInvalidInvite)
+	}
+	if invite.InviteID == "" || invite.ClientName == "" || invite.Nonce == "" || invite.MAC == "" {
+		return fmt.Errorf("%w: required fields missing", ErrInvalidInvite)
+	}
+	if _, err := netip.ParseAddr(invite.ServerAddress); err != nil {
+		return fmt.Errorf("%w: server address: %v", ErrInvalidInvite, err)
+	}
+	if _, err := netip.ParseAddr(invite.TargetAddress); err != nil {
+		return fmt.Errorf("%w: target address: %v", ErrInvalidInvite, err)
+	}
+	if invite.ServerPort == 0 || invite.TargetPort == 0 {
+		return fmt.Errorf("%w: ports must be nonzero", ErrInvalidInvite)
+	}
+	return nil
+}
+
+func macInvite(secret []byte, invite Invite) (string, error) {
+	if len(secret) != InviteSecretBytes {
+		return "", fmt.Errorf("%w: invite secret must be %d bytes", ErrInvalidInvite, InviteSecretBytes)
+	}
+	payload := strings.Join([]string{
+		invite.Kind,
+		fmt.Sprintf("%d", invite.SchemaVersion),
+		invite.InviteID,
+		invite.ClientName,
+		invite.ServerAddress,
+		fmt.Sprintf("%d", invite.ServerPort),
+		invite.TargetAddress,
+		fmt.Sprintf("%d", invite.TargetPort),
+		invite.Principal,
+		invite.ProfileID,
+		invite.ArtifactProfileID,
+		invite.HostPublicKey,
+		invite.IssuedAt,
+		invite.ExpiresAt,
+		invite.Nonce,
+	}, "\n")
+	mac := hmac.New(sha256.New, secret)
+	_, _ = mac.Write([]byte(payload))
+	return base64.RawStdEncoding.EncodeToString(mac.Sum(nil)), nil
+}
+
+func recordPath(directory, inviteID string) string {
+	return filepath.Join(directory, inviteID+".json")
+}
+
+func isSafeName(value string) bool {
+	if value == "" || len(value) > 64 {
+		return false
+	}
+	for i, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+		case r == '.' || r == '_' || r == '-':
+			if i == 0 {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func writeJSONAtomic(path string, value any, mode os.FileMode) error {
+	contents, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	contents = append(contents, '\n')
+	return writeFileAtomic(path, contents, mode)
+}
+
+func writeFileAtomic(path string, contents []byte, mode os.FileMode) error {
+	directory := filepath.Dir(path)
+	temp, err := os.CreateTemp(directory, ".wt-invite-*")
+	if err != nil {
+		return err
+	}
+	tempName := temp.Name()
+	defer func() { _ = os.Remove(tempName) }()
+	if _, err := temp.Write(contents); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Chmod(mode); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
+		return err
+	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tempName, path); err != nil {
+		return err
+	}
+	dir, err := os.Open(directory)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
+}

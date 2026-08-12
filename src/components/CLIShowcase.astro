@@ -1,0 +1,34 @@
+<div class="cli-showcase">
+  <article class="terminal-card" aria-labelledby="server-cli-title">
+    <header>
+      <div aria-hidden="true"><i></i><i></i><i></i></div>
+      <span id="server-cli-title">Machine B · server</span>
+    </header>
+    <pre tabindex="0" aria-label="WarpTweet server command example"><code>{`$ warptweet server init \\
+    --listen 203.0.113.10:2222 \\
+    --target 127.0.0.1:5432
+
+$ warptweet server invite \\
+    --target 127.0.0.1:5432 \\
+    --name studio-mac
+
+$ warptweet server status`}</code></pre>
+  </article>
+
+  <article class="terminal-card terminal-card--client" aria-labelledby="client-cli-title">
+    <header>
+      <div aria-hidden="true"><i></i><i></i><i></i></div>
+      <span id="client-cli-title">Machine A · client</span>
+    </header>
+    <pre tabindex="0" aria-label="WarpTweet client command example"><code>{`$ warptweet enroll invite.json \\
+    --proof server-proof.json
+
+$ warptweet up database-primary
+$ warptweet status database-primary
+
+database-primary  Ready
+listen=127.0.0.1:15432
+
+$ warptweet down database-primary`}</code></pre>
+  </article>
+</div>

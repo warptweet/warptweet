@@ -1,0 +1,35 @@
+---
+const rows = [
+  {
+    number: "01",
+    action: "Establish the tunnel",
+    algorithms: "ML-KEM-768 + X25519",
+    body: "Post-quantum and classical key establishment contribute to the session secret."
+  },
+  {
+    number: "02",
+    action: "Authenticate the machines",
+    algorithms: "ML-DSA-44 + Ed25519",
+    body: "Post-quantum and classical signatures authenticate both endpoint identities."
+  },
+  {
+    number: "03",
+    action: "Carry application traffic",
+    algorithms: "ChaCha20-Poly1305 / AES-256-GCM",
+    body: "Authenticated encryption protects application traffic after the tunnel is established."
+  }
+];
+---
+
+<div class="crypto-profile">
+  {rows.map((row) => (
+    <article>
+      <span>{row.number}</span>
+      <div>
+        <p>{row.action}</p>
+        <h3>{row.algorithms}</h3>
+      </div>
+      <p>{row.body}</p>
+    </article>
+  ))}
+</div>

@@ -1,0 +1,170 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://warptweet.com/schemas/client-tunnels-v1.schema.json",
+  "title": "WarpTweet client tunnels manifest v1",
+  "description": "Machine-readable shape for the path-free warptweet.client-tunnels v1 member of the WarpTweet Tunnel Manifest family.",
+  "$comment": "Runtime validation remains authoritative for numeric IP semantics and address safety, duration parsing, duration bounds and ordering, duplicate JSON object member names, tunnel identity and listener uniqueness, and cross-field relationships. Every client filesystem canonical path belongs to the fixed installed layout, is enforced outside the manifest, and is intentionally absent here.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "profile_id",
+    "ssh_binary_sha256",
+    "server",
+    "tunnels",
+    "supervision"
+  ],
+  "properties": {
+    "kind": {
+      "const": "warptweet.client-tunnels"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "profile_id": {
+      "const": "warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519"
+    },
+    "ssh_binary_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "server": {
+      "$ref": "#/$defs/server"
+    },
+    "tunnels": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/tunnel"
+      },
+      "$comment": "Runtime validation enforces unique tunnel IDs and unique local listener ports."
+    },
+    "supervision": {
+      "$ref": "#/$defs/supervision"
+    }
+  },
+  "$defs": {
+    "address": {
+      "type": "string",
+      "minLength": 2,
+      "maxLength": 45,
+      "pattern": "^[0-9A-Fa-f:.]+$",
+      "$comment": "Runtime validation is authoritative for numeric IPv4 or IPv6 parsing, canonical notation, zone rejection, and address-class safety."
+    },
+    "port": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 65535
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "tunnel_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[a-z](?:[a-z0-9_-]*[a-z0-9])?$"
+    },
+    "unix_user": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 32,
+      "pattern": "^[a-z_][a-z0-9_-]{0,31}$"
+    },
+    "duration": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[+-]?(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)(?:ns|us|µs|μs|ms|s|m|h)(?:(?:[0-9]+(?:\\.[0-9]+)?|\\.[0-9]+)(?:ns|us|µs|μs|ms|s|m|h))*$",
+      "$comment": "Runtime validation is authoritative for Go duration syntax, the inclusive 250ms to 5m bounds, and max_backoff being at least initial_backoff."
+    },
+    "endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "address",
+        "port"
+      ],
+      "properties": {
+        "address": {
+          "$ref": "#/$defs/address"
+        },
+        "port": {
+          "$ref": "#/$defs/port"
+        }
+      }
+    },
+    "local_endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "address",
+        "port"
+      ],
+      "properties": {
+        "address": {
+          "const": "127.0.0.1"
+        },
+        "port": {
+          "$ref": "#/$defs/port"
+        }
+      }
+    },
+    "server": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "address",
+        "port",
+        "user"
+      ],
+      "properties": {
+        "address": {
+          "$ref": "#/$defs/address"
+        },
+        "port": {
+          "$ref": "#/$defs/port"
+        },
+        "user": {
+          "$ref": "#/$defs/unix_user"
+        }
+      }
+    },
+    "tunnel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "listen",
+        "target"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/tunnel_id"
+        },
+        "listen": {
+          "$ref": "#/$defs/local_endpoint"
+        },
+        "target": {
+          "$ref": "#/$defs/endpoint"
+        }
+      }
+    },
+    "supervision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "initial_backoff",
+        "max_backoff"
+      ],
+      "properties": {
+        "initial_backoff": {
+          "$ref": "#/$defs/duration"
+        },
+        "max_backoff": {
+          "$ref": "#/$defs/duration"
+        }
+      }
+    }
+  }
+}
