@@ -3,6 +3,39 @@ import { resolve } from "node:path";
 
 const root = process.cwd();
 const brandSource = await readFile(resolve(root, "src/lib/brand.ts"), "utf8");
+const releaseGate = JSON.parse(
+  await readFile(resolve(root, "packaging/evidence/public-release.json"), "utf8")
+);
+const indexHtml = await readFile(resolve(root, "dist/index.html"), "utf8");
+
+if (releaseGate.kind !== "warptweet.public-release-gate" || releaseGate.schema_version !== 1) {
+  throw new Error("public release gate document is invalid");
+}
+
+if (!releaseGate.homebrew_cta_enabled) {
+  if (!indexHtml.includes("Homebrew package in release qualification")) {
+    throw new Error("website must show Homebrew qualification message while CTA is dark");
+  }
+  if (indexHtml.includes('class="install-command"') || indexHtml.includes("data-install-command")) {
+    throw new Error("website must not render an install-command block while CTA is dark");
+  }
+  if (indexHtml.includes("data-copy-command=")) {
+    throw new Error("website must not expose a copy control for install commands while CTA is dark");
+  }
+  if (indexHtml.includes(releaseGate.homebrew_command)) {
+    throw new Error("website must not expose the Homebrew install command while CTA is dark");
+  }
+} else {
+  if (!releaseGate.required_evidence_document) {
+    throw new Error("enabled Homebrew CTA requires required_evidence_document");
+  }
+  if (!indexHtml.includes(releaseGate.homebrew_command)) {
+    throw new Error("enabled Homebrew CTA must render the reviewed install command");
+  }
+  if (!indexHtml.includes(releaseGate.next_command)) {
+    throw new Error("enabled Homebrew CTA must render the enroll next action");
+  }
+}
 
 function sourceConstant(name) {
   const match = brandSource.match(new RegExp(`export const ${name} = "([^"]+)";`));

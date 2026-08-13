@@ -136,6 +136,7 @@ Local loopback is a host boundary, not per-process authentication. A deployment 
 - [Linux server packages and bootstrap](docs/2026-08-12_linux-server-packages.md)
 - [Client enrollment and lifecycle CLI](docs/2026-08-12_client-lifecycle.md)
 - [Package-to-package release evidence](docs/2026-08-12_package-interop-evidence.md)
+- [Public release and website install path](docs/2026-08-12_public-release-path.md)
 - [Local Caddy website](docs/2026-08-12_website-local.md)
 - [Logo: The Declared Route](docs/2026-08-12_logo.md)
 

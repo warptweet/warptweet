@@ -267,6 +267,81 @@ h1 em {
   gap: 12px;
 }
 
+.install-section {
+  padding-block: clamp(28px, 5vw, 48px);
+}
+
+.install-panel {
+  display: grid;
+  gap: 28px;
+  padding: clamp(24px, 4vw, 40px);
+  border: 1px solid var(--rule);
+  border-radius: 22px;
+  background: var(--surface);
+}
+
+.install-panel__copy p {
+  max-width: 62ch;
+  color: var(--ink-muted);
+}
+
+.install-panel__gated,
+.install-panel__active {
+  display: grid;
+  gap: 14px;
+}
+
+.install-qualification {
+  margin: 0;
+  color: var(--signal);
+  font-size: 1.08rem;
+  font-weight: 740;
+}
+
+.install-qualification-detail,
+.install-next-muted,
+.install-next {
+  margin: 0;
+  color: var(--ink-muted);
+  line-height: 1.55;
+}
+
+.install-command {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: stretch;
+}
+
+.install-command pre {
+  margin: 0;
+  overflow-x: auto;
+  padding: 16px 18px;
+  border-radius: 12px;
+  background: var(--night);
+  color: var(--night-text);
+  font-family: var(--mono);
+  font-size: 0.95rem;
+}
+
+.install-copy {
+  align-self: center;
+}
+
+.install-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px 22px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.install-links a {
+  color: var(--route);
+  font-weight: 650;
+}
+
 .button {
   display: inline-flex;
   align-items: center;

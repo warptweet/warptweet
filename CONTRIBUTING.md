@@ -32,10 +32,12 @@ A proposal that needs to change an invariant should begin with a threat-model an
 
 ## Development setup
 
-WarpTweet currently uses Go 1.26. The static website additionally uses the pinned Node.js and npm versions declared by `.node-version` and the Docker build. Install its locked dependencies before running the whole-repository gate:
+WarpTweet currently uses Go 1.26. The static website additionally uses the pinned Node.js and pnpm versions declared by `.node-version`, `package.json#packageManager`, and the Docker build. Install its locked dependencies before running the whole-repository gate:
 
 ```sh
-npm ci --ignore-scripts --no-audit --no-fund
+corepack enable
+corepack prepare pnpm@10.15.1 --activate
+pnpm install --frozen-lockfile --ignore-scripts
 go test ./...
 ```
 

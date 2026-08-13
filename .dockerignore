@@ -1,6 +1,6 @@
 **
 !package.json
-!package-lock.json
+!pnpm-lock.yaml
 !.npmrc
 !astro.config.mjs
 !tsconfig.json
@@ -12,3 +12,5 @@
 !schemas/**
 !src/
 !src/**
+!packaging/evidence/
+!packaging/evidence/**

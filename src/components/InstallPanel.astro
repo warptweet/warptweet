@@ -1,0 +1,75 @@
+---
+import {
+  enrollCommand,
+  homebrewCommand,
+  homebrewCtaEnabled,
+  qualificationMessage
+} from "../lib/install";
+---
+
+<section class="install-panel" aria-labelledby="install-title">
+  <div class="install-panel__copy">
+    <p class="section-kicker">Install</p>
+    <h2 id="install-title">Get WarpTweet onto the machine.</h2>
+    <p>
+      The primary install path is a signed Homebrew cask that places the package-owned
+      client layout. A controller-only formula is never the website primary path.
+    </p>
+  </div>
+
+  {
+    homebrewCtaEnabled ? (
+      <div class="install-panel__active">
+        <div class="install-command" data-install-command>
+          <pre tabindex="0" aria-label="Homebrew install command"><code>{homebrewCommand}</code></pre>
+          <button type="button" class="button button--paper install-copy" data-copy-command={homebrewCommand}>
+            Copy
+          </button>
+        </div>
+        <p class="install-next">
+          Next:
+          <code>{enrollCommand}</code>
+        </p>
+        <ul class="install-links">
+          <li><a href="https://github.com/warptweet/warptweet/releases">Signed release artifacts</a></li>
+          <li><a href="/docs/package-interop">Release evidence</a></li>
+          <li><a href="https://github.com/warptweet/warptweet/blob/main/SECURITY.md">Security policy</a></li>
+        </ul>
+      </div>
+    ) : (
+      <div class="install-panel__gated" role="status">
+        <p class="install-qualification">{qualificationMessage}</p>
+        <p class="install-qualification-detail">
+          The reviewed Homebrew cask command is published here only after package-to-package
+          release evidence passes for the published artifacts. Until then, no install command is
+          offered that resolves to a missing or controller-only package.
+        </p>
+        <p class="install-next-muted">
+          Planned next action after install:
+          <code>{enrollCommand}</code>
+        </p>
+      </div>
+    )
+  }
+</section>
+
+{
+  homebrewCtaEnabled && (
+    <script>
+      const buttons = document.querySelectorAll("[data-copy-command]");
+      for (const button of buttons) {
+        button.addEventListener("click", async () => {
+          const value = button.getAttribute("data-copy-command");
+          if (!value || !navigator.clipboard) {
+            return;
+          }
+          await navigator.clipboard.writeText(value);
+          button.textContent = "Copied";
+          window.setTimeout(() => {
+            button.textContent = "Copy";
+          }, 1600);
+        });
+      }
+    </script>
+  )
+}

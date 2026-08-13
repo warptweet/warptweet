@@ -33,22 +33,27 @@ jobs:
           check-latest: false
           package-manager-cache: false
 
+      - name: Enable pinned pnpm
+        run: |
+          set -euo pipefail
+          corepack enable
+          corepack prepare pnpm@10.15.1 --activate
+          test "$(pnpm --version)" = 10.15.1
+
       - name: Install locked website dependencies
         run: |
           set -euo pipefail
-          test "$(npm --version)" = 11.17.0
-          npm ci --ignore-scripts --no-audit --no-fund
+          pnpm install --frozen-lockfile --ignore-scripts
 
-      - name: Audit website dependency advisories and signatures
+      - name: Audit website dependency advisories
         run: |
           set -euo pipefail
-          npm audit --audit-level=high
-          npm audit signatures
+          pnpm audit --audit-level=high
 
       - name: Verify Astro and canonical schemas
         run: |
           set -euo pipefail
-          npm run verify
+          pnpm run verify
           node <<'WT_SCHEMA_CHECK'
           const fs = require("node:fs");
           for (const name of ["client-tunnels-v1.schema.json", "server-gateway-v1.schema.json"]) {

@@ -1,0 +1,20 @@
+{
+  "kind": "warptweet.public-release-gate",
+  "schema_version": 1,
+  "homebrew_cta_enabled": false,
+  "homebrew_command": "brew install --cask warptweet/tap/warptweet",
+  "next_command": "warptweet enroll <single-use-invite>",
+  "qualification_message": "Homebrew package in release qualification",
+  "required_evidence_document": "",
+  "links": {
+    "cask_template": "homebrew/Casks/warptweet.rb.tmpl",
+    "evidence_checklist": "packaging/evidence/checklist-v1.json",
+    "security_policy": "SECURITY.md",
+    "uninstall_macos": "docs/2026-08-12_macos-pkg-and-cask.md",
+    "package_interop": "docs/2026-08-12_package-interop-evidence.md"
+  },
+  "notes": [
+    "Set homebrew_cta_enabled to true only after a complete package-to-package evidence document exists for the published artifacts.",
+    "required_evidence_document must be a repository-relative path to a validated warptweet.release-evidence JSON file when the CTA is enabled."
+  ]
+}

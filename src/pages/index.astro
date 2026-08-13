@@ -5,19 +5,21 @@ import CryptoProfile from "../components/CryptoProfile.astro";
 import FeatureGrid from "../components/FeatureGrid.astro";
 import Footer from "../components/Footer.astro";
 import Header from "../components/Header.astro";
+import InstallPanel from "../components/InstallPanel.astro";
 import ManifestPanel from "../components/ManifestPanel.astro";
 import ProductRoute from "../components/ProductRoute.astro";
 import ProtocolStack from "../components/ProtocolStack.astro";
 import UseCases from "../components/UseCases.astro";
 
-const title = "WarpTweet | Quantum-safe hybrid tunneling amongst machines";
-const description = "Open named tunnels among machines with hybrid post-quantum cryptography, endpoint identities, versioned .wt routes, and one focused CLI.";
+const title = "WarpTweet | Hybrid post-quantum tunnelling";
+const description =
+  "Named hybrid post-quantum service tunnels: one local port to one authorized TCP destination, with endpoint identities, versioned .wt routes, and fail-closed profile enforcement.";
 
 const productFacts = [
-  "Hybrid key exchange",
-  "Composite machine identities",
-  "Named TCP routes",
-  "Open source"
+  "Named service routes",
+  "Endpoint identities",
+  "Fail-closed hybrid profile",
+  "No shell, one destination"
 ];
 ---
 
@@ -28,15 +30,16 @@ const productFacts = [
   <main id="main-content">
     <section class="product-hero frame" aria-labelledby="hero-title">
       <div class="product-hero__copy">
-        <p class="section-kicker">WarpTweet protocol</p>
-        <h1 id="hero-title">Quantum-safe hybrid tunneling <em>amongst machines.</em></h1>
+        <p class="section-kicker">Managed service tunnels</p>
+        <h1 id="hero-title">Hybrid post-quantum <em>tunnelling.</em></h1>
         <p class="product-hero__deck">
-          Open a named, authenticated tunnel between two machines. WarpTweet carries database,
-          API, development, and private-service traffic through a hybrid post-quantum connection,
-          managed from one focused CLI.
+          Open a named path from a local port to one authorized remote service. WarpTweet binds
+          endpoint identities, a versioned route manifest, and an exact hybrid cryptographic
+          profile, then fail-closes anything weaker. Not a VPN. Not a shell.
         </p>
         <div class="hero__actions">
-          <a class="button button--primary" href="#cli">Use WarpTweet <span aria-hidden="true">↓</span></a>
+          <a class="button button--primary" href="#install">Install <span aria-hidden="true">↓</span></a>
+          <a class="button button--text" href="#cli">Use WarpTweet</a>
           <a class="button button--text" href="#protocol">Explore the protocol</a>
         </div>
       </div>
@@ -44,6 +47,10 @@ const productFacts = [
       <ul class="product-facts" aria-label="WarpTweet highlights">
         {productFacts.map((fact) => <li>{fact}</li>)}
       </ul>
+    </section>
+
+    <section class="section frame install-section" id="install" aria-labelledby="install-title">
+      <InstallPanel />
     </section>
 
     <section class="section frame" id="features" aria-labelledby="features-title">

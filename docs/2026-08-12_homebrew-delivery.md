@@ -473,6 +473,10 @@ host-to-host evidence.
 
 ### 9. Public release and website installation path, 5 points
 
+Status: public-release gate document, website install panel, and CTA
+verification are present. The Homebrew command remains dark until complete
+package-to-package evidence is linked.
+
 Publish, in order:
 
 1. source repository with signed release tag;

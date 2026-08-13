@@ -28,8 +28,10 @@ docker compose down --remove-orphans
 ## Verify source
 
 ```sh
-npm ci --ignore-scripts --no-audit --no-fund
-npm run verify
+corepack enable
+corepack prepare pnpm@10.15.1 --activate
+pnpm install --frozen-lockfile --ignore-scripts
+pnpm run verify
 docker compose config --quiet
 ```
 

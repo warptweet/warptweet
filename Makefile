@@ -26,7 +26,7 @@ test-openssh-integration:
 	GOCACHE=$(GOCACHE) go test -count=1 -v ./tests/integration
 
 site-check:
-	npm run verify
+	pnpm run verify
 
 site-build:
 	docker compose config --quiet
@@ -34,6 +34,8 @@ site-build:
 
 site-up:
 	docker compose up --build --detach --wait website
+	@printf 'WarpTweet site: http://127.0.0.1:%s/\n' "$${WARPTWEET_SITE_PORT:-4322}"
+	@printf 'Health check:   http://127.0.0.1:%s/healthz\n' "$${WARPTWEET_SITE_PORT:-4322}"
 
 site-down:
 	docker compose down --remove-orphans
