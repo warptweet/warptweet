@@ -1,6 +1,11 @@
-.PHONY: build check check-go fmt-check script-check site-build site-check site-down site-up test test-openssh-integration test-race vet
+.PHONY: build check check-go fmt-check script-check site-build site-check site-down site-preview site-up test test-enrollment-control-plane test-openssh-integration test-race vet interop interop-help
 
 GOCACHE ?= /private/tmp/warptweet-go-build
+SITE_DEV_HOST ?= 127.0.0.1
+SITE_DEV_PORT ?= 4321
+
+# Dual-host local-dev interop: zero args. Configure via repo-root .env (see .env.example).
+# Auto-builds missing artifacts/*.deb + *.pkg (OpenSSH stages cached). Not full WP8 evidence.
 
 build:
 	mkdir -p bin
@@ -13,10 +18,27 @@ vet:
 	GOCACHE=$(GOCACHE) go vet ./...
 
 script-check:
-	@for script in scripts/*.sh; do sh -n "$$script"; done
+	@for script in scripts/*.sh scripts/interop/*.sh scripts/interop/lib/*.sh; do \
+		[ -f "$$script" ] || continue; \
+		sh -n "$$script"; \
+	done
 
 test:
 	GOCACHE=$(GOCACHE) go test ./...
+
+test-enrollment-control-plane:
+	./scripts/test-enrollment-control-plane.sh
+
+interop-help:
+	@printf 'make interop  — zero-arg dual-host happy path (loads .env)\n'
+	@printf '  copy .env.example → .env and set SERVER_HOST + SSH_IDENTITY\n'
+	@printf '  missing packages are built automatically (client local, server Docker)\n'
+	@printf '  unlock key: ssh-add $$WARPTWEET_INTEROP_SSH_IDENTITY\n\n'
+	./scripts/interop/orchestrate.sh --help
+
+# Complete local+remote round trip from .env (no make arguments).
+interop:
+	./scripts/interop/dev-run.sh
 
 test-race:
 	GOCACHE=$(GOCACHE) go test -race ./...
@@ -28,18 +50,31 @@ test-openssh-integration:
 site-check:
 	pnpm run verify
 
+# Instant local website: Astro dev server (hot reload). Stop with Ctrl+C.
+site-up:
+	@command -v pnpm >/dev/null 2>&1 || { echo "pnpm is required (corepack prepare pnpm@10.15.1 --activate)" >&2; exit 69; }
+	@test -d node_modules || pnpm install --frozen-lockfile --ignore-scripts
+	@printf '\n  WarpTweet site  http://%s:%s/\n\n' "$(SITE_DEV_HOST)" "$(SITE_DEV_PORT)"
+	pnpm exec astro dev --host "$(SITE_DEV_HOST)" --port "$(SITE_DEV_PORT)"
+
+# No-op for dev-server workflow; use Ctrl+C on site-up.
+site-down:
+	@printf 'Dev server is foreground-only. Stop site-up with Ctrl+C.\n'
+	@printf 'For the production-like container: make site-preview-down\n'
+
+# Optional production-like container (CI parity), not the default edit loop.
+site-preview:
+	docker compose up --build --detach --wait website
+	@printf 'WarpTweet preview: http://127.0.0.1:%s/\n' "$${WARPTWEET_SITE_PORT:-4322}"
+	@printf 'Health check:      http://127.0.0.1:%s/healthz\n' "$${WARPTWEET_SITE_PORT:-4322}"
+
+site-preview-down:
+	docker compose down --remove-orphans
+
 site-build:
 	docker compose config --quiet
 	docker compose build website
 
-site-up:
-	docker compose up --build --detach --wait website
-	@printf 'WarpTweet site: http://127.0.0.1:%s/\n' "$${WARPTWEET_SITE_PORT:-4322}"
-	@printf 'Health check:   http://127.0.0.1:%s/healthz\n' "$${WARPTWEET_SITE_PORT:-4322}"
-
-site-down:
-	docker compose down --remove-orphans
-
-check-go: fmt-check script-check vet test
+check-go: fmt-check script-check vet test test-enrollment-control-plane
 
 check: check-go site-check

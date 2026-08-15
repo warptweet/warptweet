@@ -20,8 +20,8 @@ const (
 	SchemaVersion = 1
 	// DefaultHomebrewCommand is the only website-primary install command.
 	DefaultHomebrewCommand = "brew install --cask warptweet/tap/warptweet"
-	// DefaultNextCommand is the post-install enrollment action.
-	DefaultNextCommand = "warptweet enroll <single-use-invite>"
+	// DefaultNextCommand is the post-install connect action.
+	DefaultNextCommand = "warptweet connect <invite-file>"
 	// QualificationMessage is shown while the CTA remains dark.
 	QualificationMessage = "Homebrew package in release qualification"
 )

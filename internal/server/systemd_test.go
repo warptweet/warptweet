@@ -44,6 +44,40 @@ func TestWarpTweetSSHDUnitUsesBundledValidatedConfiguration(t *testing.T) {
 	}
 }
 
+func TestEnrollUnitUsesControllerEnrollmentListener(t *testing.T) {
+	t.Parallel()
+
+	unit := readUnit(t, "warptweet-enroll.service")
+	requireUnitLines(t, unit,
+		"Description=WarpTweet enrollment control plane",
+		"AssertFileIsExecutable=/opt/warptweet/bin/warptweet",
+		"AssertPathExists=/etc/warptweet/server.wt",
+		"AssertPathExists=/opt/warptweet/etc/ssh_host_mldsa44_ed25519_key",
+		"AssertPathExists=/etc/warptweet/invite.mac-key",
+		"ExecStartPre=/opt/warptweet/bin/warptweet doctor-server --config /etc/warptweet/server.wt",
+		"ExecStart=/opt/warptweet/bin/warptweet server enroll-listen",
+		"User=root",
+		"ReadWritePaths=/var/lib/warptweet /opt/warptweet/etc/authorized_keys",
+		"NoNewPrivileges=yes",
+		"ProtectSystem=strict",
+		"ProtectHome=yes",
+		"PrivateDevices=yes",
+		"RestrictNamespaces=yes",
+		"RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6",
+		"UnsetEnvironment=LD_AUDIT LD_LIBRARY_PATH LD_PRELOAD OPENSSL_CONF OPENSSL_CONF_INCLUDE OPENSSL_MODULES",
+	)
+
+	for _, forbidden := range []string{
+		"ProtectSystem=false",
+		"ExecStart=/usr/bin/",
+		"ConditionFileIsExecutable=",
+	} {
+		if strings.Contains(unit, forbidden) {
+			t.Fatalf("enroll unit contains forbidden text %q", forbidden)
+		}
+	}
+}
+
 func TestTunnelUnitUsesControllerContractWithoutAmbientPrivileges(t *testing.T) {
 	t.Parallel()
 

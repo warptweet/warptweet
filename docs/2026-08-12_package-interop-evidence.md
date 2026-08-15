@@ -58,10 +58,52 @@ complete. Local preflight probes may pass individual package inventory checks
 when installed package paths are supplied; they never mark dual-host cases as
 pass without evidence.
 
+### Optional dual-host enroll env (client/orchestrator role)
+
+When the installed package controllers are available on the client host:
+
+| Variable | Purpose |
+| --- | --- |
+| `WARPTWEET_CLIENT_CTRL` | Installed client `warptweet` path (package prefix only) |
+| `WARPTWEET_ENROLL_INVITE` | Fresh `.wtinvite` minted on the server host |
+| `WARPTWEET_ENROLL_BAD_INVITE` | Expired/altered/cross-target invite for fail-closed |
+| `WARPTWEET_TUNNEL_ID` | Tunnel id after enroll (for status/down/rotate/revoke) |
+
+With those set, the harness can mark `invite-enroll-single-use`,
+`invite-fail-closed`, and the client half of
+`stop-restart-rotate-revoke-upgrade` as `pass` or `fail`. Tunnel algorithm,
+rekey, readiness, payload, and confinement cases remain dual-host data-plane
+work. Source-tree `./bin/warptweet` is rejected.
+
+### Local control-plane confidence (not WP8)
+
+```sh
+./scripts/test-enrollment-control-plane.sh
+```
+
+Loopback Go tests for invite mint, Accept, Submit enroll/rotate/revoke, and unit
+contracts. Does not light the public CTA.
+
+### Phase A dual-host orchestrator (partial matrix)
+
+```sh
+cp scripts/interop/config.example.env scripts/interop/config.env
+# pin digests, artifact filenames, server host/listen
+ssh-add ...
+./scripts/interop/orchestrate.sh --config scripts/interop/config.env
+```
+
+Installs pinned packages from an artifacts directory (Option B), runs echo
+fixture on the Linux server, mints invite, `connect`s from the local Mac
+package controller, proves deterministic payload, and writes a schema-complete
+evidence document with remaining cases `not_run`. See
+`docs/2026-08-14_dual-host-interop-orchestrator.md`.
+
 ## Relationship to other gates
 
 | Gate | Role |
 | --- | --- |
+| `test-enrollment-control-plane.sh` | Local enroll HTTP confidence (not package evidence) |
 | `test-server-preflight.sh` | Single-host installed server preflight |
 | `test-live-tunnel.sh` | Same-host Linux live tunnel negatives/positives |
 | `test-package-interop.sh` | Package-to-package host-to-host release evidence |

@@ -28,6 +28,8 @@ func TestServerUsageMentionsAdminCommands(t *testing.T) {
 	for _, required := range []string{
 		"warptweet server init",
 		"warptweet server invite",
+		"warptweet server enroll-listen",
+		"warptweet server accept-enrollment",
 		"warptweet server revoke",
 		"warptweet server status",
 	} {

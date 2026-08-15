@@ -44,6 +44,7 @@ install -d -o root -g root -m 0755 /opt/warptweet/etc/authorized_keys
 install -d -o root -g root -m 0755 /var/empty/warptweet-sshd
 install -d -o root -g root -m 0700 /var/lib/warptweet
 install -d -o root -g root -m 0700 /var/lib/warptweet/invites
+install -d -o root -g root -m 0700 /var/lib/warptweet/clients
 install -d -o root -g root -m 0700 /var/lib/warptweet/server
 install -d -o root -g root -m 0755 /run/warptweet
 install -d -o root -g root -m 0750 /run/warptweet/server
@@ -56,6 +57,9 @@ fi
 
 if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload >/dev/null 2>&1 || true
+    # Enable enrollment control plane when package-installed; start only after
+    # server init has written server.wt, host key, and invite MAC secret.
+    systemctl enable warptweet-enroll.service >/dev/null 2>&1 || true
 fi
 
 exit 0

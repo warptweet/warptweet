@@ -509,10 +509,17 @@ LIBS='' \
 PKG_CONFIG_PATH='' \
 PKG_CONFIG_LIBDIR="$WT_EMPTY_PKG_CONFIG" \
 LC_ALL=C ./configure "$@"
-LC_ALL=C make -j "$WT_BUILD_JOBS"
-LC_ALL=C make tests
+ LC_ALL=C make -j "$WT_BUILD_JOBS"
+ # OpenSSH honors SKIP_LTESTS (space-separated). Local-dev interop may set this
+ # when a host OS breaks an upstream case for tools the client stage does not ship
+ # (scp/sftp). CI leaves it unset and runs the full suite.
+ if [ -n "${SKIP_LTESTS:-}" ]; then
+     LC_ALL=C make tests SKIP_LTESTS="$SKIP_LTESTS"
+ else
+     LC_ALL=C make tests
+ fi
 
-WT_PACKAGE_ROOT="$WT_STAGE_DIRECTORY/Library/Application Support/WarpTweet"
+ WT_PACKAGE_ROOT="$WT_STAGE_DIRECTORY/Library/Application Support/WarpTweet"
 WT_INSTALL_PREFIX="$WT_PACKAGE_ROOT/libexec/openssh"
 mkdir -p \
     "$WT_INSTALL_PREFIX/bin" \

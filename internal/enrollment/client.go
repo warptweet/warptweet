@@ -70,6 +70,11 @@ func ParseClientInvite(raw []byte, now time.Time) (Invite, ClientView, error) {
 		return Invite{}, ClientView{}, fmt.Errorf("%w: invite expired", ErrInvalidInvite)
 	}
 	tunnelID := sanitizeTunnelID(invite.ClientName)
+	// Legacy transfer documents may omit enroll_port; fill the product default.
+	// Fresh Create always sets enroll_port and includes it in the server MAC.
+	if invite.EnrollPort == 0 {
+		invite.EnrollPort = DefaultEnrollmentPort
+	}
 	view := ClientView{
 		InviteID:          invite.InviteID,
 		ClientName:        invite.ClientName,
@@ -87,6 +92,14 @@ func ParseClientInvite(raw []byte, now time.Time) (Invite, ClientView, error) {
 		TunnelID:          tunnelID,
 	}
 	return invite, view, nil
+}
+
+// EnrollmentPort returns the HTTP enrollment control port from an invite.
+func (invite Invite) EnrollmentPort() uint16 {
+	if invite.EnrollPort == 0 {
+		return DefaultEnrollmentPort
+	}
+	return invite.EnrollPort
 }
 
 // BuildClientManifest renders a client .wt document from one invite and digest.
@@ -150,16 +163,21 @@ type EnrollmentRequest struct {
 }
 
 // EnrollmentProof is the server binding returned after accept.
+// ManagementToken is a single-use client capability for revoke/rotate; it is
+// returned only to the enrolling client and must not be logged.
 type EnrollmentProof struct {
-	InviteID      string `json:"invite_id"`
-	ClientID      string `json:"client_id"`
-	HostPublicKey string `json:"host_public_key"`
-	PublicKey     string `json:"public_key"`
-	Target        string `json:"target"`
-	Principal     string `json:"principal"`
-	ProfileID     string `json:"profile_id"`
-	Nonce         string `json:"nonce"`
-	AcceptedAt    string `json:"accepted_at"`
+	InviteID          string `json:"invite_id"`
+	ClientID          string `json:"client_id"`
+	HostPublicKey     string `json:"host_public_key"`
+	PublicKey         string `json:"public_key"`
+	Target            string `json:"target"`
+	Principal         string `json:"principal"`
+	ProfileID         string `json:"profile_id"`
+	Nonce             string `json:"nonce"`
+	AcceptedAt        string `json:"accepted_at"`
+	ManagementToken   string `json:"management_token,omitempty"`
+	ServerAddress     string `json:"server_address,omitempty"`
+	EnrollPort        uint16 `json:"enroll_port,omitempty"`
 }
 
 // EncodeEnrollmentRequest returns canonical request JSON.
@@ -188,28 +206,7 @@ func ValidateEnrollmentProof(proof EnrollmentProof, invite Invite, publicKey str
 }
 
 func sanitizeTunnelID(name string) string {
-	if name == "" {
-		return "tunnel"
-	}
-	var b strings.Builder
-	for i, r := range name {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
-			b.WriteRune(r)
-		case r == '-' || r == '_':
-			if i > 0 {
-				b.WriteRune(r)
-			}
-		default:
-			b.WriteByte('-')
-		}
-	}
-	id := strings.Trim(b.String(), "-_")
-	if id == "" {
-		return "tunnel"
-	}
-	if len(id) > 64 {
-		return id[:64]
-	}
-	return id
+	// Reuse invite label rules so tunnel ids match client_name basenames and
+	// satisfy the lowercase tunnel_id contract in client manifests.
+	return SanitizeInviteLabel(name)
 }

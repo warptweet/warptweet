@@ -16,7 +16,6 @@ import (
 	"strings"
 	"time"
 
-	"warptweet.com/warptweet/internal/artifactprofile"
 	"warptweet.com/warptweet/internal/enrollment"
 	"warptweet.com/warptweet/internal/installlayout"
 	"warptweet.com/warptweet/internal/profile"
@@ -31,13 +30,17 @@ const (
 
 func runServer(ctx context.Context, arguments []string, stdout, stderr io.Writer) error {
 	if len(arguments) == 0 {
-		return errors.New("server requires a subcommand: init, invite, revoke, status")
+		return errors.New("server requires a subcommand: init, invite, enroll-listen, accept-enrollment, revoke, status")
 	}
 	switch arguments[0] {
 	case "init":
 		return runServerInit(ctx, arguments[1:], stdout, stderr)
 	case "invite":
 		return runServerInvite(ctx, arguments[1:], stdout, stderr)
+	case "enroll-listen":
+		return runServerEnrollListen(ctx, arguments[1:], stdout, stderr)
+	case "accept-enrollment":
+		return runServerAcceptEnrollment(ctx, arguments[1:], stdout, stderr)
 	case "revoke":
 		return runServerRevoke(arguments[1:], stdout, stderr)
 	case "status":
@@ -199,42 +202,8 @@ func runServerInvite(ctx context.Context, arguments []string, stdout, stderr io.
 	if err != nil {
 		return err
 	}
-	if targetEndpoint.Addr().Compare(manifest.Target.Address) != 0 ||
-		uint16(manifest.Target.Port) != targetEndpoint.Port() {
-		return fmt.Errorf(
-			"invite target %s does not match server manifest target %s:%d",
-			targetEndpoint,
-			manifest.Target.Address,
-			manifest.Target.Port,
-		)
-	}
-	secret, err := enrollment.ReadSecret(inviteSecretPath)
-	if err != nil {
-		return fmt.Errorf("read invite secret: %w", err)
-	}
-	hostPublicKey, err := deriveHostPublicKey(ctx, manifest.HostKeyPath)
-	if err != nil {
-		return err
-	}
-	artifactID := ""
-	if selected, err := artifactprofile.Current(); err == nil {
-		artifactID = string(selected.ID)
-	} else {
-		artifactID = "linux-amd64"
-	}
-	invite, record, err := enrollment.Create(enrollment.CreateInput{
-		ClientName:        name.value,
-		ServerAddress:     manifest.Listen.Address,
-		ServerPort:        uint16(manifest.Listen.Port),
-		TargetAddress:     manifest.Target.Address,
-		TargetPort:        uint16(manifest.Target.Port),
-		Principal:         manifest.DedicatedUser,
-		ProfileID:         manifest.ProfileID,
-		ArtifactProfileID: artifactID,
-		HostPublicKey:     hostPublicKey,
-		TTL:               enrollment.DefaultTTL,
-		Secret:            secret,
-	})
+	label := enrollment.SanitizeInviteLabel(name.value)
+	invite, record, err := mintServerInvite(ctx, label, targetEndpoint, manifest, "")
 	if err != nil {
 		return err
 	}
@@ -305,6 +274,7 @@ func runServerStatus(ctx context.Context, arguments []string, stdout, stderr io.
 		"manifest_path":    installlayout.ServerManifestPath,
 		"host_key_path":    installlayout.ServerHostKeyPath,
 		"invite_directory": inviteDirectory,
+		"enroll_port":      enrollment.DefaultEnrollmentPort,
 	}
 	if manifest, err := server.Load(installlayout.ServerManifestPath); err == nil {
 		status["profile_id"] = manifest.ProfileID
@@ -312,6 +282,11 @@ func runServerStatus(ctx context.Context, arguments []string, stdout, stderr io.
 		status["target"] = fmt.Sprintf("%s:%d", manifest.Target.Address, manifest.Target.Port)
 		status["dedicated_user"] = manifest.DedicatedUser
 		status["manifest"] = "present"
+		if addr := manifest.Listen.Address; addr.IsValid() && !addr.IsUnspecified() {
+			if url, err := enrollment.EnrollmentURL(addr.String(), enrollment.DefaultEnrollmentPort); err == nil {
+				status["enroll_url"] = url
+			}
+		}
 	} else {
 		status["manifest"] = "missing"
 	}
@@ -330,6 +305,18 @@ func runServerStatus(ctx context.Context, arguments []string, stdout, stderr io.
 	}
 	status["invites"] = counts
 	status["invite_total"] = len(records)
+	clients, err := enrollment.ListClients(installlayout.ClientsDirectory)
+	if err != nil {
+		status["clients"] = "missing"
+		status["client_total"] = 0
+	} else {
+		clientCounts := map[string]int{}
+		for _, client := range clients {
+			clientCounts[client.Status]++
+		}
+		status["clients"] = clientCounts
+		status["client_total"] = len(clients)
+	}
 	return writeJSON(stdout, status)
 }
 

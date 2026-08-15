@@ -142,7 +142,11 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 			return err
 		}
 	} else if !prepareOnly.value {
-		return errors.New("enroll requires --proof <server-proof.json> or --prepare-only until the enrollment endpoint is packaged")
+		submitted, err := enrollment.SubmitEnrollment(ctx, invite, request)
+		if err != nil {
+			return fmt.Errorf("enrollment endpoint: %w (or pass --proof <server-proof.json>)", err)
+		}
+		proof = submitted
 	}
 
 	sshDigest := strings.Repeat("0", 64)
@@ -177,11 +181,15 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		return err
 	}
 
+	serviceEndpoint := fmt.Sprintf("%s:%d", view.TargetAddress, view.TargetPort)
+	listenEndpoint := fmt.Sprintf("%s:%d", view.ListenAddress, view.ListenPort)
+
 	if prepareOnly.value {
 		return writeJSON(stdout, map[string]any{
 			"status":              "prepared",
 			"tunnel_id":           view.TunnelID,
-			"listen_endpoint":     fmt.Sprintf("%s:%d", view.ListenAddress, view.ListenPort),
+			"listen_endpoint":     listenEndpoint,
+			"service_endpoint":    serviceEndpoint,
 			"enrollment_request":  request,
 			"stage_directory":     stageRoot,
 			"identity_public_key": publicKey,
@@ -203,35 +211,46 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		return err
 	}
 
-	receiptDir := filepath.Join(filepath.Dir(layout.ClientManifestPath), "enrollment")
-	_ = os.MkdirAll(receiptDir, 0o700)
-	receipt := map[string]any{
-		"invite_id":   invite.InviteID,
-		"client_id":   proof.ClientID,
-		"tunnel_id":   view.TunnelID,
-		"accepted_at": proof.AcceptedAt,
-		"generation":  generationID,
+	enrollPort := proof.EnrollPort
+	if enrollPort == 0 {
+		enrollPort = invite.EnrollmentPort()
 	}
-	receiptJSON, _ := json.Marshal(receipt)
-	_ = os.WriteFile(filepath.Join(receiptDir, invite.InviteID+".json"), append(receiptJSON, '\n'), 0o600)
+	if err := writeEnrollmentReceipt(layout.ClientManifestPath, enrollmentReceipt{
+		InviteID:         invite.InviteID,
+		ClientID:         proof.ClientID,
+		TunnelID:         view.TunnelID,
+		AcceptedAt:       proof.AcceptedAt,
+		Generation:       generationID,
+		ManagementToken:  proof.ManagementToken,
+		ServerAddress:    firstNonEmptyString(proof.ServerAddress, invite.ServerAddress),
+		EnrollPort:       enrollPort,
+		PublicKey:        publicKey,
+		HostPublicKey:    invite.HostPublicKey,
+		Target:           serviceEndpoint,
+		Principal:        invite.Principal,
+		ProfileID:        invite.ProfileID,
+	}); err != nil {
+		return err
+	}
 
 	store := lifecycle.Store{Root: layout.ClientRuntimeRoot}
 	_ = store.Write(lifecycle.State{
 		TunnelID:       view.TunnelID,
 		Phase:          lifecycle.PhaseStopped,
-		ListenEndpoint: fmt.Sprintf("%s:%d", view.ListenAddress, view.ListenPort),
+		ListenEndpoint: listenEndpoint,
 		TargetHealth:   lifecycle.TargetHealthNotChecked,
 		Generation:     generationID,
 	})
 
 	return writeJSON(stdout, map[string]any{
-		"status":          "enrolled",
-		"tunnel_id":       view.TunnelID,
-		"client_id":       proof.ClientID,
-		"listen_endpoint": fmt.Sprintf("%s:%d", view.ListenAddress, view.ListenPort),
-		"generation":      generationID,
-		"target_health":   lifecycle.TargetHealthNotChecked,
-		"next":            "warptweet up " + view.TunnelID,
+		"status":           "enrolled",
+		"tunnel_id":        view.TunnelID,
+		"client_id":        proof.ClientID,
+		"listen_endpoint":  listenEndpoint,
+		"service_endpoint": serviceEndpoint,
+		"generation":       generationID,
+		"target_health":    lifecycle.TargetHealthNotChecked,
+		"next":             "warptweet up " + view.TunnelID,
 	})
 }
 
@@ -474,7 +493,7 @@ func runDown(arguments []string, stdout, stderr io.Writer) error {
 	})
 }
 
-func runRotate(arguments []string, stdout, stderr io.Writer) error {
+func runRotate(ctx context.Context, arguments []string, stdout, stderr io.Writer) error {
 	flags := newFlagSet("rotate", stderr)
 	positionals, err := parseFlagsAllowArgs(flags, arguments)
 	if err != nil {
@@ -483,15 +502,127 @@ func runRotate(arguments []string, stdout, stderr io.Writer) error {
 	if len(positionals) != 1 {
 		return errors.New("rotate requires exactly one tunnel-id")
 	}
+	tunnelID := positionals[0]
+	_ = stderr
+
+	layout, err := productionClientLayout()
+	if err != nil {
+		return err
+	}
+	store := lifecycle.Store{Root: layout.ClientRuntimeRoot}
+	lock, err := store.Lock(tunnelID)
+	if err != nil {
+		return err
+	}
+	defer lifecycle.Unlock(lock)
+
+	if err := stopTunnelProcess(store, tunnelID); err != nil {
+		return err
+	}
+
+	receipt, err := loadEnrollmentReceipt(layout.ClientManifestPath, tunnelID)
+	if err != nil {
+		return err
+	}
+	if receipt.ManagementToken == "" || receipt.ClientID == "" {
+		return errors.New("enrollment receipt missing management token; re-enroll before rotate")
+	}
+
+	keygen := keygenPath(layout)
+	generationID := time.Now().UTC().Format("20060102T150405Z")
+	stageRoot := filepath.Join(os.TempDir(), "warptweet-rotate-"+generationID)
+	if err := os.MkdirAll(stageRoot, 0o700); err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(stageRoot) }()
+
+	identityPath := filepath.Join(stageRoot, "client")
+	cmd := exec.CommandContext(ctx, keygen,
+		"-t", "mldsa44-ed25519",
+		"-f", identityPath,
+		"-N", "",
+		"-C", "warptweet-client-"+tunnelID,
+	)
+	cmd.Env = []string{"LANG=C", "LC_ALL=C"}
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("generate rotated client key: %w (%s)", err, strings.TrimSpace(string(output)))
+	}
+	publicKeyBytes, err := os.ReadFile(identityPath + ".pub")
+	if err != nil {
+		return err
+	}
+	publicKey := strings.TrimSpace(string(publicKeyBytes))
+	if publicKey == "" || strings.ContainsAny(publicKey, "\r\n") {
+		return errors.New("client public key must be one line")
+	}
+
+	proof, err := enrollment.SubmitRotate(ctx, receipt.ServerAddress, receipt.enrollPortOrDefault(), enrollment.ManagementRequest{
+		ClientID:        receipt.ClientID,
+		ManagementToken: receipt.ManagementToken,
+		TunnelID:        tunnelID,
+		NewPublicKey:    publicKey,
+	})
+	if err != nil {
+		return fmt.Errorf("gateway rotate: %w", err)
+	}
+
+	// Persist gateway-accepted credentials before activation so a failed
+	// activate still retains the new management token and public key.
+	receipt.ManagementToken = proof.ManagementToken
+	receipt.PublicKey = publicKey
+	receipt.AcceptedAt = proof.AcceptedAt
+	if proof.EnrollPort != 0 {
+		receipt.EnrollPort = proof.EnrollPort
+	}
+	if err := writeEnrollmentReceipt(layout.ClientManifestPath, receipt); err != nil {
+		return err
+	}
+
+	// Keep existing manifest and known_hosts; only identity changes.
+	emptyTrust := filepath.Join(stageRoot, "known_hosts.empty")
+	if err := os.WriteFile(emptyTrust, nil, 0o600); err != nil {
+		return err
+	}
+	if err := copyFile(layout.ClientManifestPath, filepath.Join(stageRoot, "client.wt"), 0o600); err != nil {
+		return err
+	}
+	if err := copyFile(layout.ClientKnownHostsPath, filepath.Join(stageRoot, "known_hosts"), 0o600); err != nil {
+		return err
+	}
+	if err := activateGeneration(
+		layout.ClientManifestPath,
+		layout.ClientIdentityPath,
+		layout.ClientKnownHostsPath,
+		layout.ClientGlobalKnownHostsPath,
+		identityPath,
+		filepath.Join(stageRoot, "client.wt"),
+		filepath.Join(stageRoot, "known_hosts"),
+		emptyTrust,
+	); err != nil {
+		return err
+	}
+
+	receipt.Generation = generationID
+	if err := writeEnrollmentReceipt(layout.ClientManifestPath, receipt); err != nil {
+		return err
+	}
+	_ = store.Write(lifecycle.State{
+		TunnelID:     tunnelID,
+		Phase:        lifecycle.PhaseStopped,
+		TargetHealth: lifecycle.TargetHealthNotChecked,
+		Generation:   generationID,
+	})
 	return writeJSON(stdout, map[string]any{
-		"status":        "unsupported",
-		"tunnel_id":     positionals[0],
-		"error":         "client key rotation requires a live enrollment endpoint and provisioner activate-generation RPC",
+		"status":        "rotated",
+		"tunnel_id":     tunnelID,
+		"client_id":     receipt.ClientID,
+		"generation":    generationID,
 		"target_health": lifecycle.TargetHealthNotChecked,
+		"next":          "warptweet up " + tunnelID,
 	})
 }
 
-func runRevokeTunnel(arguments []string, stdout, stderr io.Writer) error {
+func runRevokeTunnel(ctx context.Context, arguments []string, stdout, stderr io.Writer) error {
 	flags := newFlagSet("revoke", stderr)
 	positionals, err := parseFlagsAllowArgs(flags, arguments)
 	if err != nil {
@@ -500,12 +631,151 @@ func runRevokeTunnel(arguments []string, stdout, stderr io.Writer) error {
 	if len(positionals) != 1 {
 		return errors.New("revoke requires exactly one tunnel-id")
 	}
+	tunnelID := positionals[0]
+	_ = stderr
+
+	layout, err := productionClientLayout()
+	if err != nil {
+		return err
+	}
+	store := lifecycle.Store{Root: layout.ClientRuntimeRoot}
+	lock, err := store.Lock(tunnelID)
+	if err != nil {
+		return err
+	}
+	defer lifecycle.Unlock(lock)
+
+	if err := stopTunnelProcess(store, tunnelID); err != nil {
+		return err
+	}
+
+	receipt, err := loadEnrollmentReceipt(layout.ClientManifestPath, tunnelID)
+	if err != nil {
+		return err
+	}
+	if receipt.ManagementToken == "" || receipt.ClientID == "" {
+		return errors.New("enrollment receipt missing management token; use server revoke on the gateway")
+	}
+	if err := enrollment.SubmitRevoke(ctx, receipt.ServerAddress, receipt.enrollPortOrDefault(), enrollment.ManagementRequest{
+		ClientID:        receipt.ClientID,
+		ManagementToken: receipt.ManagementToken,
+		TunnelID:        tunnelID,
+	}); err != nil {
+		return fmt.Errorf("gateway revoke: %w", err)
+	}
+
+	receipt.ManagementToken = ""
+	receipt.RevokedAt = time.Now().UTC().Format(time.RFC3339Nano)
+	if err := writeEnrollmentReceipt(layout.ClientManifestPath, receipt); err != nil {
+		return err
+	}
+	_ = store.Write(lifecycle.State{
+		TunnelID:     tunnelID,
+		Phase:        lifecycle.PhaseStopped,
+		TargetHealth: lifecycle.TargetHealthNotChecked,
+		Generation:   receipt.Generation,
+	})
 	return writeJSON(stdout, map[string]any{
-		"status":        "unsupported",
-		"tunnel_id":     positionals[0],
-		"error":         "client revoke requires durable gateway acknowledgment before local completion",
+		"status":        "revoked",
+		"tunnel_id":     tunnelID,
+		"client_id":     receipt.ClientID,
+		"gateway":       "acknowledged",
+		"identity":      "preserved_local",
 		"target_health": lifecycle.TargetHealthNotChecked,
 	})
+}
+
+type enrollmentReceipt struct {
+	InviteID         string `json:"invite_id"`
+	ClientID         string `json:"client_id"`
+	TunnelID         string `json:"tunnel_id"`
+	AcceptedAt       string `json:"accepted_at"`
+	Generation       string `json:"generation"`
+	ManagementToken  string `json:"management_token,omitempty"`
+	ServerAddress    string `json:"server_address"`
+	EnrollPort       uint16 `json:"enroll_port,omitempty"`
+	PublicKey        string `json:"public_key,omitempty"`
+	HostPublicKey    string `json:"host_public_key,omitempty"`
+	Target           string `json:"target,omitempty"`
+	Principal        string `json:"principal,omitempty"`
+	ProfileID        string `json:"profile_id,omitempty"`
+	RevokedAt        string `json:"revoked_at,omitempty"`
+}
+
+func (receipt enrollmentReceipt) enrollPortOrDefault() uint16 {
+	if receipt.EnrollPort == 0 {
+		return enrollment.DefaultEnrollmentPort
+	}
+	return receipt.EnrollPort
+}
+
+func enrollmentReceiptDir(clientManifestPath string) string {
+	return filepath.Join(filepath.Dir(clientManifestPath), "enrollment")
+}
+
+func writeEnrollmentReceipt(clientManifestPath string, receipt enrollmentReceipt) error {
+	dir := enrollmentReceiptDir(clientManifestPath)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return err
+	}
+	raw, err := json.Marshal(receipt)
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	return writeFileAtomic(filepath.Join(dir, receipt.TunnelID+".json"), raw, 0o600)
+}
+
+func stopTunnelProcess(store lifecycle.Store, tunnelID string) error {
+	state, err := store.Read(tunnelID)
+	if err != nil {
+		return err
+	}
+	if state.PID <= 0 {
+		return nil
+	}
+	_ = store.Signal(tunnelID, syscall.SIGTERM)
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if !processAlive(state.PID) {
+			return nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	_ = store.Signal(tunnelID, syscall.SIGKILL)
+	killDeadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(killDeadline) {
+		if !processAlive(state.PID) {
+			return nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return fmt.Errorf("tunnel %s process %d did not exit after stop", tunnelID, state.PID)
+}
+
+func loadEnrollmentReceipt(clientManifestPath, tunnelID string) (enrollmentReceipt, error) {
+	path := filepath.Join(enrollmentReceiptDir(clientManifestPath), tunnelID+".json")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return enrollmentReceipt{}, fmt.Errorf("load enrollment receipt for %s: %w", tunnelID, err)
+	}
+	var receipt enrollmentReceipt
+	if err := json.Unmarshal(raw, &receipt); err != nil {
+		return enrollmentReceipt{}, fmt.Errorf("parse enrollment receipt: %w", err)
+	}
+	if receipt.TunnelID == "" {
+		receipt.TunnelID = tunnelID
+	}
+	return receipt, nil
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func runUninstall(arguments []string, stdout, stderr io.Writer) error {

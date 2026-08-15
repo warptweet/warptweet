@@ -366,9 +366,10 @@ Acceptance:
 
 ### 7. Enrollment and lifecycle CLI, 13 points
 
-Status: enroll/up/status/down/uninstall command surface and local lifecycle
-state machine are present. rotate/revoke remain explicit unsupported until the
-packaged enrollment endpoint lands. Live package enroll evidence is WP8.
+Status: enroll/up/status/down/rotate/revoke/uninstall command surface and local
+lifecycle state machine are present. Network enroll/rotate/revoke use the
+packaged enrollment HTTP endpoint (port 29722) with management tokens. Live
+package-to-package evidence remains WP8.
 
 Add the following user commands with strict, typed outputs:
 

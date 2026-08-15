@@ -8,10 +8,12 @@ WarpTweet is not a general-purpose SSH client or VPN. It permits one declared lo
 
 This repository contains a working WarpTweet controller and tested local process boundary, but it is not yet a supported end-to-end release.
 
+- The product CLI path is implemented: `gateway` mints a named `.wtinvite` and starts the enrollment control plane; `connect` enrolls, activates, and brings the tunnel up. Operator verbs (`server *`, `enroll`, `up`/`down`/`status`/`rotate`/`revoke`) remain for advanced use.
+- Enrollment is HTTP on invite `enroll_port` (default 29722): single-use invite consume, management-token rotate/revoke, and packaged `warptweet-enroll.service`. Transport is plain HTTP on a trusted network until a pinned TLS profile exists. Local control-plane confidence: `make test-enrollment-control-plane` (not package-to-package evidence).
 - The `warptweet` CLI strictly validates both manifest kinds, renders isolated client and server policy, renders managed host and client public-key entries, performs client and installed-server preflight, and supervises one selected local forward.
 - The repository contains a pinned recipe intended to authenticate, build, test, and stage OpenSSH 10.4p1 from upstream source. It does not distribute or install an OpenSSH source tree or binary bundle, and the full upstream regression suite has not completed in this workspace sandbox.
 - Earlier macOS work proved OpenSSH 10.4p1 composite key generation, composite SSHSIG sign and verify, algorithm queries, and the then-current client `doctor` integration. That evidence predates the current Linux-only static OpenSSL, ELF, fixed-path, and root-ownership gates. The current client gate has not yet passed against an installed Linux bundle, and neither result proves a client-to-server tunnel.
-- The systemd units establish the intended Linux packaging contract and fail startup or reload unless installed-server preflight passes. Linux package assembly, a real fixed-layout server preflight run, and two-endpoint Linux interoperability have not been demonstrated in this workspace.
+- The systemd units (`warptweet-sshd`, `warptweet-enroll`, `warptweet-tunnel@`) establish the intended Linux packaging contract and fail startup or reload unless installed-server preflight passes. Two-endpoint package-to-package interoperability evidence (WP8) has not been completed; the public Homebrew CTA stays dark until it is.
 - A system `ssh` binary is not a substitute. Client preflight requires `/opt/warptweet/libexec/openssh/bin/ssh`, root-owned non-symlink ancestry that is not group or world writable, the manifest-pinned executable SHA-256, the exact OpenSSH and OpenSSL version line, an ELF executable with no dynamic libcrypto or libssl dependency and no RPATH or RUNPATH, the required algorithms, trust inputs, and effective configuration.
 
 Until a reviewed OpenSSH 10.4p1 bundle with the required composite signature support is installed, WarpTweet must remain unavailable rather than weaken its profile.
@@ -67,6 +69,18 @@ make build
 ./bin/warptweet profile
 ```
 
+Product verbs (require a packaged engine and fixed layout for a live tunnel):
+
+```sh
+# On the host that can reach the service
+./bin/warptweet gateway --to 5432 --name laptop-1
+# writes ./laptop-1.wtinvite and starts enrollment listen (or warptweet-enroll.service)
+
+# On the client
+./bin/warptweet connect laptop-1.wtinvite --yes
+./bin/warptweet status laptop-1 --json
+```
+
 Validate or render a manifest without opening a connection:
 
 ```sh
@@ -94,14 +108,12 @@ Successful `doctor-server` output also uses `"status":"preflight_ready"`, with `
 The intended release flow is:
 
 1. Install the reviewed, pinned OpenSSH 10.4p1 bundle, source receipt, and authenticated file manifest in the fixed root-owned layout.
-2. Generate distinct composite host and client keys on their managed endpoints.
-3. Provision the exact host-key pin and exact authorized client public key.
-4. Create and validate a `.wt` manifest containing policy metadata only.
-5. Review the closed client policy and restricted server configuration rendered from the immutable profile.
-6. Start the declared local forward under frequency-bounded supervision.
-7. Before a supported release, prove remote authentication, forwarding readiness, negotiated algorithms, rekey behavior, denial of classical-only peers, server confinement, and cleanup across two managed Linux endpoints.
+2. On the service host: `gateway` (or `server init` + `warptweet-enroll.service`) to mint a single-use `.wtinvite`.
+3. On the client: `connect` to generate a composite client key locally, enroll, pin the host, and open the loopback forward.
+4. Use `status` / `down` / `rotate` / `revoke` for lifecycle; rotate and revoke require gateway acknowledgment via the management token.
+5. Before a supported release, complete package-to-package dual-host evidence (WP8): authentication, forwarding readiness, negotiated algorithms, rekey, classical-only denial, confinement, invite fail-closed, and cleanup.
 
-Do not use the packaged systemd units as evidence of a supported installation until key provisioning, Linux package assembly, and two-endpoint positive and negative interoperability verification are complete.
+Do not use the packaged systemd units as evidence of a supported installation until Linux package assembly and two-endpoint positive and negative interoperability verification are complete.
 
 ## Security boundaries
 
@@ -113,7 +125,7 @@ WarpTweet's MVP intentionally excludes:
 - wildcard or LAN-facing local listeners;
 - arbitrary target hosts or ports;
 - passwords, keyboard-interactive, GSSAPI, host-based authentication, and trust on first use;
-- private keys or credentials inside `.wt` manifests;
+- private keys or credentials inside `.wt` manifests or `.wtinvite` files;
 - anonymity, traffic-flow confidentiality, endpoint compromise protection, and availability guarantees;
 - claims of standardization, FIPS validation, or quantum-proof security.
 
@@ -137,6 +149,9 @@ Local loopback is a host boundary, not per-process authentication. A deployment 
 - [Client enrollment and lifecycle CLI](docs/2026-08-12_client-lifecycle.md)
 - [Package-to-package release evidence](docs/2026-08-12_package-interop-evidence.md)
 - [Public release and website install path](docs/2026-08-12_public-release-path.md)
+- [CLI gateway and connect strategy](docs/2026-08-12_cli-gateway-connect.md)
+- [Reviewer catch-up: CLI, invites, architecture](docs/2026-08-14_reviewer-catchup-cli-invites-architecture.md)
+- [Dual-host interop orchestrator (Phase A)](docs/2026-08-14_dual-host-interop-orchestrator.md)
 - [Local Caddy website](docs/2026-08-12_website-local.md)
 - [Logo: The Declared Route](docs/2026-08-12_logo.md)
 

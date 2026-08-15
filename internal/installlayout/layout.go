@@ -24,6 +24,7 @@ const (
 	ServerManifestPath         = "/etc/warptweet/server.wt"
 	ServerHostKeyPath          = "/opt/warptweet/etc/ssh_host_mldsa44_ed25519_key"
 	AuthorizedKeysDirectory    = "/opt/warptweet/etc/authorized_keys"
+	ClientsDirectory           = "/var/lib/warptweet/clients"
 	OpenSSHSourceReceiptPath   = "/opt/warptweet/share/openssh-source.txt"
 	OpenSSLSourceReceiptPath   = "/opt/warptweet/share/openssl-source.txt"
 	OpenSSHLicensePath         = "/opt/warptweet/share/licenses/openssh/LICENCE"

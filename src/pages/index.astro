@@ -91,22 +91,20 @@ const productFacts = [
     <section class="section frame cli-section" id="cli" aria-labelledby="cli-title">
       <div class="section-heading section-heading--split">
         <div>
-          <p class="section-kicker">One command surface</p>
-          <h2 id="cli-title">Run both ends with <code>warptweet</code>.</h2>
+          <p class="section-kicker">Two commands</p>
+          <h2 id="cli-title">Gateway on one machine. Connect on the other.</h2>
         </div>
         <p>
-          Initialize the server, invite a machine, enroll the client, and control the named tunnel
-          from the same focused command line.
+          On the host that runs the service, open a gateway to a local port. On your laptop, connect
+          with the invite. Your app talks to localhost. No shell. No VPN mesh.
         </p>
       </div>
       <CLIShowcase />
       <div class="cli-flow" aria-label="WarpTweet command lifecycle">
-        <span>initialize</span><i aria-hidden="true">→</i>
+        <span>gateway</span><i aria-hidden="true">→</i>
         <span>invite</span><i aria-hidden="true">→</i>
-        <span>enroll</span><i aria-hidden="true">→</i>
-        <span>up</span><i aria-hidden="true">→</i>
-        <span>status</span><i aria-hidden="true">→</i>
-        <span>down</span>
+        <span>connect</span><i aria-hidden="true">→</i>
+        <span>localhost</span>
       </div>
     </section>
 

@@ -227,7 +227,7 @@ func TestRejectsUnknownCommand(t *testing.T) {
 	t.Parallel()
 
 	var stderr bytes.Buffer
-	code := Run(context.Background(), []string{"connect"}, nil, &bytes.Buffer{}, &stderr)
+	code := Run(context.Background(), []string{"not-a-command"}, nil, &bytes.Buffer{}, &stderr)
 	if code != 2 || !strings.Contains(stderr.String(), "unknown command") {
 		t.Fatalf("code = %d, stderr = %q", code, stderr.String())
 	}

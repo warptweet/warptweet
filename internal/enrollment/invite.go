@@ -49,6 +49,7 @@ type Invite struct {
 	ClientName        string `json:"client_name"`
 	ServerAddress     string `json:"server_address"`
 	ServerPort        uint16 `json:"server_port"`
+	EnrollPort        uint16 `json:"enroll_port"`
 	TargetAddress     string `json:"target_address"`
 	TargetPort        uint16 `json:"target_port"`
 	Principal         string `json:"principal"`
@@ -82,6 +83,7 @@ type CreateInput struct {
 	ClientName        string
 	ServerAddress     netip.Addr
 	ServerPort        uint16
+	EnrollPort        uint16
 	TargetAddress     netip.Addr
 	TargetPort        uint16
 	Principal         string
@@ -118,6 +120,10 @@ func Create(input CreateInput) (Invite, Record, error) {
 		return Invite{}, Record{}, fmt.Errorf("generate invite id: %w", err)
 	}
 
+	enrollPort := input.EnrollPort
+	if enrollPort == 0 {
+		enrollPort = DefaultEnrollmentPort
+	}
 	invite := Invite{
 		Kind:              KindInvite,
 		SchemaVersion:     CurrentSchemaVersion,
@@ -125,6 +131,7 @@ func Create(input CreateInput) (Invite, Record, error) {
 		ClientName:        input.ClientName,
 		ServerAddress:     input.ServerAddress.String(),
 		ServerPort:        input.ServerPort,
+		EnrollPort:        enrollPort,
 		TargetAddress:     input.TargetAddress.String(),
 		TargetPort:        input.TargetPort,
 		Principal:         input.Principal,
@@ -341,6 +348,9 @@ func validateCreateInput(input CreateInput) error {
 	if input.ServerPort == 0 || input.TargetPort == 0 {
 		return fmt.Errorf("%w: ports must be nonzero", ErrInvalidInvite)
 	}
+	if input.EnrollPort != 0 && input.EnrollPort == input.ServerPort {
+		return fmt.Errorf("%w: enroll_port must differ from server_port", ErrInvalidInvite)
+	}
 	if input.Principal == "" || input.ProfileID == "" || input.ArtifactProfileID == "" {
 		return fmt.Errorf("%w: principal, profile_id, and artifact_profile_id are required", ErrInvalidInvite)
 	}
@@ -369,6 +379,12 @@ func validateInviteShape(invite Invite) error {
 	if invite.ServerPort == 0 || invite.TargetPort == 0 {
 		return fmt.Errorf("%w: ports must be nonzero", ErrInvalidInvite)
 	}
+	if invite.EnrollPort == 0 {
+		return fmt.Errorf("%w: enroll_port must be nonzero", ErrInvalidInvite)
+	}
+	if invite.EnrollPort == invite.ServerPort {
+		return fmt.Errorf("%w: enroll_port must differ from server_port", ErrInvalidInvite)
+	}
 	return nil
 }
 
@@ -383,6 +399,7 @@ func macInvite(secret []byte, invite Invite) (string, error) {
 		invite.ClientName,
 		invite.ServerAddress,
 		fmt.Sprintf("%d", invite.ServerPort),
+		fmt.Sprintf("%d", invite.EnrollPort),
 		invite.TargetAddress,
 		fmt.Sprintf("%d", invite.TargetPort),
 		invite.Principal,

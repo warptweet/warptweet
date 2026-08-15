@@ -6,3 +6,6 @@
 *.log
 *.tmp
 .DS_Store
+.env
+/scripts/interop/config.env
+/scripts/interop/work/

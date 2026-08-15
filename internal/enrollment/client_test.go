@@ -19,6 +19,7 @@ func TestParseClientInviteRejectsSecretsAndExpiry(t *testing.T) {
   "client_name":"laptop-1",
   "server_address":"192.0.2.10",
   "server_port":2222,
+  "enroll_port":29722,
   "target_address":"198.51.100.20",
   "target_port":5432,
   "principal":"warptweet",

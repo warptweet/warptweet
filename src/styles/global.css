@@ -1,25 +1,25 @@
 :root {
   color-scheme: light;
-  --canvas: #f4f0e7;
-  --surface: #fffdf8;
-  --surface-muted: #e9e2d5;
-  --ink: #17201d;
-  --ink-muted: #4e5953;
-  --rule: #c9c1b2;
-  --signal: #a63f28;
-  --signal-hover: #7e2e1e;
-  --route: #1f6258;
-  --route-bright: #77beb4;
-  --route-soft: #d8e5e1;
-  --night: #17201d;
-  --night-raised: #202b27;
-  --night-text: #f3efe5;
+  --canvas: #f3f5f4;
+  --surface: #fcfdfc;
+  --surface-muted: #e7ecea;
+  --ink: #121a18;
+  --ink-muted: #4a5551;
+  --rule: #c5cdc9;
+  --signal: #0f6b5c;
+  --signal-hover: #0a5247;
+  --route: #0f6b5c;
+  --route-bright: #3d9f8f;
+  --route-soft: #d5e8e4;
+  --night: #101816;
+  --night-raised: #1a2421;
+  --night-text: #eef2f0;
   --focus: #0b65c2;
-  --focus-halo: #fffdf8;
-  --sans: ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  --mono: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
-  --frame: min(1240px, calc(100vw - 2 * clamp(20px, 4vw, 64px)));
-  --section-space: clamp(84px, 11vw, 152px);
+  --focus-halo: #fcfdfc;
+  --sans: "IBM Plex Sans Variable", "IBM Plex Sans", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+  --frame: min(1120px, calc(100vw - 2 * clamp(20px, 4vw, 56px)));
+  --section-space: clamp(72px, 9vw, 120px);
 }
 
 *,
@@ -39,8 +39,10 @@ body {
   background: var(--canvas);
   color: var(--ink);
   font-family: var(--sans);
-  font-size: 16px;
-  line-height: 1.6;
+  font-size: 17px;
+  font-weight: 400;
+  line-height: 1.55;
+  letter-spacing: -0.011em;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
 }
@@ -107,7 +109,7 @@ code {
   border: 2px solid currentColor;
   border-radius: 6px;
   background: var(--surface);
-  font-weight: 750;
+  font-weight: 600;
 }
 
 .skip-link:focus {
@@ -136,8 +138,8 @@ code {
   min-height: 44px;
   gap: 12px;
   color: var(--ink);
-  font-size: 1.03rem;
-  font-weight: 780;
+  font-size: 1rem;
+  font-weight: 620;
   letter-spacing: -0.02em;
   text-decoration: none;
 }
@@ -175,8 +177,8 @@ code {
   align-items: center;
   min-height: 44px;
   color: var(--ink-muted);
-  font-size: 0.86rem;
-  font-weight: 680;
+  font-size: 0.9rem;
+  font-weight: 520;
   text-decoration: none;
 }
 
@@ -188,14 +190,15 @@ code {
 .header-action {
   display: inline-flex;
   align-items: center;
-  min-height: 42px;
-  padding-inline: 15px;
-  gap: 12px;
-  border: 1px solid var(--ink);
+  min-height: 40px;
+  padding-inline: 16px;
+  gap: 10px;
+  border: 1px solid var(--rule);
   border-radius: 999px;
+  background: var(--surface);
   color: var(--ink);
-  font-size: 0.78rem;
-  font-weight: 760;
+  font-size: 0.84rem;
+  font-weight: 560;
   text-decoration: none;
 }
 
@@ -215,49 +218,49 @@ code {
 }
 
 .section-kicker {
-  margin-bottom: 20px;
-  color: var(--signal);
+  margin-bottom: 16px;
+  color: var(--route);
   font-family: var(--mono);
-  font-size: 0.76rem;
-  font-weight: 760;
-  letter-spacing: 0.09em;
+  font-size: 0.78rem;
+  font-weight: 560;
+  letter-spacing: 0.04em;
   line-height: 1.4;
   text-transform: uppercase;
 }
 
 .section-kicker--light {
-  color: #f0876d;
+  color: var(--route-bright);
 }
 
 .open-source-section .section-kicker--light {
-  color: #ffd0c4;
+  color: #b7e0d8;
 }
 
 h1,
 h2 {
-  letter-spacing: -0.07em;
+  letter-spacing: -0.035em;
+  font-weight: 600;
 }
 
 h1 {
-  max-width: 1160px;
-  margin-bottom: 34px;
-  font-size: clamp(4rem, 8.6vw, 8.5rem);
-  font-weight: 760;
-  line-height: 0.89;
+  max-width: 18ch;
+  margin-bottom: 28px;
+  font-size: clamp(2.75rem, 5.4vw, 4.5rem);
+  line-height: 1.05;
 }
 
 h1 em {
-  color: var(--signal);
+  color: var(--route);
   font-style: normal;
-  font-weight: 520;
+  font-weight: 600;
 }
 
 .product-hero__deck {
-  max-width: 820px;
-  margin-bottom: 32px;
+  max-width: 42rem;
+  margin-bottom: 28px;
   color: var(--ink-muted);
-  font-size: clamp(1.08rem, 1.6vw, 1.35rem);
-  line-height: 1.62;
+  font-size: clamp(1.05rem, 1.35vw, 1.2rem);
+  line-height: 1.55;
 }
 
 .hero__actions {
@@ -295,7 +298,7 @@ h1 em {
   margin: 0;
   color: var(--signal);
   font-size: 1.08rem;
-  font-weight: 740;
+  font-weight: 600;
 }
 
 .install-qualification-detail,
@@ -346,26 +349,25 @@ h1 em {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 50px;
-  padding: 12px 19px;
-  gap: 18px;
-  border-radius: 7px;
-  font-size: 0.91rem;
-  font-weight: 770;
+  min-height: 46px;
+  padding: 11px 18px;
+  gap: 12px;
+  border-radius: 8px;
+  font-size: 0.94rem;
+  font-weight: 560;
   line-height: 1.2;
   text-decoration: none;
-  transition: background-color 140ms ease, color 140ms ease, transform 140ms ease;
+  transition: background-color 140ms ease, color 140ms ease, border-color 140ms ease;
 }
 
 .button:hover {
-  transform: translateY(-2px);
   text-decoration: none;
 }
 
 .button--primary {
-  border: 1px solid var(--signal);
-  background: var(--signal);
-  color: #fffdf8;
+  border: 1px solid var(--route);
+  background: var(--route);
+  color: #f7fffd;
 }
 
 .button--primary:hover {
@@ -419,9 +421,9 @@ h1 em {
 }
 
 .product-route__header strong {
-  color: #f0876d;
+  color: var(--route-bright);
   font-size: 0.82rem;
-  font-weight: 720;
+  font-weight: 560;
 }
 
 .product-route__header span {
@@ -459,7 +461,7 @@ h1 em {
   color: var(--route-bright);
   font-family: var(--mono);
   font-size: 0.72rem;
-  font-weight: 720;
+  font-weight: 560;
   letter-spacing: 0.07em;
   text-transform: uppercase;
 }
@@ -526,7 +528,7 @@ h1 em {
   transform: translate(-50%, -50%);
   border: 3px solid var(--night);
   border-radius: 50%;
-  background: #f0876d;
+  background: var(--route-bright);
   animation: packet-cross 900ms 500ms ease-in-out both;
 }
 
@@ -549,10 +551,10 @@ h1 em {
 
 .route-span__identity span {
   margin-bottom: 5px;
-  color: #f0876d;
+  color: var(--route-bright);
   font-family: var(--mono);
   font-size: 0.69rem;
-  font-weight: 760;
+  font-weight: 560;
   letter-spacing: 0.07em;
   text-transform: uppercase;
 }
@@ -612,7 +614,7 @@ h1 em {
   border-right: 1px solid var(--rule);
   color: var(--ink-muted);
   font-size: 0.81rem;
-  font-weight: 710;
+  font-weight: 550;
 }
 
 .product-facts li::before {
@@ -647,11 +649,12 @@ h1 em {
 .protocol-intro h2,
 .crypto-heading h2,
 .open-source-section h2 {
-  max-width: 900px;
+  max-width: 18ch;
   margin-bottom: 0;
-  font-size: clamp(2.7rem, 5.4vw, 5.6rem);
-  font-weight: 690;
-  line-height: 0.96;
+  font-size: clamp(2rem, 3.8vw, 3.25rem);
+  font-weight: 600;
+  line-height: 1.12;
+  letter-spacing: -0.03em;
 }
 
 .section-heading--split > p,
@@ -692,7 +695,7 @@ h1 em {
   color: var(--signal);
   font-family: var(--mono);
   font-size: 0.74rem;
-  font-weight: 760;
+  font-weight: 560;
 }
 
 .feature-card:nth-child(3) > span,
@@ -755,10 +758,10 @@ h1 em {
 .protocol-stack span {
   display: block;
   margin-bottom: 64px;
-  color: #f0876d;
+  color: var(--route-bright);
   font-family: var(--mono);
   font-size: 0.72rem;
-  font-weight: 760;
+  font-weight: 560;
 }
 
 .protocol-stack h3 {
@@ -834,7 +837,7 @@ h1 em {
 }
 
 .terminal-card header i:first-child {
-  background: #f0876d;
+  background: var(--route-bright);
 }
 
 .terminal-card header i:last-child {
@@ -905,7 +908,7 @@ h1 em {
   color: var(--signal);
   font-family: var(--mono);
   font-size: 0.72rem;
-  font-weight: 760;
+  font-weight: 560;
   letter-spacing: 0.07em;
   text-transform: uppercase;
 }
@@ -945,13 +948,13 @@ h1 em {
   color: var(--route);
   font-family: var(--mono);
   font-size: 0.72rem;
-  font-weight: 760;
+  font-weight: 560;
   text-transform: uppercase;
 }
 
 .route-file dd {
   margin: 0;
-  font-weight: 720;
+  font-weight: 560;
   overflow-wrap: anywhere;
 }
 
@@ -978,7 +981,7 @@ h1 em {
   margin-bottom: 3px;
   color: var(--ink);
   font-size: 0.83rem;
-  font-weight: 760;
+  font-weight: 560;
 }
 
 .manifest-anatomy dd {
@@ -991,7 +994,7 @@ h1 em {
   align-self: flex-start;
   margin-top: auto;
   color: var(--route);
-  font-weight: 760;
+  font-weight: 560;
 }
 
 .crypto-heading {
@@ -1019,10 +1022,10 @@ h1 em {
 }
 
 .crypto-profile article > span {
-  color: #f0876d;
+  color: var(--route-bright);
   font-family: var(--mono);
   font-size: 0.72rem;
-  font-weight: 760;
+  font-weight: 560;
 }
 
 .crypto-profile article > div p {
@@ -1071,7 +1074,7 @@ h1 em {
   color: var(--signal);
   font-family: var(--mono);
   font-size: 0.72rem;
-  font-weight: 760;
+  font-weight: 560;
 }
 
 .use-case-grid h3 {
@@ -1125,7 +1128,7 @@ h1 em {
 .open-source-stats dd {
   margin: 3px 0 0;
   font-size: 0.78rem;
-  font-weight: 720;
+  font-weight: 560;
 }
 
 .open-source-section a:focus-visible,
@@ -1368,7 +1371,7 @@ h1 em {
   }
 
   h1 {
-    font-size: clamp(3.25rem, 16vw, 4.7rem);
+    font-size: clamp(2.4rem, 11vw, 3.2rem);
   }
 
   .hero__actions {
@@ -1423,7 +1426,7 @@ h1 em {
   .protocol-intro h2,
   .crypto-heading h2,
   .open-source-section h2 {
-    font-size: clamp(2.65rem, 12vw, 3.7rem);
+    font-size: clamp(1.9rem, 8vw, 2.6rem);
   }
 
   .feature-card {
@@ -1547,27 +1550,31 @@ h1 em {
 @media (prefers-color-scheme: dark) {
   :root {
     color-scheme: dark;
-    --canvas: #151a18;
-    --surface: #202724;
-    --surface-muted: #29312e;
-    --ink: #f4f0e7;
-    --ink-muted: #b7c0ba;
-    --rule: #48534e;
-    --signal: #f0876d;
-    --signal-hover: #ff9e86;
-    --route: #77beb4;
-    --route-soft: #29423d;
+    --canvas: #0e1412;
+    --surface: #171e1c;
+    --surface-muted: #1f2825;
+    --ink: #e8eeeb;
+    --ink-muted: #9aa8a2;
+    --rule: #2f3b37;
+    --signal: #5ec4b4;
+    --signal-hover: #7ad4c5;
+    --route: #5ec4b4;
+    --route-bright: #7ad4c5;
+    --route-soft: #1d3330;
+    --night: #0a100e;
+    --night-raised: #141c19;
+    --night-text: #e8eeeb;
     --focus: #74baff;
-    --focus-halo: #151a18;
+    --focus-halo: #0e1412;
   }
 
   .button--primary {
-    color: #151a18;
+    color: #0e1412;
   }
 
   .feature-card:nth-child(3),
   .open-source-section {
-    background: #255c54;
+    background: #163f38;
   }
 
   .use-case-grid article {

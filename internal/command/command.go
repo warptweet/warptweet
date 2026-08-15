@@ -120,6 +120,10 @@ func runWithDependencies(
 		err = runDoctorServer(ctx, arguments[1:], stdout, stderr)
 	case "run":
 		err = runTunnel(ctx, arguments[1:], stdout, stderr, dependencies)
+	case "gateway":
+		err = runGateway(ctx, arguments[1:], stdout, stderr)
+	case "connect":
+		err = runConnect(ctx, arguments[1:], stdout, stderr, dependencies)
 	case "server":
 		err = runServer(ctx, arguments[1:], stdout, stderr)
 	case "enroll":
@@ -131,9 +135,9 @@ func runWithDependencies(
 	case "down":
 		err = runDown(arguments[1:], stdout, stderr)
 	case "rotate":
-		err = runRotate(arguments[1:], stdout, stderr)
+		err = runRotate(ctx, arguments[1:], stdout, stderr)
 	case "revoke":
-		err = runRevokeTunnel(arguments[1:], stdout, stderr)
+		err = runRevokeTunnel(ctx, arguments[1:], stdout, stderr)
 	case "uninstall":
 		err = runUninstall(arguments[1:], stdout, stderr)
 	case "help", "-h", "--help":
@@ -877,6 +881,8 @@ func writeUsage(writer io.Writer) {
 	_, _ = io.WriteString(writer, `WarpTweet: open-source fail-closed post-quantum TCP tunneling
 
 Usage:
+  warptweet gateway --to <port|ip:port> [--name <label>] [--out path] [--stdout] [--listen ip:port] [--no-invite] [--no-enroll-listen] [--json]
+  warptweet connect <invite.wtinvite> [--yes] [--proof <proof.json>] [--once]
   warptweet profile
   warptweet validate --config <manifest.wt>
   warptweet render-client --config <client.wt> --tunnel <id>
@@ -888,9 +894,11 @@ Usage:
   warptweet run --config <client.wt> --tunnel <id> [--once]
   warptweet server init --listen <ip:port> --target <ip:port>
   warptweet server invite --target <ip:port> --name <name>
+  warptweet server enroll-listen [--listen ip:port]
+  warptweet server accept-enrollment --request <request.json>
   warptweet server revoke <client-or-invite-id>
   warptweet server status
-  warptweet enroll <invite.json> [--yes] [--prepare-only] [--proof <proof.json>]
+  warptweet enroll <invite.wtinvite> [--yes] [--prepare-only] [--proof <proof.json>]
   warptweet up <tunnel-id> [--once]
   warptweet status [<tunnel-id>] [--json]
   warptweet down <tunnel-id>

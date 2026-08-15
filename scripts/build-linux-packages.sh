@@ -71,6 +71,7 @@ mkdir -p \
     "$WT_ROOT/lib/systemd/system" \
     "$WT_ROOT/var/empty/warptweet-sshd" \
     "$WT_ROOT/var/lib/warptweet/invites" \
+    "$WT_ROOT/var/lib/warptweet/clients" \
     "$WT_ROOT/var/lib/warptweet/server" \
     "$WT_ROOT/run/warptweet/server"
 
@@ -79,6 +80,8 @@ cp -a "$WT_STAGE_INPUT/opt/warptweet/." "$WT_ROOT/opt/warptweet/"
 install -m 0755 "$WT_CONTROLLER_INPUT" "$WT_ROOT/opt/warptweet/bin/warptweet"
 install -m 0644 "$WT_REPOSITORY_ROOT/packaging/systemd/warptweet-sshd.service" \
     "$WT_ROOT/lib/systemd/system/warptweet-sshd.service"
+install -m 0644 "$WT_REPOSITORY_ROOT/packaging/systemd/warptweet-enroll.service" \
+    "$WT_ROOT/lib/systemd/system/warptweet-enroll.service"
 install -m 0644 "$WT_REPOSITORY_ROOT/packaging/systemd/warptweet-tunnel@.service" \
     "$WT_ROOT/lib/systemd/system/warptweet-tunnel@.service"
 install -m 0755 "$WT_REPOSITORY_ROOT/packaging/linux/postinst.sh" \
@@ -134,6 +137,7 @@ cp -a $WT_ROOT/. %{buildroot}/
 /opt/warptweet
 /etc/warptweet
 /lib/systemd/system/warptweet-sshd.service
+/lib/systemd/system/warptweet-enroll.service
 /lib/systemd/system/warptweet-tunnel@.service
 /var/empty/warptweet-sshd
 /var/lib/warptweet

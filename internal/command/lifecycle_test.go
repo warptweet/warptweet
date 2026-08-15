@@ -24,6 +24,8 @@ func TestLifecycleUsageMentionsCommands(t *testing.T) {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}
 	for _, required := range []string{
+		"warptweet gateway",
+		"warptweet connect",
 		"warptweet enroll",
 		"warptweet up",
 		"warptweet status",
@@ -114,22 +116,32 @@ func TestStatusAndDownWithoutState(t *testing.T) {
 	}
 }
 
-func TestRotateAndRevokeAreExplicitlyUnsupported(t *testing.T) {
+func TestRotateAndRevokeRequireEnrollmentReceipt(t *testing.T) {
 	t.Parallel()
 
-	for _, args := range [][]string{
-		{"rotate", "database-primary"},
-		{"revoke", "database-primary"},
-	} {
+	cases := []struct {
+		args    []string
+		wantErr string
+	}{
+		{args: []string{"rotate", "database-primary"}, wantErr: "enrollment receipt"},
+		{args: []string{"revoke", "database-primary"}, wantErr: "enrollment receipt"},
+	}
+	for _, test := range cases {
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
-		code := Run(context.Background(), args, nil, &stdout, &stderr)
-		if code != 0 {
-			t.Fatalf("%v code=%d stderr=%s", args, code, stderr.String())
+		code := Run(context.Background(), test.args, nil, &stdout, &stderr)
+		if code == 0 {
+			t.Fatalf("%v unexpectedly succeeded: %s", test.args, stdout.String())
 		}
-		if !strings.Contains(stdout.String(), `"status":"unsupported"`) {
-			t.Fatalf("%v output=%s", args, stdout.String())
+		message := stderr.String()
+		if strings.Contains(message, test.wantErr) {
+			continue
 		}
+		// Off-matrix hosts may fail layout resolution before receipt load.
+		if strings.Contains(message, "artifact profile") || strings.Contains(message, "client layout") {
+			continue
+		}
+		t.Fatalf("%v stderr=%s", test.args, message)
 	}
 }
 

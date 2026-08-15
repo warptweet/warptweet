@@ -33,7 +33,7 @@ the website must say `Homebrew package in release qualification`.
 {
   "homebrew_cta_enabled": false,
   "homebrew_command": "brew install --cask warptweet/tap/warptweet",
-  "next_command": "warptweet enroll <single-use-invite>",
+  "next_command": "warptweet connect <invite-file>",
   "qualification_message": "Homebrew package in release qualification",
   "required_evidence_document": ""
 }
@@ -49,9 +49,10 @@ To enable the CTA:
 
 ## Website behavior
 
-- Dark: qualification message, planned enroll next action, no install command.
-- Light: selectable Homebrew command, copy control, enroll next action, links to
-  artifacts/evidence/security.
+- Dark: qualification message, planned connect next action
+  (`warptweet connect <invite-file>`), no install command.
+- Light: selectable Homebrew command, copy control, connect next action
+  (`warptweet connect <invite-file>`), links to artifacts/evidence/security.
 
 ## Verification
 

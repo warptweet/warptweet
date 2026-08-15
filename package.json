@@ -9,14 +9,16 @@
     "pnpm": ">=10.15.1 <11"
   },
   "scripts": {
-    "dev": "astro dev --host 127.0.0.1",
+    "dev": "astro dev --host 127.0.0.1 --port 4321",
     "check": "astro check",
     "build": "astro build",
     "verify": "pnpm run check && pnpm run build && node src/scripts/verify-site-output.mjs"
   },
   "devDependencies": {
-    "astro": "7.2.1",
     "@astrojs/check": "0.9.6",
+    "@fontsource-variable/ibm-plex-sans": "5.3.0",
+    "@fontsource/ibm-plex-mono": "5.3.0",
+    "astro": "7.2.1",
     "typescript": "5.9.3"
   }
 }

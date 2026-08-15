@@ -15,8 +15,9 @@ The output tree contains:
 
 - fixed `/opt/warptweet` inventory from the authenticated OpenSSH stage
 - controller at `/opt/warptweet/bin/warptweet`
-- systemd units `warptweet-sshd.service` and `warptweet-tunnel@.service`
-- empty invite/state directories under `/var/lib/warptweet`
+- systemd units `warptweet-sshd.service`, `warptweet-enroll.service`, and
+  `warptweet-tunnel@.service`
+- empty invite/client/state directories under `/var/lib/warptweet`
 - `control` metadata for `dpkg-deb`
 - `warptweet.spec` for RPM-family release automation
 - `postinst` / `prerm` maintainer scripts
@@ -31,8 +32,11 @@ reload systemd units. Scripts never download packages or contact the network.
 ```text
 warptweet server init --listen <ip:port> --target <ip:port>
 warptweet server invite --target <ip:port> --name <name>
+warptweet server enroll-listen [--listen ip:port]
+warptweet server accept-enrollment --request <request.json>
 warptweet server revoke <client-or-invite-id>
 warptweet server status
+warptweet gateway --to <port|ip:port>
 ```
 
 ### `server init`
@@ -64,8 +68,26 @@ Revokes an invite by id when present; otherwise clears the managed
 
 ### `server status`
 
-Reports manifest presence, host-key presence, listen/target, and invite counts
-by status.
+Reports manifest presence, host-key presence, listen/target, enroll URL/port,
+invite counts by status, and enrolled client counts by status.
+
+### `server enroll-listen` / `warptweet-enroll.service`
+
+HTTP control plane on the invite `enroll_port` (default **29722**):
+
+- `POST /v1/enroll` — consume single-use invite, install `authorized_keys`
+- `POST /v1/rotate` — replace client key with management-token auth
+- `POST /v1/revoke` — clear authorization with management-token auth
+
+Package install enables `warptweet-enroll.service`. It starts successfully only
+after `server init` (or `gateway`) has written `server.wt`, the host key, and
+`invite.mac-key`. Operators may also run `systemctl start warptweet-enroll`
+after bootstrap. `gateway` can start a detached listener for unpackaged labs;
+packaged hosts should prefer the unit.
+
+### `server accept-enrollment`
+
+One-shot offline accept for air-gapped operators (writes proof JSON to stdout).
 
 ## Activation invariant
 

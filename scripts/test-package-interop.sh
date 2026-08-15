@@ -72,7 +72,8 @@ fi
 
 WT_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 WT_RESULTS_FILE=$(mktemp)
-trap 'rm -f "$WT_RESULTS_FILE"' EXIT
+WT_TMP=$(mktemp -d)
+trap 'rm -f "$WT_RESULTS_FILE"; rm -rf "$WT_TMP"' EXIT
 
 json_escape() {
     printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
@@ -163,20 +164,118 @@ run_case_not_run() {
     record_result "$1" "$2" not_run "$3"
 }
 
+# Dual-host enrollment control plane (package binaries only).
+# Required when marking invite-enroll-single-use / invite-fail-closed / lifecycle:
+#   WARPTWEET_SERVER_CTRL   installed server controller
+#   WARPTWEET_CLIENT_CTRL   installed client controller
+#   WARPTWEET_ENROLL_INVITE path to a fresh .wtinvite on the client host
+# Optional:
+#   WARPTWEET_TUNNEL_ID     default database-primary / invite client_name
+run_positive_invite_enroll_single_use() {
+    if [ "$WARPTWEET_INTEROP_ROLE" != "client" ] && [ "$WARPTWEET_INTEROP_ROLE" != "orchestrator" ]; then
+        run_case_not_run invite-enroll-single-use positive "server role does not execute client enroll"
+        return 0
+    fi
+    WT_CLIENT_CTRL=${WARPTWEET_CLIENT_CTRL:-}
+    WT_INVITE=${WARPTWEET_ENROLL_INVITE:-}
+    if [ -z "$WT_CLIENT_CTRL" ] || [ -z "$WT_INVITE" ]; then
+        run_case_not_run invite-enroll-single-use positive "requires WARPTWEET_CLIENT_CTRL and WARPTWEET_ENROLL_INVITE on dual-host runner"
+        return 0
+    fi
+    if [ ! -x "$WT_CLIENT_CTRL" ] || [ ! -f "$WT_INVITE" ]; then
+        record_result invite-enroll-single-use positive fail "client controller or invite missing"
+        return 0
+    fi
+    case "$WT_CLIENT_CTRL" in
+        /opt/warptweet/*|/usr/local/*|/opt/homebrew/*|/Library/*) ;;
+        *)
+            record_result invite-enroll-single-use positive fail "client controller must be an installed package path, not source-tree"
+            return 0
+            ;;
+    esac
+    if ! "$WT_CLIENT_CTRL" enroll "$WT_INVITE" --yes >"$WT_TMP/wt-enroll-out.json" 2>"$WT_TMP/wt-enroll.err"; then
+        record_result invite-enroll-single-use positive fail "enroll failed: $(tr '\n' ' ' <"$WT_TMP/wt-enroll.err")"
+        return 0
+    fi
+    if "$WT_CLIENT_CTRL" enroll "$WT_INVITE" --yes >"$WT_TMP/wt-enroll-reuse.json" 2>"$WT_TMP/wt-enroll-reuse.err"; then
+        record_result invite-enroll-single-use positive fail "invite reuse succeeded"
+        return 0
+    fi
+    record_result invite-enroll-single-use positive pass "enroll once then reuse rejected"
+}
+
+run_negative_invite_fail_closed() {
+    if [ "$WARPTWEET_INTEROP_ROLE" != "client" ] && [ "$WARPTWEET_INTEROP_ROLE" != "orchestrator" ]; then
+        run_case_not_run invite-fail-closed negative "server role does not execute client enroll negatives"
+        return 0
+    fi
+    WT_CLIENT_CTRL=${WARPTWEET_CLIENT_CTRL:-}
+    WT_BAD_INVITE=${WARPTWEET_ENROLL_BAD_INVITE:-}
+    if [ -z "$WT_CLIENT_CTRL" ] || [ -z "$WT_BAD_INVITE" ]; then
+        run_case_not_run invite-fail-closed negative "requires WARPTWEET_CLIENT_CTRL and WARPTWEET_ENROLL_BAD_INVITE"
+        return 0
+    fi
+    if [ ! -x "$WT_CLIENT_CTRL" ] || [ ! -f "$WT_BAD_INVITE" ]; then
+        record_result invite-fail-closed negative fail "client controller or bad invite missing"
+        return 0
+    fi
+    if "$WT_CLIENT_CTRL" enroll "$WT_BAD_INVITE" --yes >"$WT_TMP/wt-enroll-bad.json" 2>"$WT_TMP/wt-enroll-bad.err"; then
+        record_result invite-fail-closed negative fail "expired/altered/cross-target invite was accepted"
+        return 0
+    fi
+    record_result invite-fail-closed negative pass "bad invite rejected"
+}
+
+run_positive_stop_restart_rotate_revoke_upgrade() {
+    if [ "$WARPTWEET_INTEROP_ROLE" != "client" ] && [ "$WARPTWEET_INTEROP_ROLE" != "orchestrator" ]; then
+        run_case_not_run stop-restart-rotate-revoke-upgrade positive "server role does not execute client lifecycle"
+        return 0
+    fi
+    WT_CLIENT_CTRL=${WARPTWEET_CLIENT_CTRL:-}
+    WT_TUNNEL=${WARPTWEET_TUNNEL_ID:-}
+    if [ -z "$WT_CLIENT_CTRL" ] || [ -z "$WT_TUNNEL" ]; then
+        run_case_not_run stop-restart-rotate-revoke-upgrade positive "requires enrolled client paths and WARPTWEET_TUNNEL_ID"
+        return 0
+    fi
+    if [ ! -x "$WT_CLIENT_CTRL" ]; then
+        record_result stop-restart-rotate-revoke-upgrade positive fail "client controller missing"
+        return 0
+    fi
+    # Partial lifecycle surface after a successful enroll in the same job.
+    # Restart and package upgrade checks are not implemented yet.
+    if ! "$WT_CLIENT_CTRL" status "$WT_TUNNEL" --json >"$WT_TMP/wt-status.json" 2>"$WT_TMP/wt-status.err"; then
+        record_result stop-restart-rotate-revoke-upgrade positive fail "status failed"
+        return 0
+    fi
+    if ! "$WT_CLIENT_CTRL" down "$WT_TUNNEL" >"$WT_TMP/wt-down.json" 2>"$WT_TMP/wt-down.err"; then
+        record_result stop-restart-rotate-revoke-upgrade positive fail "down failed"
+        return 0
+    fi
+    if ! "$WT_CLIENT_CTRL" rotate "$WT_TUNNEL" >"$WT_TMP/wt-rotate.json" 2>"$WT_TMP/wt-rotate.err"; then
+        record_result stop-restart-rotate-revoke-upgrade positive fail "rotate failed"
+        return 0
+    fi
+    if ! "$WT_CLIENT_CTRL" revoke "$WT_TUNNEL" >"$WT_TMP/wt-revoke.json" 2>"$WT_TMP/wt-revoke.err"; then
+        record_result stop-restart-rotate-revoke-upgrade positive fail "revoke failed"
+        return 0
+    fi
+    record_result stop-restart-rotate-revoke-upgrade positive not_run "down/rotate/revoke only; restart and package upgrade not implemented"
+}
+
 run_positive_pkg_signature_and_manifest
 run_positive_engine_identity_trust_preflight
-run_case_not_run invite-enroll-single-use positive "requires dual-host enrollment endpoint"
+run_positive_invite_enroll_single_use
 run_case_not_run composite-auth positive "requires dual-host tunnel"
 run_case_not_run exact-kex-aead positive "requires dual-host tunnel with algorithm observation"
 run_case_not_run rekey-same-profile positive "requires dual-host rekey observation"
 run_case_not_run pid-bound-readiness positive "requires dual-host ready gate"
 run_case_not_run deterministic-target-payload positive "requires dual-host payload transit"
-run_case_not_run stop-restart-rotate-revoke-upgrade positive "requires dual-host lifecycle matrix"
+run_positive_stop_restart_rotate_revoke_upgrade
 
 run_case_not_run classical-only-kex-host-client negative "requires dual-host negative peers"
 run_case_not_run wrong-host-pin negative "requires dual-host negative peers"
 run_case_not_run malformed-keys-messages negative "requires dual-host negative peers"
-run_case_not_run invite-fail-closed negative "requires dual-host invite negatives"
+run_negative_invite_fail_closed
 run_case_not_run forwarding-surface-rejected negative "requires dual-host forwarding negatives"
 run_case_not_run local-state-mutation negative "requires dual-host mutation harness"
 run_case_not_run engine-and-package-tamper negative "requires dual-host tamper harness"

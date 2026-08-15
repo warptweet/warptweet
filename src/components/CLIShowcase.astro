@@ -2,33 +2,26 @@
   <article class="terminal-card" aria-labelledby="server-cli-title">
     <header>
       <div aria-hidden="true"><i></i><i></i><i></i></div>
-      <span id="server-cli-title">Machine B · server</span>
+      <span id="server-cli-title">Machine with the service</span>
     </header>
-    <pre tabindex="0" aria-label="WarpTweet server command example"><code>{`$ warptweet server init \\
-    --listen 203.0.113.10:2222 \\
-    --target 127.0.0.1:5432
+    <pre tabindex="0" aria-label="WarpTweet gateway command example"><code>{`$ warptweet gateway --to 5432
 
-$ warptweet server invite \\
-    --target 127.0.0.1:5432 \\
-    --name studio-mac
-
-$ warptweet server status`}</code></pre>
+gateway ready
+target  127.0.0.1:5432
+invite  db-1.wtinvite`}</code></pre>
   </article>
 
   <article class="terminal-card terminal-card--client" aria-labelledby="client-cli-title">
     <header>
       <div aria-hidden="true"><i></i><i></i><i></i></div>
-      <span id="client-cli-title">Machine A · client</span>
+      <span id="client-cli-title">Your laptop</span>
     </header>
-    <pre tabindex="0" aria-label="WarpTweet client command example"><code>{`$ warptweet enroll invite.json \\
-    --proof server-proof.json
+    <pre tabindex="0" aria-label="WarpTweet connect command example"><code>{`$ warptweet connect db-1.wtinvite
 
-$ warptweet up database-primary
-$ warptweet status database-primary
+connected
+open     127.0.0.1:15432
+service  127.0.0.1:5432
 
-database-primary  Ready
-listen=127.0.0.1:15432
-
-$ warptweet down database-primary`}</code></pre>
+# point your app at localhost:15432`}</code></pre>
   </article>
 </div>
