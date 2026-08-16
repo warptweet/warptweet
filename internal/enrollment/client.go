@@ -8,26 +8,28 @@ import (
 	"time"
 
 	"warptweet.com/warptweet/internal/config"
+	"warptweet.com/warptweet/internal/grant"
 	"warptweet.com/warptweet/internal/profile"
 )
 
 // ClientView is the non-secret invite summary shown before enrollment.
 type ClientView struct {
-	InviteID                string `json:"invite_id"`
-	ClientName              string `json:"client_name"`
-	ServerAddress           string `json:"server_address"`
-	ServerPort              uint16 `json:"server_port"`
-	TargetAddress           string `json:"target_address"`
-	TargetPort              uint16 `json:"target_port"`
-	Principal               string `json:"principal"`
-	ProfileID               string `json:"profile_id"`
-	ArtifactProfileID       string `json:"artifact_profile_id"`
-	HostPublicKey           string `json:"host_public_key"`
-	EnrollmentTLSSPKISHA256 string `json:"enrollment_tls_spki_sha256"`
-	ExpiresAt               string `json:"expires_at"`
-	ListenAddress           string `json:"listen_address"`
-	ListenPort              uint16 `json:"listen_port"`
-	TunnelID                string `json:"tunnel_id"`
+	InviteID                     string `json:"invite_id"`
+	ClientName                   string `json:"client_name"`
+	ServerAddress                string `json:"server_address"`
+	ServerPort                   uint16 `json:"server_port"`
+	TargetAddress                string `json:"target_address"`
+	TargetPort                   uint16 `json:"target_port"`
+	Principal                    string `json:"principal"`
+	ProfileID                    string `json:"profile_id"`
+	ArtifactProfileID            string `json:"artifact_profile_id"`
+	HostPublicKey                string `json:"host_public_key"`
+	EnrollmentTLSSPKISHA256      string `json:"enrollment_tls_spki_sha256"`
+	ExpiresAt                    string `json:"expires_at"`
+	AuthorizationDurationSeconds int64  `json:"authorization_duration_seconds"`
+	ListenAddress                string `json:"listen_address"`
+	ListenPort                   uint16 `json:"listen_port"`
+	TunnelID                     string `json:"tunnel_id"`
 }
 
 // ParseClientInvite validates invite JSON shape before any network activity.
@@ -77,21 +79,22 @@ func ParseClientInvite(raw []byte, now time.Time) (Invite, ClientView, error) {
 		invite.EnrollPort = DefaultEnrollmentPort
 	}
 	view := ClientView{
-		InviteID:                invite.InviteID,
-		ClientName:              invite.ClientName,
-		ServerAddress:           invite.ServerAddress,
-		ServerPort:              invite.ServerPort,
-		TargetAddress:           invite.TargetAddress,
-		TargetPort:              invite.TargetPort,
-		Principal:               invite.Principal,
-		ProfileID:               invite.ProfileID,
-		ArtifactProfileID:       invite.ArtifactProfileID,
-		HostPublicKey:           invite.HostPublicKey,
-		EnrollmentTLSSPKISHA256: invite.EnrollmentTLSSPKISHA256,
-		ExpiresAt:               invite.ExpiresAt,
-		ListenAddress:           "127.0.0.1",
-		ListenPort:              15432,
-		TunnelID:                tunnelID,
+		InviteID:                     invite.InviteID,
+		ClientName:                   invite.ClientName,
+		ServerAddress:                invite.ServerAddress,
+		ServerPort:                   invite.ServerPort,
+		TargetAddress:                invite.TargetAddress,
+		TargetPort:                   invite.TargetPort,
+		Principal:                    invite.Principal,
+		ProfileID:                    invite.ProfileID,
+		ArtifactProfileID:            invite.ArtifactProfileID,
+		HostPublicKey:                invite.HostPublicKey,
+		EnrollmentTLSSPKISHA256:      invite.EnrollmentTLSSPKISHA256,
+		ExpiresAt:                    invite.ExpiresAt,
+		AuthorizationDurationSeconds: invite.AuthorizationDurationSeconds,
+		ListenAddress:                "127.0.0.1",
+		ListenPort:                   15432,
+		TunnelID:                     tunnelID,
 	}
 	return invite, view, nil
 }
@@ -169,17 +172,19 @@ type EnrollmentRequest struct {
 // The management capability is generated and retained by the client; the
 // server never returns or stores its raw value.
 type EnrollmentProof struct {
-	InviteID      string `json:"invite_id"`
-	ClientID      string `json:"client_id"`
-	HostPublicKey string `json:"host_public_key"`
-	PublicKey     string `json:"public_key"`
-	Target        string `json:"target"`
-	Principal     string `json:"principal"`
-	ProfileID     string `json:"profile_id"`
-	Nonce         string `json:"nonce"`
-	AcceptedAt    string `json:"accepted_at"`
-	ServerAddress string `json:"server_address,omitempty"`
-	EnrollPort    uint16 `json:"enroll_port,omitempty"`
+	InviteID                     string `json:"invite_id"`
+	ClientID                     string `json:"client_id"`
+	HostPublicKey                string `json:"host_public_key"`
+	PublicKey                    string `json:"public_key"`
+	Target                       string `json:"target"`
+	Principal                    string `json:"principal"`
+	ProfileID                    string `json:"profile_id"`
+	Nonce                        string `json:"nonce"`
+	AcceptedAt                   string `json:"accepted_at"`
+	AuthorizationNotAfter        string `json:"authorization_not_after"`
+	AuthorizationDurationSeconds int64  `json:"authorization_duration_seconds"`
+	ServerAddress                string `json:"server_address,omitempty"`
+	EnrollPort                   uint16 `json:"enroll_port,omitempty"`
 }
 
 // EncodeEnrollmentRequest returns canonical request JSON.
@@ -203,6 +208,25 @@ func ValidateEnrollmentProof(proof EnrollmentProof, invite Invite, publicKey str
 	}
 	if proof.ClientID == "" {
 		return fmt.Errorf("%w: enrollment proof missing client_id", ErrInvalidInvite)
+	}
+	if proof.AuthorizationDurationSeconds != invite.AuthorizationDurationSeconds {
+		return fmt.Errorf("%w: enrollment proof authorization duration mismatch", ErrInvalidInvite)
+	}
+	acceptedAt, err := grant.ParseUTC(proof.AcceptedAt)
+	if err != nil {
+		return fmt.Errorf("%w: enrollment proof accepted_at: %v", ErrInvalidInvite, err)
+	}
+	_, wantNotAfter, err := grant.AuthorizationNotAfter(acceptedAt, proof.AuthorizationDurationSeconds)
+	if err != nil {
+		return fmt.Errorf("%w: enrollment proof authorization_not_after: %v", ErrInvalidInvite, err)
+	}
+	gotNotAfter, err := grant.ParseUTC(proof.AuthorizationNotAfter)
+	if err != nil {
+		return fmt.Errorf("%w: enrollment proof authorization_not_after: %v", ErrInvalidInvite, err)
+	}
+	wantParsed, err := grant.ParseUTC(wantNotAfter)
+	if err != nil || !gotNotAfter.Equal(wantParsed) {
+		return fmt.Errorf("%w: enrollment proof authorization_not_after mismatch", ErrInvalidInvite)
 	}
 	return nil
 }

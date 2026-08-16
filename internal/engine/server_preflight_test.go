@@ -16,6 +16,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"warptweet.com/warptweet/internal/installlayout"
 	"warptweet.com/warptweet/internal/opensshsource"
@@ -907,7 +908,7 @@ func newServerPreflightFixture(t *testing.T) *serverPreflightFixture {
 	}
 	publicKeyBlob := serverTestPublicKeyBlob(selected, 0x42)
 	plainPublicKey := []byte(selected.AuthenticationKeyType + " " + publicKeyBlob + "\n")
-	authorizedKey, err := server.RenderAuthorizedKey(fixture.config, plainPublicKey)
+	authorizedKey, err := server.RenderAuthorizedKey(fixture.config, plainPublicKey, time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("server.RenderAuthorizedKey: %v", err)
 	}

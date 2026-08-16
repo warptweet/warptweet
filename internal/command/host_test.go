@@ -115,6 +115,28 @@ func TestHostRejectsMutuallyExclusiveFlags(t *testing.T) {
 	}
 }
 
+func TestHostRejectsAccessForAboveMaximum(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run(context.Background(), []string{"host", "--to", "5432", "--access-for", "400d"}, nil, &stdout, &stderr)
+	if code == 0 || !strings.Contains(stderr.String(), "exceeds host maximum") {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+}
+
+func TestHostRejectsTTLFlag(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run(context.Background(), []string{"host", "--to", "5432", "--ttl", "30d"}, nil, &stdout, &stderr)
+	if code == 0 || !strings.Contains(stderr.String(), "flag provided but not defined") {
+		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+}
+
 func TestHostRejectsEnrollmentReadinessBypass(t *testing.T) {
 	t.Parallel()
 

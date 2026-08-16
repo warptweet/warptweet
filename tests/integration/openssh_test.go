@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"warptweet.com/warptweet/internal/command"
 	"warptweet.com/warptweet/internal/engine"
@@ -73,11 +74,11 @@ func TestPinnedOpenSSHStagedCryptoAndRendering(t *testing.T) {
 		HostKeyPath:        installlayout.ServerHostKeyPath,
 		AuthorizedKeysPath: installlayout.AuthorizedKeysDirectory + "/" + server.DefaultDedicatedUser,
 	}
-	authorizedKey, err := server.RenderAuthorizedKey(serverManifest, clientPublicKey)
+	authorizedKey, err := server.RenderAuthorizedKey(serverManifest, clientPublicKey, time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatalf("render real authorized key: %v", err)
 	}
-	if !bytes.HasPrefix(authorizedKey, []byte("restrict,port-forwarding,permitopen=\"10.0.0.20:5432\" ")) ||
+	if !bytes.HasPrefix(authorizedKey, []byte("restrict,port-forwarding,permitopen=\"10.0.0.20:5432\",expiry-time=\"20260915120000Z\" ")) ||
 		!bytes.HasSuffix(authorizedKey, []byte(" warptweet-managed-client\n")) {
 		t.Fatalf("unexpected managed authorized key: %q", authorizedKey)
 	}
@@ -101,6 +102,7 @@ func TestPinnedOpenSSHStagedCryptoAndRendering(t *testing.T) {
 		"render-authorized-key",
 		"--config", serverManifestPath,
 		"--public-key", clientKeyPath+".pub",
+		"--not-after", "2026-09-15T12:00:00Z",
 	); !bytes.Equal(rendered, authorizedKey) {
 		t.Fatalf("CLI authorized key differs from renderer output")
 	}

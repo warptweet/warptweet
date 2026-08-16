@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"os/exec"
@@ -20,8 +21,10 @@ import (
 
 	"warptweet.com/warptweet/internal/config"
 	"warptweet.com/warptweet/internal/enrollment"
+	"warptweet.com/warptweet/internal/grant"
 	"warptweet.com/warptweet/internal/installlayout"
 	"warptweet.com/warptweet/internal/lifecycle"
+	"warptweet.com/warptweet/internal/routestate"
 )
 
 type Server struct {
@@ -215,10 +218,13 @@ func startTunnel(ctx context.Context, tunnelID string, once bool, serviceUID, se
 		job.loaded && job.pid == current.PID && processAlive(current.PID) {
 		return encodeOutput(map[string]any{"status": "already_ready", "tunnel_id": tunnelID, "pid": current.PID})
 	}
+	if err := persistDarwinDesiredState(tunnelID, routestate.DesiredRunning); err != nil {
+		return "", err
+	}
 	if err := ensureTunnelRuntime(tunnelID, serviceUID, serviceGID); err != nil {
 		return "", err
 	}
-	plistPath, label, err := writeTunnelPlist(tunnelID, once)
+	plistPath, label, err := writeTunnelPlist(tunnelID, once, desiredRunAtLoad(tunnelID))
 	if err != nil {
 		return "", err
 	}
@@ -282,6 +288,9 @@ func stopTunnel(ctx context.Context, tunnelID string) (string, error) {
 	if err := config.ValidateTunnelID(tunnelID); err != nil {
 		return "", err
 	}
+	if _, _, err := writeTunnelPlist(tunnelID, true, false); err != nil {
+		return "", err
+	}
 	label := installlayout.DarwinTunnelLabelPrefix + tunnelID
 	job, err := inspectTunnelJob(ctx, label)
 	if err != nil {
@@ -314,11 +323,14 @@ func stopTunnel(ctx context.Context, tunnelID string) (string, error) {
 		stopped.Generation = state.Generation
 	}
 	_ = store.Write(stopped)
+	if err := persistDarwinDesiredState(tunnelID, routestate.DesiredStopped); err != nil {
+		slog.Error("persist desired stopped state after tunnel stop", "tunnel_id", tunnelID, "err", err)
+	}
 	return encodeOutput(map[string]any{"status": "stopped", "tunnel_id": tunnelID, "phase": lifecycle.PhaseStopped})
 }
 
-func writeTunnelPlist(tunnelID string, once bool) (string, string, error) {
-	contents, label, err := renderTunnelPlist(tunnelID, once)
+func writeTunnelPlist(tunnelID string, once, runAtLoad bool) (string, string, error) {
+	contents, label, err := renderTunnelPlist(tunnelID, once, runAtLoad)
 	if err != nil {
 		return "", "", err
 	}
@@ -337,7 +349,63 @@ func writeTunnelPlist(tunnelID string, once bool) (string, string, error) {
 	return path, label, nil
 }
 
-func renderTunnelPlist(tunnelID string, once bool) ([]byte, string, error) {
+func persistDarwinDesiredState(tunnelID, desired string) error {
+	store := routestate.Store{Root: installlayout.DarwinClientRoutesDirectory}
+	exists, err := store.Exists(tunnelID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	intent, err := store.LoadIntent(tunnelID)
+	if err != nil {
+		intent = routestate.Intent{
+			Kind:          routestate.KindDesiredState,
+			SchemaVersion: routestate.CurrentSchemaVersion,
+			RouteID:       tunnelID,
+			RestartPolicy: routestate.RestartUnlessStopped,
+		}
+	}
+	intent.DesiredState = desired
+	if desired == routestate.DesiredRunning && intent.RestartPolicy == routestate.RestartManual {
+		intent.BootID = darwinBootID()
+	}
+	if desired == routestate.DesiredStopped {
+		intent.BootID = ""
+	}
+	return store.WriteIntent(intent)
+}
+
+func desiredRunAtLoad(tunnelID string) bool {
+	store := routestate.Store{Root: installlayout.DarwinClientRoutesDirectory}
+	receipt, err := store.LoadReceipt(tunnelID)
+	if err != nil {
+		return false
+	}
+	if receipt.RevokedAt != "" || receipt.AuthorizationNotAfter == "" {
+		return false
+	}
+	notAfter, err := grant.ParseUTC(receipt.AuthorizationNotAfter)
+	if err != nil || grant.ReadyToExpire(notAfter, time.Now().UTC()) {
+		return false
+	}
+	intent, err := store.LoadIntent(tunnelID)
+	if err != nil {
+		return false
+	}
+	return routestate.ShouldStartAtBoot(intent, darwinBootID())
+}
+
+func darwinBootID() string {
+	output, err := exec.Command("/usr/sbin/sysctl", "-n", "kern.boottime").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(output))
+}
+
+func renderTunnelPlist(tunnelID string, once, runAtLoad bool) ([]byte, string, error) {
 	if err := config.ValidateTunnelID(tunnelID); err != nil {
 		return nil, "", err
 	}
@@ -345,6 +413,10 @@ func renderTunnelPlist(tunnelID string, once bool) ([]byte, string, error) {
 	onceArgument := ""
 	if once {
 		onceArgument = "<string>--once</string>"
+	}
+	runAtLoadValue := "<false/>"
+	if runAtLoad {
+		runAtLoadValue = "<true/>"
 	}
 	contents := fmt.Sprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -355,11 +427,12 @@ func renderTunnelPlist(tunnelID string, once bool) ([]byte, string, error) {
 <string>--tunnel</string><string>%s</string>%s<string>--managed-lifecycle</string>
 </array>
 <key>UserName</key><string>%s</string><key>GroupName</key><string>%s</string>
-<key>RunAtLoad</key><true/><key>KeepAlive</key><false/>
+<key>RunAtLoad</key>%s<key>KeepAlive</key><false/>
 <key>ThrottleInterval</key><integer>5</integer><key>ProcessType</key><string>Background</string>
 </dict></plist>
 `, label, installlayout.DarwinControllerPath, installlayout.DarwinClientManifestPath,
-		tunnelID, onceArgument, installlayout.DarwinClientServiceUser, installlayout.DarwinClientServiceGroup)
+		tunnelID, onceArgument, installlayout.DarwinClientServiceUser, installlayout.DarwinClientServiceGroup,
+		runAtLoadValue)
 	return []byte(contents), label, nil
 }
 

@@ -78,6 +78,22 @@ func TestEnrollUnitUsesControllerEnrollmentListener(t *testing.T) {
 	}
 }
 
+func TestReconcileUnitUsesTypedController(t *testing.T) {
+	t.Parallel()
+
+	unit := readUnit(t, "warptweet-reconcile.service")
+	requireUnitLines(t, unit,
+		"Description=WarpTweet client route reconciler",
+		"AssertFileIsExecutable=/opt/warptweet/bin/warptweet",
+		"Type=oneshot",
+		"KillMode=process",
+		"ExecStart=/opt/warptweet/bin/warptweet reconcile",
+		"User=root",
+		"NoNewPrivileges=yes",
+		"ProtectSystem=strict",
+	)
+}
+
 func TestTunnelUnitUsesControllerContractWithoutAmbientPrivileges(t *testing.T) {
 	t.Parallel()
 

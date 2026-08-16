@@ -26,6 +26,7 @@ func TestRenderAuthorizedKeyCommandWritesDeterministicManagedLine(t *testing.T) 
 		"render-authorized-key",
 		"--config", manifestPath,
 		"--public-key", publicKeyPath,
+		"--not-after", "2026-09-15T12:00:00Z",
 	}, nil, &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
@@ -34,7 +35,7 @@ func TestRenderAuthorizedKeyCommandWritesDeterministicManagedLine(t *testing.T) 
 		t.Fatalf("unexpected stderr: %s", stderr.String())
 	}
 
-	want := "restrict,port-forwarding,permitopen=\"198.51.100.7:5432\" " +
+	want := "restrict,port-forwarding,permitopen=\"198.51.100.7:5432\",expiry-time=\"20260915120000Z\" " +
 		"ssh-mldsa44-ed25519@openssh.com " + blob + " warptweet-managed-client\n"
 	if stdout.String() != want {
 		t.Fatalf("unexpected stdout:\n--- got ---\n%s--- want ---\n%s", stdout.String(), want)
@@ -56,21 +57,21 @@ func TestRenderAuthorizedKeyCommandRejectsAmbiguousArguments(t *testing.T) {
 		{
 			name:      "missing both flags",
 			arguments: []string{"render-authorized-key"},
-			wantError: "requires --config and --public-key",
+			wantError: "requires --config, --public-key, and --not-after",
 		},
 		{
 			name: "missing public key",
 			arguments: []string{
 				"render-authorized-key", "--config", manifestPath,
 			},
-			wantError: "requires --config and --public-key",
+			wantError: "requires --config, --public-key, and --not-after",
 		},
 		{
 			name: "missing manifest",
 			arguments: []string{
 				"render-authorized-key", "--public-key", publicKeyPath,
 			},
-			wantError: "requires --config and --public-key",
+			wantError: "requires --config, --public-key, and --not-after",
 		},
 		{
 			name: "unexpected positional argument",
@@ -78,6 +79,7 @@ func TestRenderAuthorizedKeyCommandRejectsAmbiguousArguments(t *testing.T) {
 				"render-authorized-key",
 				"--config", manifestPath,
 				"--public-key", publicKeyPath,
+				"--not-after", "2026-09-15T12:00:00Z",
 				"extra",
 			},
 			wantError: "unexpected positional arguments",
@@ -173,6 +175,7 @@ func TestRenderAuthorizedKeyCommandBoundsAndValidatesPublicKeyFile(t *testing.T)
 				"render-authorized-key",
 				"--config", manifestPath,
 				"--public-key", test.path,
+				"--not-after", "2026-09-15T12:00:00Z",
 			}, nil, &stdout, &stderr)
 			if code != 1 {
 				t.Fatalf("code = %d, want 1; stderr = %s", code, stderr.String())
@@ -198,7 +201,7 @@ func TestUsageIncludesRenderAuthorizedKey(t *testing.T) {
 	}
 	if !strings.Contains(
 		stdout.String(),
-		"warptweet render-authorized-key --config <server.wt> --public-key <client.pub>",
+		"warptweet render-authorized-key --config <server.wt> --public-key <client.pub> --not-after <rfc3339>",
 	) {
 		t.Fatalf("usage omits render-authorized-key: %s", stdout.String())
 	}

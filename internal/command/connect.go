@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"strings"
+
+	"warptweet.com/warptweet/internal/routestate"
 )
 
 func runConnect(ctx context.Context, arguments []string, stdout, stderr io.Writer, dependencies commandDependencies) error {
@@ -14,9 +16,11 @@ func runConnect(ctx context.Context, arguments []string, stdout, stderr io.Write
 	yes := onceBoolFlag{name: "--yes"}
 	proofPath := onceStringFlag{name: "--proof"}
 	once := onceBoolFlag{name: "--once"}
+	restart := onceStringFlag{name: "--restart"}
 	flags.Var(&yes, "yes", "skip interactive confirmation")
 	flags.Var(&proofPath, "proof", "path to server enrollment proof JSON")
 	flags.Var(&once, "once", "do not restart after exit when bringing the tunnel up")
+	flags.Var(&restart, "restart", "durable restart policy: unless-stopped or manual")
 	positionals, err := parseFlagsAllowArgs(flags, arguments)
 	if err != nil {
 		return err
@@ -27,6 +31,11 @@ func runConnect(ctx context.Context, arguments []string, stdout, stderr io.Write
 	invitePath := positionals[0]
 	if strings.TrimSpace(invitePath) == "" {
 		return errors.New("connect requires exactly one invite file path")
+	}
+
+	restartPolicy, err := routestate.ParseRestartPolicy(restart.value)
+	if err != nil {
+		return err
 	}
 
 	enrollArgs := buildConnectEnrollArgs(invitePath, yes.value, proofPath.value)
@@ -41,11 +50,15 @@ func runConnect(ctx context.Context, arguments []string, stdout, stderr io.Write
 	if err != nil {
 		return err
 	}
+	if err := persistConnectDesiredState(tunnelID, restartPolicy); err != nil {
+		return fmt.Errorf("persist restart policy: %w", err)
+	}
 
 	upArgs := buildConnectUpArgs(tunnelID, once.value)
 	var upOut strings.Builder
 	if err := runUp(ctx, upArgs, &upOut, stderr, dependencies); err != nil {
-		return fmt.Errorf("enrolled as %s but up failed: %w", tunnelID, err)
+		fmt.Fprintf(stdout, "enrolled_not_ready\nopen     %s\ntunnel   %s\nerror    %v\n", listenEndpoint, tunnelID, err)
+		return fmt.Errorf("enrolled as %s but not ready: %w", tunnelID, err)
 	}
 
 	if serviceEndpoint != "" {

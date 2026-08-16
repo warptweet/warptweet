@@ -119,6 +119,73 @@ func TestRevokeInvite(t *testing.T) {
 	}
 }
 
+func TestCreateBindsAuthorizationDurationToMAC(t *testing.T) {
+	t.Parallel()
+
+	secret, err := GenerateSecret()
+	if err != nil {
+		t.Fatalf("GenerateSecret: %v", err)
+	}
+	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	invite, _, err := Create(CreateInput{
+		ClientName:                   "laptop-1",
+		ServerAddress:                netip.MustParseAddr("192.0.2.10"),
+		ServerPort:                   2222,
+		TargetAddress:                netip.MustParseAddr("198.51.100.20"),
+		TargetPort:                   5432,
+		Principal:                    "warptweet",
+		ProfileID:                    "profile-v1",
+		ArtifactProfileID:            "linux-amd64",
+		HostPublicKey:                "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256:      testEnrollmentTLSSPKIPin,
+		TTL:                          DefaultTTL,
+		AuthorizationDurationSeconds: 3600,
+		Now:                          now,
+		Secret:                       secret,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	if invite.SchemaVersion != 2 || invite.AuthorizationDurationSeconds != 3600 {
+		t.Fatalf("invite=%+v", invite)
+	}
+	raw, err := Encode(invite)
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	if _, err := ParseAndVerify(raw, secret, now.Add(time.Minute)); err != nil {
+		t.Fatalf("ParseAndVerify: %v", err)
+	}
+	tampered := []byte(strings.Replace(string(raw), `"authorization_duration_seconds":3600`, `"authorization_duration_seconds":7200`, 1))
+	if _, err := ParseAndVerify(tampered, secret, now.Add(time.Minute)); err == nil {
+		t.Fatal("ParseAndVerify accepted a duration that was not in the original MAC binding")
+	}
+}
+
+func TestCreateRejectsDurationAboveMaximum(t *testing.T) {
+	t.Parallel()
+
+	secret := make([]byte, InviteSecretBytes)
+	_, _, err := Create(CreateInput{
+		ClientName:                          "laptop-1",
+		ServerAddress:                       netip.MustParseAddr("192.0.2.10"),
+		ServerPort:                          2222,
+		TargetAddress:                       netip.MustParseAddr("198.51.100.20"),
+		TargetPort:                          5432,
+		Principal:                           "warptweet",
+		ProfileID:                           "profile",
+		ArtifactProfileID:                   "linux-amd64",
+		HostPublicKey:                       "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256:             testEnrollmentTLSSPKIPin,
+		AuthorizationDurationSeconds:        31536001,
+		MaximumAuthorizationDurationSeconds: 31536000,
+		Secret:                              secret,
+	})
+	if err == nil {
+		t.Fatal("Create accepted a duration above the host maximum")
+	}
+}
+
 func TestCreateRejectsUnsafeInputs(t *testing.T) {
 	t.Parallel()
 

@@ -10,11 +10,15 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"warptweet.com/warptweet/internal/grant"
 )
 
 const (
 	ClientStatusEnrollmentPending = "enrollment_pending"
 	ClientStatusActive            = "active"
+	ClientStatusExpirationPending = "expiration_pending"
+	ClientStatusExpired           = "expired"
 	ClientStatusRotationPending   = "rotation_pending"
 	ClientStatusRevocationPending = "revocation_pending"
 	ClientStatusRevoked           = "revoked"
@@ -26,17 +30,25 @@ const (
 // management capabilities are never stored here.
 type ClientRecord struct {
 	ClientID                      string `json:"client_id"`
+	GrantID                       string `json:"grant_id"`
 	TunnelID                      string `json:"tunnel_id"`
+	RouteID                       string `json:"route_id"`
 	InviteID                      string `json:"invite_id"`
 	PublicKey                     string `json:"public_key"`
 	PublicKeySHA256               string `json:"public_key_sha256"`
 	ManagementTokenSHA256         string `json:"management_token_sha256"`
 	Principal                     string `json:"principal"`
 	ProfileID                     string `json:"profile_id"`
+	ArtifactProfileID             string `json:"artifact_profile_id"`
 	ServerAddress                 string `json:"server_address"`
+	TargetAddress                 string `json:"target_address"`
+	TargetPort                    uint16 `json:"target_port"`
 	Status                        string `json:"status"`
 	AcceptedAt                    string `json:"accepted_at"`
+	AuthorizationNotAfter         string `json:"authorization_not_after"`
+	AuthorizationDurationSeconds  int64  `json:"authorization_duration_seconds"`
 	RevokedAt                     string `json:"revoked_at,omitempty"`
+	ExpiredAt                     string `json:"expired_at,omitempty"`
 	Generation                    string `json:"generation,omitempty"`
 	PreviousPublicKey             string `json:"previous_public_key,omitempty"`
 	PreviousManagementTokenSHA256 string `json:"previous_management_token_sha256,omitempty"`
@@ -177,7 +189,8 @@ func RevokeClient(directory string, request ManagementRequest, now time.Time, re
 		}
 		return record, nil
 	}
-	if record.Status != ClientStatusActive && record.Status != ClientStatusRevocationPending {
+	if record.Status != ClientStatusActive && record.Status != ClientStatusRevocationPending &&
+		record.Status != ClientStatusExpirationPending {
 		return ClientRecord{}, fmt.Errorf("%w: client status is %q", ErrInvalidInvite, record.Status)
 	}
 	if !managementTokenMatches(record.ManagementTokenSHA256, request.ManagementToken) {
@@ -254,6 +267,12 @@ func RotateClientPublicKey(directory string, request ManagementRequest, newPubli
 		}
 		return record, nil
 	}
+	if err := authorizationStillValid(record, now); err != nil {
+		return ClientRecord{}, err
+	}
+	if record.Status == ClientStatusExpired || record.Status == ClientStatusExpirationPending {
+		return ClientRecord{}, fmt.Errorf("%w: client status is %q", ErrInvalidInvite, record.Status)
+	}
 	if record.Status != ClientStatusActive && record.Status != ClientStatusRotationPending {
 		return ClientRecord{}, fmt.Errorf("%w: client status is %q", ErrInvalidInvite, record.Status)
 	}
@@ -292,6 +311,117 @@ func RotateClientPublicKey(directory string, request ManagementRequest, newPubli
 		return ClientRecord{}, err
 	}
 	return record, nil
+}
+
+// ExpireClient runs the host expiry transaction for one grant generation.
+func ExpireClient(directory string, clientID string, now time.Time, ops grant.ExpireOps) (ClientRecord, error) {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	if !isHexID(clientID) {
+		return ClientRecord{}, fmt.Errorf("%w: client_id is invalid", ErrInvalidInvite)
+	}
+	unlock, err := lockClient(directory, clientID)
+	if err != nil {
+		return ClientRecord{}, err
+	}
+	defer unlock()
+	record, err := LoadClient(directory, clientID)
+	if err != nil {
+		return ClientRecord{}, fmt.Errorf("%w: unknown client", ErrInvalidInvite)
+	}
+	if record.Status == ClientStatusExpired {
+		return record, nil
+	}
+	notAfter, err := grant.ParseUTC(record.AuthorizationNotAfter)
+	if err != nil {
+		return ClientRecord{}, fmt.Errorf("%w: authorization_not_after: %v", ErrInvalidInvite, err)
+	}
+	plan := grant.ExpirePlan{
+		ClientID:        record.ClientID,
+		Generation:      record.Generation,
+		PublicKey:       record.PublicKey,
+		PublicKeySHA256: record.PublicKeySHA256,
+		Status:          record.Status,
+		NotAfter:        notAfter,
+		Now:             now,
+	}
+	if err := grant.ValidateExpirePlan(plan); err != nil {
+		return ClientRecord{}, err
+	}
+	if record.Status == ClientStatusActive {
+		if err := grant.AuthorizeTransition(record.Status, ClientStatusExpirationPending); err != nil {
+			return ClientRecord{}, err
+		}
+		record.Status = ClientStatusExpirationPending
+		record.OperationStartedAt = now.Format(time.RFC3339Nano)
+		if err := writeJSONAtomic(clientPath(directory, record.ClientID), record, 0o600); err != nil {
+			return ClientRecord{}, err
+		}
+		plan.Status = record.Status
+	}
+	var burnedHash string
+	wrapped := ops
+	wrapped.BurnManagementToken = func() (string, error) {
+		hash, burnErr := ops.BurnManagementToken()
+		burnedHash = hash
+		return hash, burnErr
+	}
+	if err := grant.ExecuteExpire(plan, wrapped); err != nil {
+		return ClientRecord{}, err
+	}
+	if burnedHash != "" {
+		record.PreviousManagementTokenSHA256 = record.ManagementTokenSHA256
+		record.ManagementTokenSHA256 = burnedHash
+	}
+	record.Status = ClientStatusExpired
+	record.ExpiredAt = now.Format(time.RFC3339Nano)
+	record.OperationStartedAt = ""
+	if err := writeJSONAtomic(clientPath(directory, record.ClientID), record, 0o600); err != nil {
+		return ClientRecord{}, err
+	}
+	return record, nil
+}
+
+// ReconcileExpiredClients expires every due grant before the host reports ready.
+func ReconcileExpiredClients(directory string, now time.Time, opsFor func(ClientRecord) grant.ExpireOps) error {
+	records, err := ListClients(directory)
+	if err != nil {
+		return err
+	}
+	for _, record := range records {
+		if record.Status != ClientStatusActive && record.Status != ClientStatusExpirationPending {
+			continue
+		}
+		if record.AuthorizationNotAfter == "" {
+			continue
+		}
+		notAfter, err := grant.ParseUTC(record.AuthorizationNotAfter)
+		if err != nil {
+			return fmt.Errorf("client %s: %w", record.ClientID, err)
+		}
+		if record.Status != ClientStatusExpirationPending && !grant.ReadyToExpire(notAfter, now) {
+			continue
+		}
+		if _, err := ExpireClient(directory, record.ClientID, now, opsFor(record)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func authorizationStillValid(record ClientRecord, now time.Time) error {
+	if record.AuthorizationNotAfter == "" {
+		return fmt.Errorf("%w: grant has no host authorization expiry", ErrInvalidInvite)
+	}
+	notAfter, err := grant.ParseUTC(record.AuthorizationNotAfter)
+	if err != nil {
+		return fmt.Errorf("%w: authorization_not_after: %v", ErrInvalidInvite, err)
+	}
+	if grant.ReadyToExpire(notAfter, now) {
+		return fmt.Errorf("%w: authorization expired", ErrInvalidInvite)
+	}
+	return nil
 }
 
 func validateManagementRequestShape(request ManagementRequest) error {

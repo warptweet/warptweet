@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"warptweet.com/warptweet/internal/grant"
 	"warptweet.com/warptweet/internal/profile"
 )
 
@@ -33,7 +34,8 @@ type AcceptInput struct {
 	// InstallAuthorization must make the exact public key authorization
 	// durable and is required for the production acceptance path. It must be
 	// idempotent because Accept may call it again after an interrupted reply.
-	InstallAuthorization func(publicKey string) error
+	// notAfter is the host-computed authorization expiry.
+	InstallAuthorization func(publicKey string, notAfter time.Time) error
 }
 
 // AcceptResult is the durable, authorized enrollment outcome.
@@ -128,27 +130,50 @@ func Accept(input AcceptInput) (AcceptResult, error) {
 	}
 
 	acceptedAt := now.Format(time.RFC3339Nano)
+	authorizationSeconds := record.AuthorizationDurationSeconds
+	if authorizationSeconds == 0 {
+		return AcceptResult{}, fmt.Errorf("%w: invite missing authorization_duration_seconds", ErrInvalidInvite)
+	}
+	notAfter, notAfterEncoded, err := grant.AuthorizationNotAfter(now, authorizationSeconds)
+	if err != nil {
+		return AcceptResult{}, fmt.Errorf("%w: %v", ErrInvalidInvite, err)
+	}
 	serverAddress := firstNonEmpty(input.ServerAddress, record.ServerAddress)
 	if input.ClientsDirectory != "" {
 		wantClient := ClientRecord{
-			ClientID:              clientID,
-			TunnelID:              input.Request.TunnelID,
-			InviteID:              record.InviteID,
-			PublicKey:             publicKey,
-			PublicKeySHA256:       PublicKeyDigest(publicKey),
-			ManagementTokenSHA256: HashManagementToken(input.Request.ManagementToken),
-			Principal:             record.Principal,
-			ProfileID:             record.ProfileID,
-			ServerAddress:         serverAddress,
-			Status:                ClientStatusEnrollmentPending,
-			AcceptedAt:            acceptedAt,
-			Generation:            now.Format("20060102T150405Z"),
+			ClientID:                     clientID,
+			GrantID:                      grantIDFor(record.InviteID, publicKey),
+			TunnelID:                     input.Request.TunnelID,
+			RouteID:                      input.Request.TunnelID,
+			InviteID:                     record.InviteID,
+			PublicKey:                    publicKey,
+			PublicKeySHA256:              PublicKeyDigest(publicKey),
+			ManagementTokenSHA256:        HashManagementToken(input.Request.ManagementToken),
+			Principal:                    record.Principal,
+			ProfileID:                    record.ProfileID,
+			ArtifactProfileID:            record.ArtifactProfileID,
+			ServerAddress:                serverAddress,
+			TargetAddress:                record.TargetAddress,
+			TargetPort:                   record.TargetPort,
+			Status:                       ClientStatusEnrollmentPending,
+			AcceptedAt:                   acceptedAt,
+			AuthorizationNotAfter:        notAfterEncoded,
+			AuthorizationDurationSeconds: authorizationSeconds,
+			Generation:                   now.Format("20060102T150405Z"),
 		}
 		client, err := storeOrResumePendingClient(input.ClientsDirectory, wantClient)
 		if err != nil {
 			return AcceptResult{}, err
 		}
-		if err := input.InstallAuthorization(publicKey); err != nil {
+		acceptedAt = client.AcceptedAt
+		notAfterEncoded = client.AuthorizationNotAfter
+		authorizationSeconds = client.AuthorizationDurationSeconds
+		storedNotAfter, parseErr := grant.ParseUTC(client.AuthorizationNotAfter)
+		if parseErr != nil {
+			return AcceptResult{}, fmt.Errorf("%w: stored authorization_not_after: %v", ErrInvalidInvite, parseErr)
+		}
+		notAfter = storedNotAfter
+		if err := input.InstallAuthorization(publicKey, notAfter); err != nil {
 			return AcceptResult{}, fmt.Errorf("install client authorization: %w", err)
 		}
 		if client.Status == ClientStatusEnrollmentPending {
@@ -157,8 +182,7 @@ func Accept(input AcceptInput) (AcceptResult, error) {
 				return AcceptResult{}, err
 			}
 		}
-		acceptedAt = client.AcceptedAt
-	} else if err := input.InstallAuthorization(publicKey); err != nil {
+	} else if err := input.InstallAuthorization(publicKey, notAfter); err != nil {
 		return AcceptResult{}, fmt.Errorf("install client authorization: %w", err)
 	}
 
@@ -172,17 +196,19 @@ func Accept(input AcceptInput) (AcceptResult, error) {
 		enrollPort = DefaultEnrollmentPort
 	}
 	proof := EnrollmentProof{
-		InviteID:      consumed.InviteID,
-		ClientID:      clientID,
-		HostPublicKey: consumed.HostPublicKey,
-		PublicKey:     publicKey,
-		Target:        fmt.Sprintf("%s:%d", consumed.TargetAddress, consumed.TargetPort),
-		Principal:     consumed.Principal,
-		ProfileID:     consumed.ProfileID,
-		Nonce:         consumed.Nonce,
-		AcceptedAt:    acceptedAt,
-		ServerAddress: serverAddress,
-		EnrollPort:    enrollPort,
+		InviteID:                     consumed.InviteID,
+		ClientID:                     clientID,
+		HostPublicKey:                consumed.HostPublicKey,
+		PublicKey:                    publicKey,
+		Target:                       fmt.Sprintf("%s:%d", consumed.TargetAddress, consumed.TargetPort),
+		Principal:                    consumed.Principal,
+		ProfileID:                    consumed.ProfileID,
+		Nonce:                        consumed.Nonce,
+		AcceptedAt:                   acceptedAt,
+		AuthorizationNotAfter:        notAfterEncoded,
+		AuthorizationDurationSeconds: authorizationSeconds,
+		ServerAddress:                serverAddress,
+		EnrollPort:                   enrollPort,
 	}
 	return AcceptResult{
 		Proof:     proof,
@@ -210,7 +236,11 @@ func resumeAcceptedEnrollment(input AcceptInput, invite Record, clientID, public
 	if input.InstallAuthorization == nil {
 		return AcceptResult{}, errors.New("enrollment authorization installer is required")
 	}
-	if err := input.InstallAuthorization(publicKey); err != nil {
+	notAfter, err := grant.ParseUTC(client.AuthorizationNotAfter)
+	if err != nil {
+		return AcceptResult{}, fmt.Errorf("%w: stored authorization_not_after: %v", ErrInvalidInvite, err)
+	}
+	if err := input.InstallAuthorization(publicKey, notAfter); err != nil {
 		return AcceptResult{}, fmt.Errorf("reconcile client authorization: %w", err)
 	}
 	return acceptedResult(input, invite, client, publicKey), nil
@@ -232,7 +262,10 @@ func storeOrResumePendingClient(directory string, want ClientRecord) (ClientReco
 		existing.ManagementTokenSHA256 != want.ManagementTokenSHA256 ||
 		existing.Principal != want.Principal ||
 		existing.ProfileID != want.ProfileID ||
-		existing.ServerAddress != want.ServerAddress {
+		existing.ServerAddress != want.ServerAddress ||
+		existing.AuthorizationDurationSeconds != want.AuthorizationDurationSeconds ||
+		existing.TargetAddress != want.TargetAddress ||
+		existing.TargetPort != want.TargetPort {
 		return ClientRecord{}, fmt.Errorf("%w: conflicting client enrollment state", ErrInvalidInvite)
 	}
 	return existing, nil
@@ -244,17 +277,19 @@ func acceptedResult(input AcceptInput, invite Record, client ClientRecord, publi
 		enrollPort = DefaultEnrollmentPort
 	}
 	proof := EnrollmentProof{
-		InviteID:      invite.InviteID,
-		ClientID:      client.ClientID,
-		HostPublicKey: invite.HostPublicKey,
-		PublicKey:     publicKey,
-		Target:        fmt.Sprintf("%s:%d", invite.TargetAddress, invite.TargetPort),
-		Principal:     invite.Principal,
-		ProfileID:     invite.ProfileID,
-		Nonce:         invite.Nonce,
-		AcceptedAt:    client.AcceptedAt,
-		ServerAddress: firstNonEmpty(input.ServerAddress, invite.ServerAddress),
-		EnrollPort:    enrollPort,
+		InviteID:                     invite.InviteID,
+		ClientID:                     client.ClientID,
+		HostPublicKey:                invite.HostPublicKey,
+		PublicKey:                    publicKey,
+		Target:                       fmt.Sprintf("%s:%d", invite.TargetAddress, invite.TargetPort),
+		Principal:                    invite.Principal,
+		ProfileID:                    invite.ProfileID,
+		Nonce:                        invite.Nonce,
+		AcceptedAt:                   client.AcceptedAt,
+		AuthorizationNotAfter:        client.AuthorizationNotAfter,
+		AuthorizationDurationSeconds: client.AuthorizationDurationSeconds,
+		ServerAddress:                firstNonEmpty(input.ServerAddress, invite.ServerAddress),
+		EnrollPort:                   enrollPort,
 	}
 	return AcceptResult{Proof: proof, PublicKey: publicKey, Invite: invite.Invite, ClientID: client.ClientID}
 }
@@ -338,6 +373,11 @@ func validatePublicKeyLine(publicKey string) error {
 
 func clientIDFor(inviteID, publicKey string) string {
 	sum := sha256.Sum256([]byte(inviteID + "\x00" + strings.TrimSpace(publicKey)))
+	return hex.EncodeToString(sum[:16])
+}
+
+func grantIDFor(inviteID, publicKey string) string {
+	sum := sha256.Sum256([]byte(inviteID + "\x01" + strings.TrimSpace(publicKey)))
 	return hex.EncodeToString(sum[:16])
 }
 

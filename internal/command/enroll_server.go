@@ -13,11 +13,15 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"warptweet.com/warptweet/internal/enrollment"
+	"warptweet.com/warptweet/internal/grant"
 	"warptweet.com/warptweet/internal/installlayout"
 	"warptweet.com/warptweet/internal/profile"
 	"warptweet.com/warptweet/internal/server"
@@ -40,6 +44,13 @@ func runServerEnrollListen(ctx context.Context, arguments []string, stdout, stde
 	manifest, err := server.Load(installlayout.ServerManifestPath)
 	if err != nil {
 		return err
+	}
+	now := time.Now().UTC()
+	if _, err := grant.ObserveClock(installlayout.HostClockObservationPath, now); err != nil {
+		return fmt.Errorf("host clock: %w", err)
+	}
+	if err := reconcileExpiredGrants(manifest, now); err != nil {
+		return fmt.Errorf("reconcile expired grants: %w", err)
 	}
 	if err := reconcileManagedAuthorizations(manifest); err != nil {
 		return fmt.Errorf("reconcile managed authorizations: %w", err)
@@ -95,6 +106,8 @@ func runServerEnrollListen(ctx context.Context, arguments []string, stdout, stde
 	if abs, err := enrollment.EnrollmentURL(listenEndpoint.Addr().String(), listenEndpoint.Port()); err == nil {
 		fmt.Fprintf(stdout, "url      %s\n", abs)
 	}
+
+	go reconcileGrantsUntil(ctx, manifest)
 
 	select {
 	case <-ctx.Done():
@@ -199,7 +212,15 @@ func newEnrollmentHandler(manifest server.Config, hostPublicKey string, enrollPo
 			if manage.NewPublicKey == "" {
 				return nil, fmt.Errorf("%w: new_public_key is required", enrollment.ErrInvalidInvite)
 			}
-			line, err := server.RenderAuthorizedKey(manifest, []byte(manage.NewPublicKey))
+			existing, err := enrollment.LoadClient(installlayout.ClientsDirectory, manage.ClientID)
+			if err != nil {
+				return nil, err
+			}
+			notAfter, err := grant.ParseUTC(existing.AuthorizationNotAfter)
+			if err != nil {
+				return nil, fmt.Errorf("%w: %v", enrollment.ErrInvalidInvite, err)
+			}
+			line, err := server.RenderAuthorizedKey(manifest, []byte(manage.NewPublicKey), notAfter)
 			if err != nil {
 				return nil, fmt.Errorf("%w: %v", enrollment.ErrInvalidInvite, err)
 			}
@@ -216,17 +237,19 @@ func newEnrollmentHandler(manifest server.Config, hostPublicKey string, enrollPo
 				return nil, err
 			}
 			return enrollment.EnrollmentProof{
-				InviteID:      record.InviteID,
-				ClientID:      record.ClientID,
-				HostPublicKey: hostPublicKey,
-				PublicKey:     record.PublicKey,
-				Target:        fmt.Sprintf("%s:%d", manifest.Target.Address, manifest.Target.Port),
-				Principal:     record.Principal,
-				ProfileID:     record.ProfileID,
-				Nonce:         "",
-				AcceptedAt:    time.Now().UTC().Format(time.RFC3339Nano),
-				ServerAddress: record.ServerAddress,
-				EnrollPort:    enrollPort,
+				InviteID:                     record.InviteID,
+				ClientID:                     record.ClientID,
+				HostPublicKey:                hostPublicKey,
+				PublicKey:                    record.PublicKey,
+				Target:                       fmt.Sprintf("%s:%d", manifest.Target.Address, manifest.Target.Port),
+				Principal:                    record.Principal,
+				ProfileID:                    record.ProfileID,
+				Nonce:                        "",
+				AcceptedAt:                   record.AcceptedAt,
+				AuthorizationNotAfter:        record.AuthorizationNotAfter,
+				AuthorizationDurationSeconds: record.AuthorizationDurationSeconds,
+				ServerAddress:                record.ServerAddress,
+				EnrollPort:                   enrollPort,
 			}, nil
 		})
 	})
@@ -406,8 +429,8 @@ func acceptAndAuthorize(
 		TargetPort:       uint16(manifest.Target.Port),
 		ServerAddress:    manifest.Listen.Address.String(),
 		Now:              now,
-		InstallAuthorization: func(publicKey string) error {
-			line, err := server.RenderAuthorizedKey(manifest, []byte(publicKey))
+		InstallAuthorization: func(publicKey string, notAfter time.Time) error {
+			line, err := server.RenderAuthorizedKey(manifest, []byte(publicKey), notAfter)
 			if err != nil {
 				return fmt.Errorf("%w: %v", enrollment.ErrInvalidInvite, err)
 			}
@@ -418,6 +441,227 @@ func acceptAndAuthorize(
 		return enrollment.EnrollmentProof{}, err
 	}
 	return result.Proof, nil
+}
+
+func reconcileExpiredGrants(manifest server.Config, now time.Time) error {
+	return enrollment.ReconcileExpiredClients(installlayout.ClientsDirectory, now, func(record enrollment.ClientRecord) grant.ExpireOps {
+		return grantExpireOps(manifest, record)
+	})
+}
+
+func grantExpireOps(manifest server.Config, record enrollment.ClientRecord) grant.ExpireOps {
+	return grant.ExpireOps{
+		RemoveAuthorization: func(publicKey string) error {
+			return removeAuthorizedKeyForPublicKey(manifest.AuthorizedKeysPath, publicKey)
+		},
+		VerifyAuthorizationGone: func(publicKey string) error {
+			return verifyAuthorizedKeyAbsent(manifest.AuthorizedKeysPath, publicKey)
+		},
+		TerminateSession: func(clientID, generation, publicKeySHA256 string) error {
+			return terminateGrantSession(clientID, generation, publicKeySHA256)
+		},
+		VerifySessionGone: func(clientID, generation, publicKeySHA256 string) error {
+			return verifyGrantSessionGone(clientID, generation, publicKeySHA256)
+		},
+		BurnManagementToken: func() (string, error) {
+			token, err := enrollment.GenerateManagementToken()
+			if err != nil {
+				return "", err
+			}
+			return enrollment.HashManagementToken(token), nil
+		},
+	}
+}
+
+func verifyAuthorizedKeyAbsent(path, publicKey string) error {
+	lines, err := readAuthorizedKeyLines(path)
+	if err != nil {
+		return err
+	}
+	blob := authorizedKeyBlob(publicKey)
+	if blob == "" {
+		return fmt.Errorf("authorized key is unparsable; cannot prove absence")
+	}
+	for _, existing := range lines {
+		if authorizedKeyBlob(existing) == blob {
+			return fmt.Errorf("authorized key for grant is still present")
+		}
+	}
+	return nil
+}
+
+func reconcileGrantsUntil(ctx context.Context, manifest server.Config) {
+	records, _ := enrollment.ListClients(installlayout.ClientsDirectory)
+	timer := time.NewTimer(nextGrantReconcileDelay(time.Now().UTC(), records))
+	defer timer.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-timer.C:
+			now := time.Now().UTC()
+			records, listErr := enrollment.ListClients(installlayout.ClientsDirectory)
+			if _, err := grant.ObserveClock(installlayout.HostClockObservationPath, now); err != nil {
+				slog.Error("host clock invalid during grant reconcile", "err", err)
+			} else if err := reconcileExpiredGrants(manifest, now); err != nil {
+				slog.Error("grant expiry reconcile failed", "err", err)
+			} else if err := reconcileManagedAuthorizations(manifest); err != nil {
+				slog.Error("authorization reconcile failed", "err", err)
+			}
+			if listErr != nil {
+				records = nil
+			}
+			timer.Reset(nextGrantReconcileDelay(now, records))
+		}
+	}
+}
+
+func nextGrantReconcileDelay(now time.Time, records []enrollment.ClientRecord) time.Duration {
+	const maximum = time.Minute
+	if records == nil {
+		return maximum
+	}
+	delay := maximum
+	for _, record := range records {
+		if record.Status != enrollment.ClientStatusActive && record.Status != enrollment.ClientStatusExpirationPending {
+			continue
+		}
+		if record.AuthorizationNotAfter == "" {
+			continue
+		}
+		notAfter, err := grant.ParseUTC(record.AuthorizationNotAfter)
+		if err != nil || !notAfter.After(now) {
+			return time.Second
+		}
+		remaining := notAfter.Sub(now)
+		if remaining < delay {
+			delay = remaining
+		}
+	}
+	if delay < time.Second {
+		return time.Second
+	}
+	return delay
+}
+
+func terminateGrantSession(clientID, generation, publicKeySHA256 string) error {
+	store := grantSessionStore{root: installlayout.GrantSessionsDirectory}
+	refs, err := store.lookup(clientID, generation, publicKeySHA256)
+	if err != nil {
+		return err
+	}
+	for _, ref := range refs {
+		if ref.PID <= 0 {
+			continue
+		}
+		err := signalPID(ref.PID, syscall.SIGTERM)
+		if err != nil && !processAlivePID(ref.PID) {
+			continue
+		}
+		deadline := time.Now().Add(2 * time.Second)
+		for time.Now().Before(deadline) && processAlivePID(ref.PID) {
+			time.Sleep(20 * time.Millisecond)
+		}
+		if processAlivePID(ref.PID) {
+			_ = signalPID(ref.PID, syscall.SIGKILL)
+		}
+	}
+	return nil
+}
+
+func verifyGrantSessionGone(clientID, generation, publicKeySHA256 string) error {
+	store := grantSessionStore{root: installlayout.GrantSessionsDirectory}
+	refs, err := store.lookup(clientID, generation, publicKeySHA256)
+	if err != nil {
+		return err
+	}
+	for _, ref := range refs {
+		if processAlivePID(ref.PID) {
+			return fmt.Errorf("session pid %d for client %s generation %s is still running", ref.PID, clientID, generation)
+		}
+	}
+	live, err := liveDataPlaneSessionCount()
+	if err != nil {
+		return fmt.Errorf("cannot prove session termination: %w", err)
+	}
+	if len(refs) == 0 && live > 0 {
+		return fmt.Errorf("matching session ownership is unknown while %d data-plane session(s) remain", live)
+	}
+	return store.clear(clientID, generation, publicKeySHA256)
+}
+
+func signalPID(pid int, signal syscall.Signal) error {
+	if pid <= 0 {
+		return nil
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return err
+	}
+	return process.Signal(signal)
+}
+
+func processAlivePID(pid int) bool {
+	if pid <= 0 {
+		return false
+	}
+	process, err := os.FindProcess(pid)
+	if err != nil {
+		return false
+	}
+	return process.Signal(syscall.Signal(0)) == nil
+}
+
+func liveDataPlaneSessionCount() (int, error) {
+	if runtime.GOOS != "linux" {
+		return 0, fmt.Errorf("data-plane session inspection requires Linux")
+	}
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return 0, err
+	}
+	sshdPIDs := make(map[int]int)
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pid, err := strconv.Atoi(entry.Name())
+		if err != nil || pid <= 0 {
+			continue
+		}
+		exe, err := os.Readlink(filepath.Join("/proc", entry.Name(), "exe"))
+		if err != nil || exe != installlayout.SSHDPath {
+			continue
+		}
+		ppid, err := linuxPPID(pid)
+		if err != nil {
+			return 0, err
+		}
+		sshdPIDs[pid] = ppid
+	}
+	sessions := 0
+	for _, ppid := range sshdPIDs {
+		if _, parentIsSSHD := sshdPIDs[ppid]; parentIsSSHD {
+			sessions++
+		}
+	}
+	return sessions, nil
+}
+
+func linuxPPID(pid int) (int, error) {
+	contents, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+	if err != nil {
+		return 0, err
+	}
+	closeParen := strings.LastIndexByte(string(contents), ')')
+	if closeParen < 0 || closeParen+1 >= len(contents) {
+		return 0, fmt.Errorf("parse /proc/%d/stat", pid)
+	}
+	fields := strings.Fields(string(contents[closeParen+1:]))
+	if len(fields) < 2 {
+		return 0, fmt.Errorf("parse /proc/%d/stat ppid", pid)
+	}
+	return strconv.Atoi(fields[1])
 }
 
 func reconcileManagedAuthorizations(manifest server.Config) error {
@@ -431,7 +675,17 @@ func reconcileManagedAuthorizations(manifest server.Config) error {
 		for _, record := range records {
 			switch record.Status {
 			case enrollment.ClientStatusActive, enrollment.ClientStatusRotationPending:
-				line, err := server.RenderAuthorizedKey(manifest, []byte(record.PublicKey))
+				if record.AuthorizationNotAfter == "" {
+					continue
+				}
+				notAfter, err := grant.ParseUTC(record.AuthorizationNotAfter)
+				if err != nil {
+					return fmt.Errorf("client %s: %w", record.ClientID, err)
+				}
+				if grant.ReadyToExpire(notAfter, time.Now().UTC()) {
+					continue
+				}
+				line, err := server.RenderAuthorizedKey(manifest, []byte(record.PublicKey), notAfter)
 				if err != nil {
 					return fmt.Errorf("client %s: %w", record.ClientID, err)
 				}
@@ -443,6 +697,8 @@ func reconcileManagedAuthorizations(manifest server.Config) error {
 				seen[blob] = struct{}{}
 				lines = append(lines, entry)
 			case enrollment.ClientStatusEnrollmentPending,
+				enrollment.ClientStatusExpirationPending,
+				enrollment.ClientStatusExpired,
 				enrollment.ClientStatusRevocationPending,
 				enrollment.ClientStatusRevoked:
 				// These states are deliberately unauthorized during recovery.

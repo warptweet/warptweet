@@ -8,9 +8,14 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
+	"time"
 
 	"warptweet.com/warptweet/internal/profile"
 )
+
+func testAuthorizationExpiry() time.Time {
+	return time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC)
+}
 
 func TestRenderAuthorizedKeyAddsExactManagedRestrictions(t *testing.T) {
 	t.Parallel()
@@ -26,11 +31,11 @@ func TestRenderAuthorizedKeyAddsExactManagedRestrictions(t *testing.T) {
 	)
 	input := selectedProfile.AuthenticationKeyType + " " + blob + " discarded input comment\n"
 
-	got, err := RenderAuthorizedKey(validConfig(), []byte(input))
+	got, err := RenderAuthorizedKey(validConfig(), []byte(input), testAuthorizationExpiry())
 	if err != nil {
 		t.Fatalf("RenderAuthorizedKey: %v", err)
 	}
-	want := "restrict,port-forwarding,permitopen=\"198.51.100.7:5432\" " +
+	want := "restrict,port-forwarding,permitopen=\"198.51.100.7:5432\",expiry-time=\"20260915120000Z\" " +
 		selectedProfile.AuthenticationKeyType + " " + blob + " " + ManagedClientMarker + "\n"
 	if string(got) != want {
 		t.Fatalf("unexpected authorized key:\n--- got ---\n%s--- want ---\n%s", got, want)
@@ -42,6 +47,7 @@ func TestRenderAuthorizedKeyAddsExactManagedRestrictions(t *testing.T) {
 	withoutComment, err := RenderAuthorizedKey(
 		validConfig(),
 		[]byte(selectedProfile.AuthenticationKeyType+" "+blob),
+		testAuthorizationExpiry(),
 	)
 	if err != nil {
 		t.Fatalf("RenderAuthorizedKey without comment: %v", err)
@@ -76,13 +82,14 @@ func TestRenderAuthorizedKeyFormatsIPv6PermitOpen(t *testing.T) {
 	got, err := RenderAuthorizedKey(
 		config,
 		[]byte(selectedProfile.AuthenticationKeyType+" "+blob+"\r\n"),
+		testAuthorizationExpiry(),
 	)
 	if err != nil {
 		t.Fatalf("RenderAuthorizedKey: %v", err)
 	}
 	if !strings.HasPrefix(
 		string(got),
-		"restrict,port-forwarding,permitopen=\"[2001:db8::20]:443\" ",
+		"restrict,port-forwarding,permitopen=\"[2001:db8::20]:443\",expiry-time=\"20260915120000Z\" ",
 	) {
 		t.Fatalf("authorized key has wrong IPv6 restriction: %s", got)
 	}
@@ -103,7 +110,7 @@ func TestRenderAuthorizedKeyRejectsInvalidConfig(t *testing.T) {
 		nil,
 	)
 
-	_, err = RenderAuthorizedKey(config, []byte(input))
+	_, err = RenderAuthorizedKey(config, []byte(input), testAuthorizationExpiry())
 	if err == nil {
 		t.Fatal("RenderAuthorizedKey accepted an invalid server policy")
 	}
@@ -190,7 +197,7 @@ func TestRenderAuthorizedKeyRejectsUnsafeKeyInput(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := RenderAuthorizedKey(validConfig(), test.input)
+			_, err := RenderAuthorizedKey(validConfig(), test.input, testAuthorizationExpiry())
 			if err == nil {
 				t.Fatal("RenderAuthorizedKey accepted unsafe input")
 			}
@@ -216,6 +223,7 @@ func TestValidateAuthorizedKeysRejectsNoncanonicalOrUnsafeInput(t *testing.T) {
 	valid, err := RenderAuthorizedKey(
 		validConfig(),
 		[]byte(selectedProfile.AuthenticationKeyType+" "+validBlob),
+		testAuthorizationExpiry(),
 	)
 	if err != nil {
 		t.Fatalf("RenderAuthorizedKey: %v", err)
@@ -345,17 +353,32 @@ func TestValidateAuthorizedKeysAcceptsEmptyAndMultipleDistinctClients(t *testing
 	}
 	secondRaw[len(secondRaw)-1] = 1
 	secondBlob := base64.StdEncoding.EncodeToString(secondRaw)
-	first, err := RenderAuthorizedKey(config, []byte(selected.AuthenticationKeyType+" "+firstBlob))
+	first, err := RenderAuthorizedKey(config, []byte(selected.AuthenticationKeyType+" "+firstBlob), testAuthorizationExpiry())
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := RenderAuthorizedKey(config, []byte(selected.AuthenticationKeyType+" "+secondBlob))
+	second, err := RenderAuthorizedKey(config, []byte(selected.AuthenticationKeyType+" "+secondBlob), testAuthorizationExpiry())
 	if err != nil {
 		t.Fatal(err)
 	}
 	report, err := ValidateAuthorizedKeys(config, append(first, second...))
 	if err != nil || report.KeyCount != 2 {
 		t.Fatalf("multiple clients: report=%+v err=%v", report, err)
+	}
+}
+
+func TestValidateAuthorizedKeysRejectsLegacyPrefixWithoutExpiry(t *testing.T) {
+	t.Parallel()
+
+	selected, err := profile.Lookup(profile.CurrentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blob := authorizedKeyBlob(selected.AuthenticationKeyType, selected.RawPublicKeyBytes, nil)
+	legacy := []byte("restrict,port-forwarding,permitopen=\"198.51.100.7:5432\" " +
+		selected.AuthenticationKeyType + " " + blob + " " + ManagedClientMarker + "\n")
+	if _, err := ValidateAuthorizedKeys(validConfig(), legacy); err == nil {
+		t.Fatal("ValidateAuthorizedKeys accepted a managed key without expiry-time")
 	}
 }
 

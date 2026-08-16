@@ -107,12 +107,12 @@ func TestStatusAndDownWithoutState(t *testing.T) {
 		}
 		return
 	}
-	var state lifecycle.State
-	if err := json.Unmarshal(stdout.Bytes(), &state); err != nil {
+	var payload map[string]any
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
 		t.Fatalf("decode: %v (%s)", err, stdout.String())
 	}
-	if state.Phase != lifecycle.PhaseStopped || state.TargetHealth != lifecycle.TargetHealthNotChecked {
-		t.Fatalf("state=%+v", state)
+	if payload["phase"] != string(lifecycle.PhaseStopped) || payload["target_health"] != lifecycle.TargetHealthNotChecked {
+		t.Fatalf("state=%+v", payload)
 	}
 }
 

@@ -5,8 +5,9 @@ package installlayout
 
 const (
 	ControllerPath              = "/opt/warptweet/bin/warptweet"
-	ClientManifestPath          = "/etc/warptweet/client.wt"
-	ClientIdentityDirectory     = "/etc/warptweet/identity"
+	ClientStateRoot             = "/etc/warptweet"
+	ClientManifestPath          = ClientStateRoot + "/client.wt"
+	ClientIdentityDirectory     = ClientStateRoot + "/identity"
 	ClientIdentityPath          = ClientIdentityDirectory + "/client"
 	ClientTrustDirectory        = "/etc/warptweet/trust"
 	ClientKnownHostsPath        = ClientTrustDirectory + "/known_hosts"
@@ -28,6 +29,10 @@ const (
 	ServerEnrollmentTLSKeyPath  = ServerEnrollmentDirectory + "/tls.key"
 	AuthorizedKeysDirectory     = "/opt/warptweet/etc/authorized_keys"
 	ClientsDirectory            = "/var/lib/warptweet/clients"
+	HostAuthorizationPolicyPath = "/etc/warptweet/host-authorization.json"
+	HostClockObservationPath    = "/var/lib/warptweet/clock-observation.json"
+	GrantSessionsDirectory      = "/var/lib/warptweet/sessions"
+	ClientRoutesDirectory       = "/etc/warptweet/routes"
 	OpenSSHSourceReceiptPath    = "/opt/warptweet/share/openssh-source.txt"
 	OpenSSLSourceReceiptPath    = "/opt/warptweet/share/openssl-source.txt"
 	OpenSSHLicensePath          = "/opt/warptweet/share/licenses/openssh/LICENCE"

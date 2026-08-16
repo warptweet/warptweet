@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"net/netip"
 	"strings"
+	"time"
 
+	"warptweet.com/warptweet/internal/grant"
 	"warptweet.com/warptweet/internal/sshwire"
 )
 
@@ -36,7 +38,7 @@ type AuthorizedKeysReport struct {
 // RenderAuthorizedKey validates one plain public-key line and adds the
 // defense-in-depth restrictions that bind it to Config.Target. Any input
 // comment is intentionally replaced with WarpTweet's stable managed marker.
-func RenderAuthorizedKey(config Config, publicKey []byte) ([]byte, error) {
+func RenderAuthorizedKey(config Config, publicKey []byte, notAfter time.Time) ([]byte, error) {
 	if len(publicKey) == 0 {
 		return nil, invalidAuthorizedKey("input is empty")
 	}
@@ -76,7 +78,7 @@ func RenderAuthorizedKey(config Config, publicKey []byte) ([]byte, error) {
 		return nil, invalidAuthorizedKey("validate public-key blob: %v", err)
 	}
 
-	return renderManagedAuthorizedKey(config, selectedProfile.AuthenticationKeyType, fields[1]), nil
+	return renderManagedAuthorizedKey(config, selectedProfile.AuthenticationKeyType, fields[1], notAfter)
 }
 
 // ValidateAuthorizedKeys requires zero or more byte-for-byte canonical,
@@ -102,7 +104,6 @@ func ValidateAuthorizedKeys(config Config, contents []byte) (AuthorizedKeysRepor
 			"authorized_keys entry must end with exactly one LF",
 		)
 	}
-	prefix := managedAuthorizedKeyPrefix(config, selectedProfile.AuthenticationKeyType)
 	suffix := " " + ManagedClientMarker
 	lines := bytes.Split(contents[:len(contents)-1], []byte{'\n'})
 	seen := make(map[string]struct{}, len(lines))
@@ -116,10 +117,13 @@ func ValidateAuthorizedKeys(config Config, contents []byte) (AuthorizedKeysRepor
 			}
 		}
 		text := string(line)
-		if !strings.HasPrefix(text, prefix) || !strings.HasSuffix(text, suffix) {
+		if !strings.HasSuffix(text, suffix) {
 			return AuthorizedKeysReport{}, invalidAuthorizedKey("authorized_keys line %d does not match the canonical managed format", lineIndex+1)
 		}
-		blob := strings.TrimSuffix(strings.TrimPrefix(text, prefix), suffix)
+		notAfter, blob, err := parseManagedAuthorizedKey(config, selectedProfile.AuthenticationKeyType, text)
+		if err != nil {
+			return AuthorizedKeysReport{}, invalidAuthorizedKey("authorized_keys line %d %v", lineIndex+1, err)
+		}
 		if blob == "" || strings.ContainsAny(blob, " \t") {
 			return AuthorizedKeysReport{}, invalidAuthorizedKey("authorized_keys line %d contains an invalid public-key blob field", lineIndex+1)
 		}
@@ -130,7 +134,10 @@ func ValidateAuthorizedKeys(config Config, contents []byte) (AuthorizedKeysRepor
 		if err := sshwire.ValidatePublicKeyBlob(blob, selectedProfile.AuthenticationKeyType, selectedProfile.RawPublicKeyBytes); err != nil {
 			return AuthorizedKeysReport{}, invalidAuthorizedKey("validate authorized_keys line %d public-key blob: %v", lineIndex+1, err)
 		}
-		canonical := renderManagedAuthorizedKey(config, selectedProfile.AuthenticationKeyType, blob)
+		canonical, err := renderManagedAuthorizedKey(config, selectedProfile.AuthenticationKeyType, blob, notAfter)
+		if err != nil {
+			return AuthorizedKeysReport{}, invalidAuthorizedKey("authorized_keys line %d %v", lineIndex+1, err)
+		}
 		if len(canonical) == 0 || canonical[len(canonical)-1] != '\n' || !bytes.Equal(line, canonical[:len(canonical)-1]) {
 			return AuthorizedKeysReport{}, invalidAuthorizedKey("authorized_keys line %d is not byte-for-byte canonical", lineIndex+1)
 		}
@@ -138,20 +145,76 @@ func ValidateAuthorizedKeys(config Config, contents []byte) (AuthorizedKeysRepor
 	return AuthorizedKeysReport{KeyCount: len(lines)}, nil
 }
 
-func renderManagedAuthorizedKey(config Config, algorithm, blob string) []byte {
-	return []byte(managedAuthorizedKeyPrefix(config, algorithm) + blob + " " + ManagedClientMarker + "\n")
+func renderManagedAuthorizedKey(config Config, algorithm, blob string, notAfter time.Time) ([]byte, error) {
+	prefix, err := managedAuthorizedKeyPrefix(config, algorithm, notAfter)
+	if err != nil {
+		return nil, err
+	}
+	return []byte(prefix + blob + " " + ManagedClientMarker + "\n"), nil
 }
 
-func managedAuthorizedKeyPrefix(config Config, algorithm string) string {
+func managedAuthorizedKeyPrefix(config Config, algorithm string, notAfter time.Time) (string, error) {
+	if notAfter.IsZero() {
+		return "", invalidAuthorizedKey("authorization expiry is required")
+	}
+	expiry, err := grant.OpenSSHExpiryTime(notAfter)
+	if err != nil {
+		return "", invalidAuthorizedKey("authorization expiry: %v", err)
+	}
 	target := netip.AddrPortFrom(
 		canonicalAddress(config.Target.Address),
 		uint16(config.Target.Port),
 	).String()
 	return fmt.Sprintf(
-		"restrict,port-forwarding,permitopen=\"%s\" %s ",
+		"restrict,port-forwarding,permitopen=\"%s\",expiry-time=\"%s\" %s ",
 		target,
+		expiry,
 		algorithm,
-	)
+	), nil
+}
+
+func parseManagedAuthorizedKey(config Config, algorithm, text string) (time.Time, string, error) {
+	fields := strings.Fields(text)
+	if len(fields) < 3 {
+		return time.Time{}, "", fmt.Errorf("does not match the canonical managed format")
+	}
+	options := fields[0]
+	if fields[1] != algorithm {
+		return time.Time{}, "", fmt.Errorf("does not match the required key type")
+	}
+	if !strings.HasPrefix(options, "restrict,port-forwarding,permitopen=\"") {
+		return time.Time{}, "", fmt.Errorf("does not match the canonical managed format")
+	}
+	remainder := strings.TrimPrefix(options, "restrict,port-forwarding,permitopen=\"")
+	wantTarget := netip.AddrPortFrom(
+		canonicalAddress(config.Target.Address),
+		uint16(config.Target.Port),
+	).String()
+	blob := fields[2]
+	if len(fields) > 3 && strings.Join(fields[3:], " ") != ManagedClientMarker {
+		return time.Time{}, "", fmt.Errorf("does not match the canonical managed format")
+	}
+	targetEnd := strings.Index(remainder, "\",expiry-time=\"")
+	if targetEnd < 0 {
+		return time.Time{}, "", fmt.Errorf("authorization expiry-time is required")
+	}
+	target := remainder[:targetEnd]
+	if target != wantTarget {
+		return time.Time{}, "", fmt.Errorf("permitopen target does not match the server policy")
+	}
+	expiryAndRest := remainder[targetEnd+len("\",expiry-time=\""):]
+	if !strings.HasSuffix(expiryAndRest, "\"") {
+		return time.Time{}, "", fmt.Errorf("expiry-time is not quoted")
+	}
+	expiry := strings.TrimSuffix(expiryAndRest, "\"")
+	if !strings.HasSuffix(expiry, "Z") || len(expiry) != 15 {
+		return time.Time{}, "", fmt.Errorf("expiry-time must be YYYYMMDDHHMMSSZ")
+	}
+	notAfter, err := time.Parse("20060102150405Z", expiry)
+	if err != nil {
+		return time.Time{}, "", fmt.Errorf("expiry-time is not a UTC timestamp")
+	}
+	return notAfter.UTC(), blob, nil
 }
 
 func onePublicKeyLine(input []byte) ([]byte, error) {

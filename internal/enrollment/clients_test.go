@@ -63,7 +63,7 @@ func TestAcceptStoresClientAndRevokeBurnsToken(t *testing.T) {
 		TargetPort:           invite.TargetPort,
 		ServerAddress:        invite.ServerAddress,
 		Now:                  now.Add(time.Minute),
-		InstallAuthorization: func(string) error { return nil },
+		InstallAuthorization: func(string, time.Time) error { return nil },
 	})
 	if err != nil {
 		t.Fatalf("Accept: %v", err)
@@ -164,7 +164,7 @@ func TestRotateClientIssuesNewToken(t *testing.T) {
 		TargetAddress:        invite.TargetAddress,
 		TargetPort:           invite.TargetPort,
 		Now:                  now.Add(time.Minute),
-		InstallAuthorization: func(string) error { return nil },
+		InstallAuthorization: func(string, time.Time) error { return nil },
 	})
 	if err != nil {
 		t.Fatalf("Accept: %v", err)
@@ -215,6 +215,75 @@ func TestRotateClientIssuesNewToken(t *testing.T) {
 		NextManagementToken: testNextManagementToken,
 	}, firstKey, now.Add(4*time.Minute), func(string, string) error { return nil }); err == nil {
 		t.Fatal("old management token still accepted")
+	}
+}
+
+func TestRotateClientRejectsHostExpiredGrant(t *testing.T) {
+	t.Parallel()
+
+	secret, err := GenerateSecret()
+	if err != nil {
+		t.Fatalf("GenerateSecret: %v", err)
+	}
+	now := time.Date(2026, 8, 14, 21, 0, 0, 0, time.UTC)
+	invite, record, err := Create(CreateInput{
+		ClientName:                   "studio-mac",
+		ServerAddress:                netip.MustParseAddr("192.0.2.10"),
+		ServerPort:                   2222,
+		TargetAddress:                netip.MustParseAddr("198.51.100.20"),
+		TargetPort:                   5432,
+		Principal:                    "warptweet",
+		ProfileID:                    profile.CurrentID,
+		ArtifactProfileID:            "linux-amd64",
+		HostPublicKey:                "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256:      testEnrollmentTLSSPKIPin,
+		AuthorizationDurationSeconds: 3600,
+		Now:                          now,
+		Secret:                       secret,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	invites := t.TempDir()
+	clients := t.TempDir()
+	if err := Store(invites, record); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	result, err := Accept(AcceptInput{
+		Directory:        invites,
+		ClientsDirectory: clients,
+		Request: EnrollmentRequest{
+			InviteID:        invite.InviteID,
+			Nonce:           invite.Nonce,
+			ClientName:      invite.ClientName,
+			PublicKey:       testCompositePublicKey(),
+			ProfileID:       profile.CurrentID,
+			TunnelID:        "studio-mac",
+			ListenAddress:   "127.0.0.1",
+			ListenPort:      15432,
+			ManagementToken: testManagementToken,
+		},
+		HostPublicKey:        invite.HostPublicKey,
+		Principal:            invite.Principal,
+		ProfileID:            profile.CurrentID,
+		TargetAddress:        invite.TargetAddress,
+		TargetPort:           invite.TargetPort,
+		Now:                  now.Add(time.Minute),
+		InstallAuthorization: func(string, time.Time) error { return nil },
+	})
+	if err != nil {
+		t.Fatalf("Accept: %v", err)
+	}
+	if _, err := RotateClientPublicKey(clients, ManagementRequest{
+		ClientID:            result.ClientID,
+		ManagementToken:     testManagementToken,
+		TunnelID:            "studio-mac",
+		NextManagementToken: testNextManagementToken,
+	}, testCompositePublicKeyRotated(), now.Add(2*time.Hour), func(string, string) error {
+		t.Fatal("replaced authorization after host expiry")
+		return nil
+	}); err == nil {
+		t.Fatal("RotateClientPublicKey accepted a host-expired grant")
 	}
 }
 

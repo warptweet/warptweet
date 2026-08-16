@@ -20,6 +20,7 @@ import (
 	"warptweet.com/warptweet/internal/artifactprofile"
 	"warptweet.com/warptweet/internal/config"
 	"warptweet.com/warptweet/internal/engine"
+	"warptweet.com/warptweet/internal/grant"
 	"warptweet.com/warptweet/internal/knownhosts"
 	"warptweet.com/warptweet/internal/lifecycle"
 	"warptweet.com/warptweet/internal/profile"
@@ -131,10 +132,14 @@ func runWithDependencies(
 		err = runEnroll(ctx, arguments[1:], stdout, stderr)
 	case "up":
 		err = runUp(ctx, arguments[1:], stdout, stderr, dependencies)
+	case "routes":
+		err = runRoutes(arguments[1:], stdout, stderr)
 	case "status":
 		err = runStatus(arguments[1:], stdout, stderr)
 	case "down":
 		err = runDown(arguments[1:], stdout, stderr)
+	case "reconcile":
+		err = runReconcile(ctx, arguments[1:], stdout, stderr, dependencies)
 	case "rotate":
 		err = runRotate(ctx, arguments[1:], stdout, stderr)
 	case "revoke":
@@ -302,13 +307,15 @@ func runRenderAuthorizedKey(arguments []string, stdout, stderr io.Writer) error 
 	flags := newFlagSet("render-authorized-key", stderr)
 	manifestPath := onceStringFlag{name: "--config"}
 	publicKeyPath := onceStringFlag{name: "--public-key"}
+	notAfter := onceStringFlag{name: "--not-after"}
 	flags.Var(&manifestPath, "config", "path to a server-gateway .wt manifest")
 	flags.Var(&publicKeyPath, "public-key", "path to one plain client public-key line")
+	flags.Var(&notAfter, "not-after", "RFC 3339 UTC authorization expiry")
 	if err := parseFlags(flags, arguments); err != nil {
 		return err
 	}
-	if manifestPath.value == "" || publicKeyPath.value == "" {
-		return errors.New("render-authorized-key requires --config and --public-key")
+	if manifestPath.value == "" || publicKeyPath.value == "" || notAfter.value == "" {
+		return errors.New("render-authorized-key requires --config, --public-key, and --not-after")
 	}
 
 	manifest, err := server.Load(manifestPath.value)
@@ -319,7 +326,11 @@ func runRenderAuthorizedKey(arguments []string, stdout, stderr io.Writer) error 
 	if err != nil {
 		return err
 	}
-	contents, err := server.RenderAuthorizedKey(manifest, publicKey)
+	expiry, err := grant.ParseUTC(notAfter.value)
+	if err != nil {
+		return fmt.Errorf("not-after: %w", err)
+	}
+	contents, err := server.RenderAuthorizedKey(manifest, publicKey, expiry)
 	if err != nil {
 		return err
 	}
@@ -484,6 +495,9 @@ func runDoctorServer(ctx context.Context, arguments []string, stdout, stderr io.
 	manifest, err := server.Load(manifestPath.value)
 	if err != nil {
 		return err
+	}
+	if err := reconcileManagedAuthorizations(manifest); err != nil {
+		return fmt.Errorf("reconcile managed authorizations: %w", err)
 	}
 	report, err := engine.PreflightServer(ctx, manifest)
 	if err != nil {
@@ -962,21 +976,23 @@ func writeUsage(writer io.Writer) {
 	_, _ = io.WriteString(writer, `WarpTweet: open-source fail-closed post-quantum TCP tunneling
 
 Usage:
-  warptweet host --to <port|ip:port> [--name <label>] [--out path] [--stdout] [--listen ip:port] [--no-invite] [--json]
-  warptweet connect <invite.wtinvite> [--yes] [--proof <proof.json>] [--once]
+  warptweet host --to <port|ip:port> [--name <label>] [--access-for 30d] [--out path] [--stdout] [--listen ip:port] [--no-invite] [--json]
+  warptweet connect <invite.wtinvite> [--yes] [--restart unless-stopped|manual] [--proof <proof.json>]
   warptweet profile
   warptweet validate --config <manifest.wt>
   warptweet render-client --config <client.wt> --tunnel <id>
   warptweet render-server --config <server.wt>
-  warptweet render-authorized-key --config <server.wt> --public-key <client.pub>
+  warptweet render-authorized-key --config <server.wt> --public-key <client.pub> --not-after <rfc3339>
   warptweet render-known-host --config <client.wt> --tunnel <id> --public-key <host.pub>
   warptweet doctor --config <client.wt> --tunnel <id>
   warptweet doctor-server --config <server.wt>
   warptweet run --config <client.wt> --tunnel <id> [--once]
   warptweet enroll <invite.wtinvite> [--yes] [--prepare-only] [--proof <proof.json>]
-  warptweet up <tunnel-id> [--once]
-  warptweet status [<tunnel-id>] [--json]
-  warptweet down <tunnel-id>
+  warptweet routes [--json]
+  warptweet up <route-id>
+  warptweet status [<route-id>] [--json]
+  warptweet down <route-id>
+  warptweet reconcile
   warptweet rotate <tunnel-id>
   warptweet revoke <tunnel-id>
   warptweet uninstall --preserve-identity

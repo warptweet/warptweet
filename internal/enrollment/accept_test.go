@@ -71,7 +71,7 @@ func TestAcceptResumesPendingAuthorizationWithoutBurningInvite(t *testing.T) {
 		TargetPort:       invite.TargetPort,
 		ServerAddress:    invite.ServerAddress,
 		Now:              now.Add(time.Minute),
-		InstallAuthorization: func(string) error {
+		InstallAuthorization: func(string, time.Time) error {
 			return errors.New("injected authorization failure")
 		},
 	}
@@ -95,7 +95,7 @@ func TestAcceptResumesPendingAuthorizationWithoutBurningInvite(t *testing.T) {
 	}
 
 	installCalls := 0
-	input.InstallAuthorization = func(got string) error {
+	input.InstallAuthorization = func(got string, _ time.Time) error {
 		installCalls++
 		if got != request.PublicKey {
 			t.Fatalf("authorization key mismatch")
@@ -203,7 +203,7 @@ func TestAcceptConsumesInviteOnce(t *testing.T) {
 		TargetAddress: invite.TargetAddress,
 		TargetPort:    invite.TargetPort,
 		Now:           now.Add(time.Minute),
-		InstallAuthorization: func(string) error {
+		InstallAuthorization: func(string, time.Time) error {
 			return nil
 		},
 	})
@@ -222,7 +222,7 @@ func TestAcceptConsumesInviteOnce(t *testing.T) {
 		TargetAddress: invite.TargetAddress,
 		TargetPort:    invite.TargetPort,
 		Now:           now.Add(2 * time.Minute),
-		InstallAuthorization: func(string) error {
+		InstallAuthorization: func(string, time.Time) error {
 			return nil
 		},
 	}); err == nil {
@@ -279,7 +279,7 @@ func TestAcceptRejectsNonceMismatch(t *testing.T) {
 		TargetAddress: invite.TargetAddress,
 		TargetPort:    invite.TargetPort,
 		Now:           now.Add(time.Minute),
-		InstallAuthorization: func(string) error {
+		InstallAuthorization: func(string, time.Time) error {
 			return nil
 		},
 	}); err == nil {
@@ -343,7 +343,7 @@ func TestEnrollmentHTTPHandlerAcceptsValidRequest(t *testing.T) {
 			http.Error(writer, err.Error(), http.StatusBadRequest)
 			return
 		}
-		line, err := server.RenderAuthorizedKey(manifest, []byte(enrollRequest.PublicKey))
+		line, err := server.RenderAuthorizedKey(manifest, []byte(enrollRequest.PublicKey), time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC))
 		if err != nil {
 			http.Error(writer, err.Error(), http.StatusBadRequest)
 			return
@@ -357,7 +357,7 @@ func TestEnrollmentHTTPHandlerAcceptsValidRequest(t *testing.T) {
 			TargetAddress: invite.TargetAddress,
 			TargetPort:    invite.TargetPort,
 			Now:           time.Now().UTC(),
-			InstallAuthorization: func(string) error {
+			InstallAuthorization: func(string, time.Time) error {
 				return os.WriteFile(authPath, line, 0o600)
 			},
 		})

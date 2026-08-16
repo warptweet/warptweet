@@ -73,7 +73,7 @@ func TestSubmitEnrollmentRotateRevokeRoundTrip(t *testing.T) {
 			http.Error(writer, err.Error(), http.StatusBadRequest)
 			return
 		}
-		line, err := server.RenderAuthorizedKey(manifest, []byte(manage.NewPublicKey))
+		line, err := server.RenderAuthorizedKey(manifest, []byte(manage.NewPublicKey), time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC))
 		if err != nil {
 			http.Error(writer, err.Error(), http.StatusBadRequest)
 			return
@@ -297,7 +297,7 @@ func newTestEnrollHandler(
 			http.Error(writer, err.Error(), http.StatusBadRequest)
 			return
 		}
-		line, err := server.RenderAuthorizedKey(manifest, []byte(request.PublicKey))
+		line, err := server.RenderAuthorizedKey(manifest, []byte(request.PublicKey), time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC))
 		if err != nil {
 			http.Error(writer, err.Error(), http.StatusBadRequest)
 			return
@@ -313,7 +313,7 @@ func newTestEnrollHandler(
 			TargetPort:       invite.TargetPort,
 			ServerAddress:    "127.0.0.1",
 			Now:              time.Now().UTC(),
-			InstallAuthorization: func(string) error {
+			InstallAuthorization: func(string, time.Time) error {
 				if authPath == "" {
 					return nil
 				}

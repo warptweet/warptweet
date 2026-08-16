@@ -66,11 +66,11 @@ func TestDecodeSingleJSONRejectsUnknownTrailingAndOversizedInput(t *testing.T) {
 func TestRenderTunnelPlistIsClosedAndDeterministic(t *testing.T) {
 	t.Parallel()
 
-	first, label, err := renderTunnelPlist("db-1", false)
+	first, label, err := renderTunnelPlist("db-1", false, true)
 	if err != nil {
 		t.Fatalf("renderTunnelPlist: %v", err)
 	}
-	second, secondLabel, err := renderTunnelPlist("db-1", false)
+	second, secondLabel, err := renderTunnelPlist("db-1", false, true)
 	if err != nil {
 		t.Fatalf("renderTunnelPlist repeat: %v", err)
 	}
@@ -92,14 +92,14 @@ func TestRenderTunnelPlistIsClosedAndDeterministic(t *testing.T) {
 	if strings.Contains(text, "--once") {
 		t.Fatal("default managed plist unexpectedly disables bounded in-process restart")
 	}
-	once, _, err := renderTunnelPlist("db-1", true)
+	once, _, err := renderTunnelPlist("db-1", true, true)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if strings.Count(string(once), "<string>--once</string>") != 1 {
 		t.Fatal("once plist does not contain exactly one --once argument")
 	}
-	if _, _, err := renderTunnelPlist(`db</string>`, false); err == nil {
+	if _, _, err := renderTunnelPlist(`db</string>`, false, true); err == nil {
 		t.Fatal("plist renderer accepted XML injection")
 	}
 }

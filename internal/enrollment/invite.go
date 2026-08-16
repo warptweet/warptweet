@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"warptweet.com/warptweet/internal/grant"
 	"warptweet.com/warptweet/internal/strictjson"
 )
 
@@ -26,7 +27,7 @@ const (
 	// KindInvite is the invite document kind.
 	KindInvite = "warptweet.invite"
 	// CurrentSchemaVersion is the only supported invite schema.
-	CurrentSchemaVersion = 1
+	CurrentSchemaVersion = 2
 	// DefaultTTL is the maximum invite lifetime.
 	DefaultTTL = 15 * time.Minute
 	// MaxInviteBytes bounds invite JSON.
@@ -43,24 +44,25 @@ var ErrInvalidInvite = errors.New("invalid WarpTweet invite")
 // Invite is the canonical signed enrollment authorization carried to a client.
 // It contains no private-key material.
 type Invite struct {
-	Kind                    string `json:"kind"`
-	SchemaVersion           int    `json:"schema_version"`
-	InviteID                string `json:"invite_id"`
-	ClientName              string `json:"client_name"`
-	ServerAddress           string `json:"server_address"`
-	ServerPort              uint16 `json:"server_port"`
-	EnrollPort              uint16 `json:"enroll_port"`
-	TargetAddress           string `json:"target_address"`
-	TargetPort              uint16 `json:"target_port"`
-	Principal               string `json:"principal"`
-	ProfileID               string `json:"profile_id"`
-	ArtifactProfileID       string `json:"artifact_profile_id"`
-	HostPublicKey           string `json:"host_public_key"`
-	EnrollmentTLSSPKISHA256 string `json:"enrollment_tls_spki_sha256"`
-	IssuedAt                string `json:"issued_at"`
-	ExpiresAt               string `json:"expires_at"`
-	Nonce                   string `json:"nonce"`
-	MAC                     string `json:"mac"`
+	Kind                         string `json:"kind"`
+	SchemaVersion                int    `json:"schema_version"`
+	InviteID                     string `json:"invite_id"`
+	ClientName                   string `json:"client_name"`
+	ServerAddress                string `json:"server_address"`
+	ServerPort                   uint16 `json:"server_port"`
+	EnrollPort                   uint16 `json:"enroll_port"`
+	TargetAddress                string `json:"target_address"`
+	TargetPort                   uint16 `json:"target_port"`
+	Principal                    string `json:"principal"`
+	ProfileID                    string `json:"profile_id"`
+	ArtifactProfileID            string `json:"artifact_profile_id"`
+	HostPublicKey                string `json:"host_public_key"`
+	EnrollmentTLSSPKISHA256      string `json:"enrollment_tls_spki_sha256"`
+	IssuedAt                     string `json:"issued_at"`
+	ExpiresAt                    string `json:"expires_at"`
+	AuthorizationDurationSeconds int64  `json:"authorization_duration_seconds"`
+	Nonce                        string `json:"nonce"`
+	MAC                          string `json:"mac"`
 }
 
 // Record is durable server-side invite state.
@@ -81,20 +83,22 @@ const (
 
 // CreateInput is the operator-facing invite request.
 type CreateInput struct {
-	ClientName              string
-	ServerAddress           netip.Addr
-	ServerPort              uint16
-	EnrollPort              uint16
-	TargetAddress           netip.Addr
-	TargetPort              uint16
-	Principal               string
-	ProfileID               string
-	ArtifactProfileID       string
-	HostPublicKey           string
-	EnrollmentTLSSPKISHA256 string
-	TTL                     time.Duration
-	Now                     time.Time
-	Secret                  []byte
+	ClientName                          string
+	ServerAddress                       netip.Addr
+	ServerPort                          uint16
+	EnrollPort                          uint16
+	TargetAddress                       netip.Addr
+	TargetPort                          uint16
+	Principal                           string
+	ProfileID                           string
+	ArtifactProfileID                   string
+	HostPublicKey                       string
+	EnrollmentTLSSPKISHA256             string
+	TTL                                 time.Duration
+	AuthorizationDurationSeconds        int64
+	MaximumAuthorizationDurationSeconds int64
+	Now                                 time.Time
+	Secret                              []byte
 }
 
 // Create builds one single-use invite and its durable record.
@@ -108,6 +112,14 @@ func Create(input CreateInput) (Invite, Record, error) {
 	}
 	if ttl > DefaultTTL {
 		return Invite{}, Record{}, fmt.Errorf("%w: ttl exceeds %s", ErrInvalidInvite, DefaultTTL)
+	}
+	policy := grant.InstalledDefault()
+	if input.MaximumAuthorizationDurationSeconds != 0 {
+		policy.MaximumAuthorizationDurationSeconds = input.MaximumAuthorizationDurationSeconds
+	}
+	authorizationSeconds, err := grant.ResolveDuration(policy, input.AuthorizationDurationSeconds)
+	if err != nil {
+		return Invite{}, Record{}, fmt.Errorf("%w: %v", ErrInvalidInvite, err)
 	}
 	now := input.Now.UTC()
 	if now.IsZero() {
@@ -127,23 +139,24 @@ func Create(input CreateInput) (Invite, Record, error) {
 		enrollPort = DefaultEnrollmentPort
 	}
 	invite := Invite{
-		Kind:                    KindInvite,
-		SchemaVersion:           CurrentSchemaVersion,
-		InviteID:                hex.EncodeToString(inviteID),
-		ClientName:              input.ClientName,
-		ServerAddress:           input.ServerAddress.String(),
-		ServerPort:              input.ServerPort,
-		EnrollPort:              enrollPort,
-		TargetAddress:           input.TargetAddress.String(),
-		TargetPort:              input.TargetPort,
-		Principal:               input.Principal,
-		ProfileID:               input.ProfileID,
-		ArtifactProfileID:       input.ArtifactProfileID,
-		HostPublicKey:           strings.TrimSpace(input.HostPublicKey),
-		EnrollmentTLSSPKISHA256: strings.TrimSpace(input.EnrollmentTLSSPKISHA256),
-		IssuedAt:                now.Format(time.RFC3339Nano),
-		ExpiresAt:               now.Add(ttl).Format(time.RFC3339Nano),
-		Nonce:                   hex.EncodeToString(nonce),
+		Kind:                         KindInvite,
+		SchemaVersion:                CurrentSchemaVersion,
+		InviteID:                     hex.EncodeToString(inviteID),
+		ClientName:                   input.ClientName,
+		ServerAddress:                input.ServerAddress.String(),
+		ServerPort:                   input.ServerPort,
+		EnrollPort:                   enrollPort,
+		TargetAddress:                input.TargetAddress.String(),
+		TargetPort:                   input.TargetPort,
+		Principal:                    input.Principal,
+		ProfileID:                    input.ProfileID,
+		ArtifactProfileID:            input.ArtifactProfileID,
+		HostPublicKey:                strings.TrimSpace(input.HostPublicKey),
+		EnrollmentTLSSPKISHA256:      strings.TrimSpace(input.EnrollmentTLSSPKISHA256),
+		IssuedAt:                     now.Format(time.RFC3339Nano),
+		ExpiresAt:                    now.Add(ttl).Format(time.RFC3339Nano),
+		AuthorizationDurationSeconds: authorizationSeconds,
+		Nonce:                        hex.EncodeToString(nonce),
 	}
 	mac, err := macInvite(input.Secret, invite)
 	if err != nil {
@@ -394,6 +407,9 @@ func validateInviteShape(invite Invite) error {
 	if !isLowerHexDigest(invite.EnrollmentTLSSPKISHA256) {
 		return fmt.Errorf("%w: enrollment_tls_spki_sha256 must be a lowercase SHA-256 digest", ErrInvalidInvite)
 	}
+	if _, err := grant.DurationFromSeconds(invite.AuthorizationDurationSeconds); err != nil {
+		return fmt.Errorf("%w: authorization_duration_seconds: %v", ErrInvalidInvite, err)
+	}
 	return nil
 }
 
@@ -418,6 +434,7 @@ func macInvite(secret []byte, invite Invite) (string, error) {
 		invite.EnrollmentTLSSPKISHA256,
 		invite.IssuedAt,
 		invite.ExpiresAt,
+		fmt.Sprintf("%d", invite.AuthorizationDurationSeconds),
 		invite.Nonce,
 	}, "\n")
 	mac := hmac.New(sha256.New, secret)

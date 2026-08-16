@@ -22,6 +22,7 @@ import (
 	"warptweet.com/warptweet/internal/artifactprofile"
 	"warptweet.com/warptweet/internal/engine"
 	"warptweet.com/warptweet/internal/enrollment"
+	"warptweet.com/warptweet/internal/grant"
 	"warptweet.com/warptweet/internal/installlayout"
 	"warptweet.com/warptweet/internal/profile"
 	"warptweet.com/warptweet/internal/server"
@@ -38,6 +39,7 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 	stdoutInvite := onceBoolFlag{name: "--stdout"}
 	noInvite := onceBoolFlag{name: "--no-invite"}
 	asJSON := onceBoolFlag{name: "--json"}
+	accessFor := onceStringFlag{name: "--access-for"}
 	flags.Var(&to, "to", "target port or ip:port")
 	flags.Var(&name, "name", "invite client label")
 	flags.Var(&out, "out", "exact invite output path")
@@ -45,6 +47,7 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 	flags.Var(&stdoutInvite, "stdout", "print invite JSON only; do not write a file")
 	flags.Var(&noInvite, "no-invite", "bootstrap host without minting an invite")
 	flags.Var(&asJSON, "json", "emit JSON")
+	flags.Var(&accessFor, "access-for", "authorization duration such as 30d")
 	if err := parseFlags(flags, arguments); err != nil {
 		return err
 	}
@@ -65,6 +68,29 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 	if err != nil {
 		return fmt.Errorf("to: %w", err)
 	}
+	policy, err := grant.LoadPolicy(installlayout.HostAuthorizationPolicyPath)
+	if err != nil {
+		return fmt.Errorf("host authorization policy: %w", err)
+	}
+	var requestedDuration int64
+	if accessFor.value != "" {
+		parsed, err := grant.ParseAccessDuration(accessFor.value)
+		if err != nil {
+			return fmt.Errorf("access-for: %w", err)
+		}
+		seconds, err := grant.Seconds(parsed)
+		if err != nil {
+			return fmt.Errorf("access-for: %w", err)
+		}
+		requestedDuration = seconds
+	}
+	authorizationSeconds, err := grant.ResolveDuration(policy, requestedDuration)
+	if err != nil {
+		if accessFor.value != "" {
+			return fmt.Errorf("access-for: %w", err)
+		}
+		return fmt.Errorf("host authorization policy: %w", err)
+	}
 	listenEndpoint, err := resolveHostListen(listen.value)
 	if err != nil {
 		return err
@@ -72,6 +98,9 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 
 	if err := ensureHostDirectories(); err != nil {
 		return err
+	}
+	if _, err := grant.ObserveClock(installlayout.HostClockObservationPath, time.Now().UTC()); err != nil {
+		return fmt.Errorf("host clock: %w", err)
 	}
 	hostPublicKey, createdHostKey, err := ensureHostIdentity(ctx)
 	if err != nil {
@@ -92,6 +121,9 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 	manifest, err := writeHostManifest(listenEndpoint, targetEndpoint)
 	if err != nil {
 		return err
+	}
+	if err := reconcileExpiredGrants(manifest, time.Now().UTC()); err != nil {
+		return fmt.Errorf("reconcile expired grants: %w", err)
 	}
 	if err := reconcileManagedAuthorizations(manifest); err != nil {
 		return fmt.Errorf("reconcile managed authorizations: %w", err)
@@ -130,7 +162,12 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 		if asJSON.value {
 			return writeJSON(stdout, result)
 		}
-		return writeHostHuman(stdout, targetEndpoint.String(), listenEndpoint.String(), hostFingerprint, "", enrollStatus)
+		return writeHostHuman(stdout, hostHumanOutput{
+			Target:       targetEndpoint.String(),
+			Listen:       listenEndpoint.String(),
+			Fingerprint:  hostFingerprint,
+			EnrollStatus: enrollStatus,
+		})
 	}
 
 	label := name.value
@@ -139,7 +176,7 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 	}
 	label = enrollment.SanitizeInviteLabel(label)
 
-	invite, record, err := mintServerInvite(ctx, label, targetEndpoint, manifest, hostPublicKey, enrollmentPin)
+	invite, record, err := mintServerInvite(ctx, label, targetEndpoint, manifest, hostPublicKey, enrollmentPin, authorizationSeconds)
 	if err != nil {
 		return err
 	}
@@ -159,7 +196,8 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 				return err
 			}
 			result["invite_id"] = invite.InviteID
-			result["expires_at"] = invite.ExpiresAt
+			result["invite_expires_at"] = invite.ExpiresAt
+			result["authorization_duration_seconds"] = invite.AuthorizationDurationSeconds
 			result["invite"] = inviteObject
 			return writeJSON(stdout, result)
 		}
@@ -182,14 +220,23 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 	}
 
 	result["invite_id"] = invite.InviteID
-	result["expires_at"] = invite.ExpiresAt
+	result["invite_expires_at"] = invite.ExpiresAt
+	result["authorization_duration_seconds"] = invite.AuthorizationDurationSeconds
 	result["invite_path"] = invitePath
 	result["client_name"] = label
 
 	if asJSON.value {
 		return writeJSON(stdout, result)
 	}
-	return writeHostHuman(stdout, targetEndpoint.String(), listenEndpoint.String(), hostFingerprint, invitePath, enrollStatus)
+	return writeHostHuman(stdout, hostHumanOutput{
+		Target:               targetEndpoint.String(),
+		Listen:               listenEndpoint.String(),
+		Fingerprint:          hostFingerprint,
+		InvitePath:           invitePath,
+		InviteExpiresAt:      invite.ExpiresAt,
+		AuthorizationSeconds: invite.AuthorizationDurationSeconds,
+		EnrollStatus:         enrollStatus,
+	})
 }
 
 func applyEnrollListenStatus(result map[string]any, listenAddr netip.Addr, enrollmentPin string) (string, error) {
@@ -207,18 +254,40 @@ func applyEnrollListenStatus(result map[string]any, listenAddr netip.Addr, enrol
 	return enrollStatus, nil
 }
 
-func writeHostHuman(stdout io.Writer, target, listen, hostFingerprint, invitePath, enrollStatus string) error {
-	_, err := fmt.Fprintf(stdout, "host ready\ntarget   %s\nlisten   %s\nhost     SHA256:%s\n", target, listen, hostFingerprint)
+type hostHumanOutput struct {
+	Target               string
+	Listen               string
+	Fingerprint          string
+	InvitePath           string
+	InviteExpiresAt      string
+	AuthorizationSeconds int64
+	EnrollStatus         string
+}
+
+func writeHostHuman(stdout io.Writer, output hostHumanOutput) error {
+	_, err := fmt.Fprintf(stdout, "host ready\ntarget   %s\nlisten   %s\nhost     SHA256:%s\n", output.Target, output.Listen, output.Fingerprint)
 	if err != nil {
 		return err
 	}
-	if invitePath != "" {
-		_, err = fmt.Fprintf(stdout, "invite   %s\n", invitePath)
+	if output.InvitePath != "" {
+		_, err = fmt.Fprintf(stdout, "invite   %s\n", output.InvitePath)
 		if err != nil {
 			return err
 		}
 	}
-	_, err = fmt.Fprintf(stdout, "enroll   :%d (%s)\n", enrollment.DefaultEnrollmentPort, enrollStatus)
+	if output.InviteExpiresAt != "" {
+		_, err = fmt.Fprintf(stdout, "invite expires   %s\n", output.InviteExpiresAt)
+		if err != nil {
+			return err
+		}
+	}
+	if output.AuthorizationSeconds > 0 {
+		_, err = fmt.Fprintf(stdout, "authorization    %ds\n", output.AuthorizationSeconds)
+		if err != nil {
+			return err
+		}
+	}
+	_, err = fmt.Fprintf(stdout, "enroll   :%d (%s)\n", enrollment.DefaultEnrollmentPort, output.EnrollStatus)
 	return err
 }
 
@@ -661,6 +730,7 @@ func mintServerInvite(
 	manifest server.Config,
 	hostPublicKey string,
 	enrollmentTLSSPKISHA256 string,
+	authorizationSeconds int64,
 ) (enrollment.Invite, enrollment.Record, error) {
 	if targetEndpoint.Addr().Compare(manifest.Target.Address) != 0 ||
 		uint16(manifest.Target.Port) != targetEndpoint.Port() {
@@ -687,18 +757,19 @@ func mintServerInvite(
 	}
 	artifactID := string(selected.ID)
 	return enrollment.Create(enrollment.CreateInput{
-		ClientName:              clientName,
-		ServerAddress:           manifest.Listen.Address,
-		ServerPort:              uint16(manifest.Listen.Port),
-		EnrollPort:              enrollment.DefaultEnrollmentPort,
-		TargetAddress:           manifest.Target.Address,
-		TargetPort:              uint16(manifest.Target.Port),
-		Principal:               manifest.DedicatedUser,
-		ProfileID:               manifest.ProfileID,
-		ArtifactProfileID:       artifactID,
-		HostPublicKey:           hostPublicKey,
-		EnrollmentTLSSPKISHA256: enrollmentTLSSPKISHA256,
-		TTL:                     enrollment.DefaultTTL,
-		Secret:                  secret,
+		ClientName:                   clientName,
+		ServerAddress:                manifest.Listen.Address,
+		ServerPort:                   uint16(manifest.Listen.Port),
+		EnrollPort:                   enrollment.DefaultEnrollmentPort,
+		TargetAddress:                manifest.Target.Address,
+		TargetPort:                   uint16(manifest.Target.Port),
+		Principal:                    manifest.DedicatedUser,
+		ProfileID:                    manifest.ProfileID,
+		ArtifactProfileID:            artifactID,
+		HostPublicKey:                hostPublicKey,
+		EnrollmentTLSSPKISHA256:      enrollmentTLSSPKISHA256,
+		TTL:                          enrollment.DefaultTTL,
+		AuthorizationDurationSeconds: authorizationSeconds,
+		Secret:                       secret,
 	})
 }

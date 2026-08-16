@@ -14,6 +14,7 @@ const (
 	DarwinClientTrustDirectory       = DarwinClientStateRoot + "/trust"
 	DarwinClientKnownHostsPath       = DarwinClientTrustDirectory + "/known_hosts"
 	DarwinClientGlobalKnownHostsPath = DarwinClientTrustDirectory + "/known_hosts.empty"
+	DarwinClientRoutesDirectory      = DarwinClientStateRoot + "/routes"
 	DarwinOpenSSHPrefix              = DarwinApplicationSupportRoot + "/libexec/openssh"
 	DarwinSSHPath                    = DarwinOpenSSHPrefix + "/bin/ssh"
 	DarwinSSHKeygenPath              = DarwinOpenSSHPrefix + "/bin/ssh-keygen"

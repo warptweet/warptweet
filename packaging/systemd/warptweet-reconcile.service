@@ -1,0 +1,29 @@
+[Unit]
+Description=WarpTweet client route reconciler
+After=network-online.target
+Wants=network-online.target
+AssertFileIsExecutable=/opt/warptweet/bin/warptweet
+DefaultDependencies=yes
+
+[Service]
+Type=oneshot
+KillMode=process
+User=root
+ExecStart=/opt/warptweet/bin/warptweet reconcile
+RemainAfterExit=yes
+TimeoutStartSec=600
+StandardInput=null
+StandardOutput=journal
+StandardError=journal
+UnsetEnvironment=DISPLAY LD_AUDIT LD_LIBRARY_PATH LD_PRELOAD OPENSSL_CONF OPENSSL_CONF_INCLUDE OPENSSL_MODULES SSH_ASKPASS SSH_ASKPASS_REQUIRE SSH_AUTH_SOCK
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateDevices=yes
+ReadOnlyPaths=/opt/warptweet
+ReadWritePaths=/etc/warptweet /run/warptweet
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictNamespaces=yes
+
+[Install]
+WantedBy=multi-user.target

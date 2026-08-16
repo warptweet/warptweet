@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"os/exec"
 	"os/user"
@@ -19,11 +20,13 @@ import (
 
 	"warptweet.com/warptweet/internal/artifactprofile"
 	"warptweet.com/warptweet/internal/enrollment"
+	"warptweet.com/warptweet/internal/grant"
 	"warptweet.com/warptweet/internal/installlayout"
 	"warptweet.com/warptweet/internal/knownhosts"
 	"warptweet.com/warptweet/internal/lifecycle"
 	"warptweet.com/warptweet/internal/profile"
 	"warptweet.com/warptweet/internal/provisioner"
+	"warptweet.com/warptweet/internal/routestate"
 )
 
 func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer) error {
@@ -68,6 +71,7 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		fmt.Fprintf(stderr, "  principal:  %s\n", view.Principal)
 		fmt.Fprintf(stderr, "  profile:    %s\n", view.ProfileID)
 		fmt.Fprintf(stderr, "  local bind: %s:%d\n", view.ListenAddress, view.ListenPort)
+		fmt.Fprintf(stderr, "  access:     %ds\n", view.AuthorizationDurationSeconds)
 		fmt.Fprintf(stderr, "  host key:   %s\n", truncateMiddle(view.HostPublicKey, 72))
 		fmt.Fprintf(stderr, "Type ENROLL to continue: ")
 		reader := bufio.NewReader(os.Stdin)
@@ -183,6 +187,15 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	serviceEndpoint := fmt.Sprintf("%s:%d", view.TargetAddress, view.TargetPort)
 	listenEndpoint := fmt.Sprintf("%s:%d", view.ListenAddress, view.ListenPort)
 
+	if !prepareOnly.value {
+		if proof.AuthorizationNotAfter == "" || proof.AuthorizationDurationSeconds <= 0 {
+			return errors.New("enrollment proof missing host authorization expiry")
+		}
+		if _, err := grant.ParseUTC(proof.AuthorizationNotAfter); err != nil {
+			return fmt.Errorf("enrollment proof authorization_not_after: %w", err)
+		}
+	}
+
 	if prepareOnly.value {
 		return writeJSON(stdout, map[string]any{
 			"status":                  "prepared",
@@ -214,22 +227,28 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	if enrollPort == 0 {
 		enrollPort = invite.EnrollmentPort()
 	}
-	if err := writeEnrollmentReceipt(layout.ClientManifestPath, enrollmentReceipt{
-		InviteID:                invite.InviteID,
-		ClientID:                proof.ClientID,
-		TunnelID:                view.TunnelID,
-		AcceptedAt:              proof.AcceptedAt,
-		Generation:              generationID,
-		ManagementToken:         managementToken,
-		ServerAddress:           firstNonEmptyString(proof.ServerAddress, invite.ServerAddress),
-		EnrollPort:              enrollPort,
-		PublicKey:               publicKey,
-		HostPublicKey:           invite.HostPublicKey,
-		EnrollmentTLSSPKISHA256: invite.EnrollmentTLSSPKISHA256,
-		Target:                  serviceEndpoint,
-		Principal:               invite.Principal,
-		ProfileID:               invite.ProfileID,
-	}); err != nil {
+	receipt := enrollmentReceipt{
+		InviteID:                     invite.InviteID,
+		ClientID:                     proof.ClientID,
+		TunnelID:                     view.TunnelID,
+		AcceptedAt:                   proof.AcceptedAt,
+		AuthorizationNotAfter:        proof.AuthorizationNotAfter,
+		AuthorizationDurationSeconds: proof.AuthorizationDurationSeconds,
+		Generation:                   generationID,
+		ManagementToken:              managementToken,
+		ServerAddress:                firstNonEmptyString(proof.ServerAddress, invite.ServerAddress),
+		EnrollPort:                   enrollPort,
+		PublicKey:                    publicKey,
+		HostPublicKey:                invite.HostPublicKey,
+		EnrollmentTLSSPKISHA256:      invite.EnrollmentTLSSPKISHA256,
+		Target:                       serviceEndpoint,
+		Principal:                    invite.Principal,
+		ProfileID:                    invite.ProfileID,
+	}
+	if err := writeEnrollmentReceipt(layout.ClientManifestPath, receipt); err != nil {
+		return err
+	}
+	if err := persistRouteEnrollment(view.TunnelID, listenEndpoint, receipt, routestate.RestartUnlessStopped); err != nil {
 		return err
 	}
 	if err := os.RemoveAll(stageRoot); err != nil {
@@ -246,14 +265,19 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	})
 
 	return writeJSON(stdout, map[string]any{
-		"status":           "enrolled",
-		"tunnel_id":        view.TunnelID,
-		"client_id":        proof.ClientID,
-		"listen_endpoint":  listenEndpoint,
-		"service_endpoint": serviceEndpoint,
-		"generation":       generationID,
-		"target_health":    lifecycle.TargetHealthNotChecked,
-		"next":             "warptweet up " + view.TunnelID,
+		"status":                         "enrolled",
+		"tunnel_id":                      view.TunnelID,
+		"route_id":                       view.TunnelID,
+		"client_id":                      proof.ClientID,
+		"listen_endpoint":                listenEndpoint,
+		"service_endpoint":               serviceEndpoint,
+		"generation":                     generationID,
+		"authorization_not_after":        proof.AuthorizationNotAfter,
+		"authorization_duration_seconds": proof.AuthorizationDurationSeconds,
+		"desired_state":                  routestate.DesiredRunning,
+		"restart_policy":                 routestate.RestartUnlessStopped,
+		"target_health":                  lifecycle.TargetHealthNotChecked,
+		"next":                           "warptweet up " + view.TunnelID,
 	})
 }
 
@@ -281,6 +305,9 @@ func runUp(ctx context.Context, arguments []string, stdout, stderr io.Writer, de
 
 	layout, err := productionClientLayout()
 	if err != nil {
+		return err
+	}
+	if err := writeRouteDesiredState(tunnelID, routestate.DesiredRunning, "", currentBootID()); err != nil {
 		return err
 	}
 	store := lifecycle.Store{Root: layout.ClientRuntimeRoot}
@@ -510,11 +537,12 @@ func runStatus(arguments []string, stdout, stderr io.Writer) error {
 		if err != nil {
 			return err
 		}
+		payload := routeStatusPayload(positionals[0], state)
 		if useJSON {
-			return writeJSON(stdout, state)
+			return writeJSON(stdout, payload)
 		}
-		fmt.Fprintf(stdout, "%s %s listen=%s target_health=%s pid=%d\n",
-			state.TunnelID, state.Phase, state.ListenEndpoint, state.TargetHealth, state.PID)
+		fmt.Fprintf(stdout, "%s %s desired=%s listen=%s target_health=%s pid=%d\n",
+			state.TunnelID, payload["actual_state"], payload["desired_state"], state.ListenEndpoint, state.TargetHealth, state.PID)
 		return nil
 	}
 	states, err := store.List()
@@ -544,6 +572,9 @@ func runDown(arguments []string, stdout, stderr io.Writer) error {
 	if handled, err := callInstalledProvisioner(context.Background(), provisioner.Request{
 		Version: provisioner.ProtocolVersion, Action: provisioner.ActionDown, TunnelID: tunnelID,
 	}, stdout); handled {
+		return err
+	}
+	if err := writeRouteDesiredState(tunnelID, routestate.DesiredStopped, "", ""); err != nil {
 		return err
 	}
 	layout, err := productionClientLayout()
@@ -670,6 +701,9 @@ func runRotate(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	if err := writeEnrollmentReceipt(layout.ClientManifestPath, receipt); err != nil {
 		return err
 	}
+	if err := syncRouteReceipt(tunnelID, receipt); err != nil {
+		slog.Error("route receipt sync failed after rotate", "route_id", tunnelID, "err", err)
+	}
 
 	// Keep existing manifest and known_hosts; only identity changes.
 	emptyTrust := filepath.Join(stageRoot, "known_hosts.empty")
@@ -698,6 +732,9 @@ func runRotate(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	receipt.Generation = generationID
 	if err := writeEnrollmentReceipt(layout.ClientManifestPath, receipt); err != nil {
 		return err
+	}
+	if err := syncRouteReceipt(tunnelID, receipt); err != nil {
+		slog.Error("route receipt sync failed after rotate", "route_id", tunnelID, "err", err)
 	}
 	if err := os.RemoveAll(stageRoot); err != nil {
 		return fmt.Errorf("remove completed pending rotation: %w", err)
@@ -773,6 +810,9 @@ func runRevokeTunnel(ctx context.Context, arguments []string, stdout, stderr io.
 	if err := writeEnrollmentReceipt(layout.ClientManifestPath, receipt); err != nil {
 		return err
 	}
+	if err := syncRouteReceipt(tunnelID, receipt); err != nil {
+		slog.Error("route receipt sync failed after revoke", "route_id", tunnelID, "err", err)
+	}
 	_ = store.Write(lifecycle.State{
 		TunnelID:     tunnelID,
 		Phase:        lifecycle.PhaseStopped,
@@ -790,21 +830,23 @@ func runRevokeTunnel(ctx context.Context, arguments []string, stdout, stderr io.
 }
 
 type enrollmentReceipt struct {
-	InviteID                string `json:"invite_id"`
-	ClientID                string `json:"client_id"`
-	TunnelID                string `json:"tunnel_id"`
-	AcceptedAt              string `json:"accepted_at"`
-	Generation              string `json:"generation"`
-	ManagementToken         string `json:"management_token,omitempty"`
-	ServerAddress           string `json:"server_address"`
-	EnrollPort              uint16 `json:"enroll_port,omitempty"`
-	PublicKey               string `json:"public_key,omitempty"`
-	HostPublicKey           string `json:"host_public_key,omitempty"`
-	EnrollmentTLSSPKISHA256 string `json:"enrollment_tls_spki_sha256"`
-	Target                  string `json:"target,omitempty"`
-	Principal               string `json:"principal,omitempty"`
-	ProfileID               string `json:"profile_id,omitempty"`
-	RevokedAt               string `json:"revoked_at,omitempty"`
+	InviteID                     string `json:"invite_id"`
+	ClientID                     string `json:"client_id"`
+	TunnelID                     string `json:"tunnel_id"`
+	AcceptedAt                   string `json:"accepted_at"`
+	AuthorizationNotAfter        string `json:"authorization_not_after,omitempty"`
+	AuthorizationDurationSeconds int64  `json:"authorization_duration_seconds,omitempty"`
+	Generation                   string `json:"generation"`
+	ManagementToken              string `json:"management_token,omitempty"`
+	ServerAddress                string `json:"server_address"`
+	EnrollPort                   uint16 `json:"enroll_port,omitempty"`
+	PublicKey                    string `json:"public_key,omitempty"`
+	HostPublicKey                string `json:"host_public_key,omitempty"`
+	EnrollmentTLSSPKISHA256      string `json:"enrollment_tls_spki_sha256"`
+	Target                       string `json:"target,omitempty"`
+	Principal                    string `json:"principal,omitempty"`
+	ProfileID                    string `json:"profile_id,omitempty"`
+	RevokedAt                    string `json:"revoked_at,omitempty"`
 }
 
 type pendingRotation struct {
@@ -1055,6 +1097,354 @@ func loadEnrollmentReceipt(clientManifestPath, tunnelID string) (enrollmentRecei
 		receipt.TunnelID = tunnelID
 	}
 	return receipt, nil
+}
+
+func productionRouteStore() (routestate.Store, error) {
+	layout, err := productionClientLayout()
+	if err != nil {
+		return routestate.Store{}, err
+	}
+	root := installlayout.ClientRoutesDirectory
+	if runtime.GOOS == "darwin" {
+		root = installlayout.DarwinClientRoutesDirectory
+	}
+	if dir := filepath.Dir(layout.ClientManifestPath); dir != installlayout.ClientStateRoot && dir != installlayout.DarwinClientStateRoot {
+		root = filepath.Join(dir, "routes")
+	}
+	return routestate.Store{Root: root}, nil
+}
+
+func persistRouteEnrollment(routeID, listenEndpoint string, receipt enrollmentReceipt, restartPolicy string) error {
+	store, err := productionRouteStore()
+	if err != nil {
+		return err
+	}
+	exists, err := store.Exists(routeID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		if err := store.Reserve(routeID); err != nil {
+			return err
+		}
+	}
+	if err := store.WriteReceipt(routestate.Receipt{
+		InviteID:                     receipt.InviteID,
+		ClientID:                     receipt.ClientID,
+		RouteID:                      routeID,
+		AcceptedAt:                   receipt.AcceptedAt,
+		AuthorizationNotAfter:        receipt.AuthorizationNotAfter,
+		AuthorizationDurationSeconds: receipt.AuthorizationDurationSeconds,
+		Generation:                   receipt.Generation,
+		ManagementToken:              receipt.ManagementToken,
+		ServerAddress:                receipt.ServerAddress,
+		EnrollPort:                   receipt.EnrollPort,
+		PublicKey:                    receipt.PublicKey,
+		HostPublicKey:                receipt.HostPublicKey,
+		EnrollmentTLSSPKISHA256:      receipt.EnrollmentTLSSPKISHA256,
+		Target:                       receipt.Target,
+		ListenEndpoint:               listenEndpoint,
+		Principal:                    receipt.Principal,
+		ProfileID:                    receipt.ProfileID,
+		RevokedAt:                    receipt.RevokedAt,
+	}); err != nil {
+		return err
+	}
+	return store.WriteIntent(routestate.Intent{
+		Kind:          routestate.KindDesiredState,
+		SchemaVersion: routestate.CurrentSchemaVersion,
+		RouteID:       routeID,
+		DesiredState:  routestate.DesiredRunning,
+		RestartPolicy: restartPolicy,
+		BootID:        currentBootID(),
+	})
+}
+
+func persistConnectDesiredState(routeID, restartPolicy string) error {
+	store, err := productionRouteStore()
+	if err != nil {
+		return err
+	}
+	exists, err := store.Exists(routeID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return fmt.Errorf("%w: route %q is not reserved; enroll before setting --restart", routestate.ErrInvalidRoute, routeID)
+	}
+	intent, err := store.LoadIntent(routeID)
+	if err != nil {
+		intent = routestate.Intent{
+			Kind:          routestate.KindDesiredState,
+			SchemaVersion: routestate.CurrentSchemaVersion,
+			RouteID:       routeID,
+		}
+	}
+	intent.RestartPolicy = restartPolicy
+	intent.DesiredState = routestate.DesiredRunning
+	if restartPolicy == routestate.RestartManual {
+		intent.BootID = currentBootID()
+	}
+	return store.WriteIntent(intent)
+}
+
+func syncRouteReceipt(routeID string, receipt enrollmentReceipt) error {
+	store, err := productionRouteStore()
+	if err != nil {
+		return err
+	}
+	exists, err := store.Exists(routeID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	current, err := store.LoadReceipt(routeID)
+	if err != nil {
+		current = routestate.Receipt{RouteID: routeID}
+	}
+	current.InviteID = firstNonEmptyString(receipt.InviteID, current.InviteID)
+	current.ClientID = firstNonEmptyString(receipt.ClientID, current.ClientID)
+	current.RouteID = routeID
+	current.AcceptedAt = firstNonEmptyString(receipt.AcceptedAt, current.AcceptedAt)
+	if receipt.AuthorizationNotAfter != "" {
+		current.AuthorizationNotAfter = receipt.AuthorizationNotAfter
+	}
+	if receipt.AuthorizationDurationSeconds > 0 {
+		current.AuthorizationDurationSeconds = receipt.AuthorizationDurationSeconds
+	}
+	current.Generation = firstNonEmptyString(receipt.Generation, current.Generation)
+	current.ManagementToken = receipt.ManagementToken
+	current.ServerAddress = firstNonEmptyString(receipt.ServerAddress, current.ServerAddress)
+	if receipt.EnrollPort != 0 {
+		current.EnrollPort = receipt.EnrollPort
+	}
+	current.PublicKey = firstNonEmptyString(receipt.PublicKey, current.PublicKey)
+	current.HostPublicKey = firstNonEmptyString(receipt.HostPublicKey, current.HostPublicKey)
+	current.EnrollmentTLSSPKISHA256 = firstNonEmptyString(receipt.EnrollmentTLSSPKISHA256, current.EnrollmentTLSSPKISHA256)
+	current.Target = firstNonEmptyString(receipt.Target, current.Target)
+	current.Principal = firstNonEmptyString(receipt.Principal, current.Principal)
+	current.ProfileID = firstNonEmptyString(receipt.ProfileID, current.ProfileID)
+	current.RevokedAt = receipt.RevokedAt
+	return store.WriteReceipt(current)
+}
+
+func writeRouteDesiredState(routeID, desired, restartPolicy, bootID string) error {
+	store, err := productionRouteStore()
+	if err != nil {
+		return err
+	}
+	exists, err := store.Exists(routeID)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		if err := store.Reserve(routeID); err != nil {
+			return err
+		}
+	}
+	intent, err := store.LoadIntent(routeID)
+	if err != nil {
+		intent = routestate.Intent{
+			Kind:          routestate.KindDesiredState,
+			SchemaVersion: routestate.CurrentSchemaVersion,
+			RouteID:       routeID,
+			RestartPolicy: routestate.RestartUnlessStopped,
+		}
+	}
+	intent.DesiredState = desired
+	if restartPolicy != "" {
+		intent.RestartPolicy = restartPolicy
+	}
+	if desired == routestate.DesiredRunning && intent.RestartPolicy == routestate.RestartManual {
+		if bootID == "" {
+			bootID = currentBootID()
+		}
+		intent.BootID = bootID
+	}
+	if desired == routestate.DesiredStopped {
+		intent.BootID = ""
+	}
+	return store.WriteIntent(intent)
+}
+
+func currentBootID() string {
+	if runtime.GOOS == "linux" {
+		contents, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+		if err == nil {
+			return strings.TrimSpace(string(contents))
+		}
+	}
+	if runtime.GOOS == "darwin" {
+		output, err := exec.Command("/usr/sbin/sysctl", "-n", "kern.boottime").Output()
+		if err == nil {
+			return strings.TrimSpace(string(output))
+		}
+	}
+	return ""
+}
+
+func routeStatusPayload(routeID string, state lifecycle.State) map[string]any {
+	payload := map[string]any{
+		"version":         1,
+		"route_id":        routeID,
+		"tunnel_id":       routeID,
+		"actual_state":    state.Phase,
+		"phase":           state.Phase,
+		"listen_endpoint": state.ListenEndpoint,
+		"target_health":   state.TargetHealth,
+		"pid":             state.PID,
+		"generation":      state.Generation,
+		"last_error":      state.Error,
+	}
+	store, err := productionRouteStore()
+	if err != nil {
+		return payload
+	}
+	if intent, err := store.LoadIntent(routeID); err == nil {
+		payload["desired_state"] = intent.DesiredState
+		payload["restart_policy"] = intent.RestartPolicy
+	}
+	if receipt, err := store.LoadReceipt(routeID); err == nil {
+		payload["client_id"] = receipt.ClientID
+		payload["authorization_not_after"] = receipt.AuthorizationNotAfter
+		payload["authorization_duration_seconds"] = receipt.AuthorizationDurationSeconds
+		payload["server_endpoint"] = receipt.ServerAddress
+		payload["target_endpoint"] = receipt.Target
+		payload["authorization_state"] = authorizationState(receipt, state)
+	}
+	if payload["desired_state"] == nil {
+		payload["desired_state"] = ""
+	}
+	return payload
+}
+
+func authorizationState(receipt routestate.Receipt, state lifecycle.State) string {
+	if receipt.RevokedAt != "" {
+		return "revoked"
+	}
+	if receipt.AuthorizationNotAfter == "" {
+		return "invalid"
+	}
+	notAfter, err := grant.ParseUTC(receipt.AuthorizationNotAfter)
+	if err != nil {
+		return "invalid"
+	}
+	if grant.ReadyToExpire(notAfter, time.Now().UTC()) {
+		return "expired"
+	}
+	if state.Phase == lifecycle.PhaseReady {
+		return "active"
+	}
+	return "valid"
+}
+
+func runRoutes(arguments []string, stdout, stderr io.Writer) error {
+	flags := newFlagSet("routes", stderr)
+	asJSON := onceBoolFlag{name: "--json"}
+	flags.Var(&asJSON, "json", "emit JSON")
+	if err := parseFlags(flags, arguments); err != nil {
+		return err
+	}
+	store, err := productionRouteStore()
+	if err != nil {
+		return err
+	}
+	listed, err := store.List()
+	if err != nil {
+		return err
+	}
+	type routeJSON struct {
+		RouteID       string `json:"route_id"`
+		DesiredState  string `json:"desired_state,omitempty"`
+		RestartPolicy string `json:"restart_policy,omitempty"`
+		Listen        string `json:"listen_endpoint,omitempty"`
+		Target        string `json:"target_endpoint,omitempty"`
+		Authorization string `json:"authorization_not_after,omitempty"`
+		Invalid       bool   `json:"invalid"`
+		Error         string `json:"error,omitempty"`
+	}
+	payload := make([]routeJSON, 0, len(listed))
+	for _, route := range listed {
+		payload = append(payload, routeJSON{
+			RouteID:       route.RouteID,
+			DesiredState:  route.Intent.DesiredState,
+			RestartPolicy: route.Intent.RestartPolicy,
+			Listen:        route.Listen,
+			Target:        route.Receipt.Target,
+			Authorization: route.Receipt.AuthorizationNotAfter,
+			Invalid:       route.Invalid,
+			Error:         route.Error,
+		})
+	}
+	if asJSON.value || !asJSON.set {
+		return writeJSON(stdout, map[string]any{"version": 1, "routes": payload})
+	}
+	for _, route := range payload {
+		if route.Invalid {
+			fmt.Fprintf(stdout, "%s invalid %s\n", route.RouteID, route.Error)
+			continue
+		}
+		fmt.Fprintf(stdout, "%s %s restart=%s listen=%s\n", route.RouteID, route.DesiredState, route.RestartPolicy, route.Listen)
+	}
+	return nil
+}
+
+func runReconcile(ctx context.Context, arguments []string, stdout, stderr io.Writer, dependencies commandDependencies) error {
+	flags := newFlagSet("reconcile", stderr)
+	if err := parseFlags(flags, arguments); err != nil {
+		return err
+	}
+	store, err := productionRouteStore()
+	if err != nil {
+		return err
+	}
+	listed, err := store.List()
+	if err != nil {
+		return err
+	}
+	bootID := currentBootID()
+	var started, skipped []string
+	failed := map[string]string{}
+	for _, route := range listed {
+		if route.Invalid {
+			skipped = append(skipped, route.RouteID)
+			continue
+		}
+		if route.Receipt.ClientID == "" || route.Receipt.AuthorizationNotAfter == "" {
+			skipped = append(skipped, route.RouteID)
+			continue
+		}
+		notAfter, parseErr := grant.ParseUTC(route.Receipt.AuthorizationNotAfter)
+		if parseErr != nil || grant.ReadyToExpire(notAfter, time.Now().UTC()) {
+			skipped = append(skipped, route.RouteID)
+			continue
+		}
+		if route.Receipt.RevokedAt != "" {
+			skipped = append(skipped, route.RouteID)
+			continue
+		}
+		if !routestate.ShouldStartAtBoot(route.Intent, bootID) {
+			if route.Intent.DesiredState == routestate.DesiredStopped {
+				_ = runDown([]string{route.RouteID}, io.Discard, stderr)
+			}
+			skipped = append(skipped, route.RouteID)
+			continue
+		}
+		if err := runUp(ctx, []string{route.RouteID}, io.Discard, stderr, dependencies); err != nil {
+			failed[route.RouteID] = err.Error()
+			continue
+		}
+		started = append(started, route.RouteID)
+	}
+	return writeJSON(stdout, map[string]any{
+		"version": 1,
+		"status":  "reconciled",
+		"started": started,
+		"skipped": skipped,
+		"failed":  failed,
+	})
 }
 
 func firstNonEmptyString(values ...string) string {
