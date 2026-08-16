@@ -21,6 +21,7 @@ import (
 	"warptweet.com/warptweet/internal/config"
 	"warptweet.com/warptweet/internal/engine"
 	"warptweet.com/warptweet/internal/knownhosts"
+	"warptweet.com/warptweet/internal/lifecycle"
 	"warptweet.com/warptweet/internal/profile"
 	"warptweet.com/warptweet/internal/server"
 	"warptweet.com/warptweet/internal/supervisor"
@@ -120,8 +121,8 @@ func runWithDependencies(
 		err = runDoctorServer(ctx, arguments[1:], stdout, stderr)
 	case "run":
 		err = runTunnel(ctx, arguments[1:], stdout, stderr, dependencies)
-	case "gateway":
-		err = runGateway(ctx, arguments[1:], stdout, stderr)
+	case "host":
+		err = runHost(ctx, arguments[1:], stdout, stderr)
 	case "connect":
 		err = runConnect(ctx, arguments[1:], stdout, stderr, dependencies)
 	case "server":
@@ -545,14 +546,39 @@ func runTunnel(
 	manifestPath := onceStringFlag{name: "--config"}
 	tunnelID := onceStringFlag{name: "--tunnel"}
 	once := onceBoolFlag{name: "--once"}
+	readyFD := onceStringFlag{name: "--ready-fd"}
+	managedLifecycle := onceBoolFlag{name: "--managed-lifecycle"}
 	flags.Var(&manifestPath, "config", "path to a client-tunnels .wt manifest")
 	flags.Var(&tunnelID, "tunnel", "ID of the tunnel to run")
 	flags.Var(&once, "once", "do not restart the tunnel after exit")
+	flags.Var(&readyFD, "ready-fd", "internal inherited readiness pipe descriptor")
+	flags.Var(&managedLifecycle, "managed-lifecycle", "internal launchd lifecycle ownership")
 	if err := parseFlags(flags, arguments); err != nil {
 		return err
 	}
 	if manifestPath.value == "" || tunnelID.value == "" {
 		return errors.New("run requires --config and --tunnel")
+	}
+	var readinessWriter *os.File
+	if readyFD.value != "" {
+		if !once.value {
+			return errors.New("run --ready-fd requires --once")
+		}
+		fd, err := strconv.ParseUint(readyFD.value, 10, 32)
+		if err != nil || fd != 3 {
+			return errors.New("run --ready-fd must name inherited descriptor 3")
+		}
+		readinessWriter = os.NewFile(uintptr(fd), "warptweet-ready")
+		info, err := readinessWriter.Stat()
+		if err != nil || info.Mode()&os.ModeNamedPipe == 0 {
+			_ = readinessWriter.Close()
+			return errors.New("run inherited readiness descriptor must be a pipe")
+		}
+		defer func() {
+			if readinessWriter != nil {
+				_ = readinessWriter.Close()
+			}
+		}()
 	}
 
 	manifest, err := dependencies.loadProductionClientManifest(manifestPath.value)
@@ -562,6 +588,28 @@ func runTunnel(
 	spec, err := clientSpec(manifest, tunnelID.value)
 	if err != nil {
 		return err
+	}
+	layout, err := productionClientLayout()
+	if err != nil {
+		return err
+	}
+	var lifecycleStore lifecycle.Store
+	var lifecycleLock *os.File
+	if managedLifecycle.value {
+		lifecycleStore = lifecycle.Store{Root: layout.ClientRuntimeRoot}
+		lifecycleLock, err = lifecycleStore.Lock(tunnelID.value)
+		if err != nil {
+			return err
+		}
+		defer lifecycle.Unlock(lifecycleLock)
+		if err := lifecycleStore.Write(lifecycle.State{
+			TunnelID: tunnelID.value, Phase: lifecycle.PhaseAwaitingReadiness,
+			PID:            os.Getpid(),
+			ListenEndpoint: fmt.Sprintf("%s:%d", spec.ListenAddress, spec.ListenPort),
+			TargetHealth:   lifecycle.TargetHealthNotChecked,
+		}); err != nil {
+			return fmt.Errorf("write managed lifecycle start: %w", err)
+		}
 	}
 	notifier, err := dependencies.newServiceNotifier()
 	if err != nil {
@@ -576,10 +624,6 @@ func runTunnel(
 		}
 	}()
 
-	layout, err := productionClientLayout()
-	if err != nil {
-		return err
-	}
 	logger := slog.New(slog.NewJSONHandler(stderr, nil))
 	binary := engine.Binary{
 		Path:   layout.SSHPath,
@@ -629,6 +673,25 @@ func runTunnel(
 			return err
 		}
 		readyPublished = true
+		if managedLifecycle.value {
+			if err := lifecycleStore.Write(lifecycle.State{
+				TunnelID: tunnelID.value, Phase: lifecycle.PhaseReady,
+				PID:            os.Getpid(),
+				ListenEndpoint: fmt.Sprintf("%s:%d", spec.ListenAddress, spec.ListenPort),
+				TargetHealth:   lifecycle.TargetHealthNotChecked,
+			}); err != nil {
+				return fmt.Errorf("write managed lifecycle readiness: %w", err)
+			}
+		}
+		if readinessWriter != nil {
+			if _, err := fmt.Fprintf(readinessWriter, "READY %d\n", event.PID); err != nil {
+				return fmt.Errorf("publish inherited readiness: %w", err)
+			}
+			if err := readinessWriter.Close(); err != nil {
+				return fmt.Errorf("close inherited readiness: %w", err)
+			}
+			readinessWriter = nil
+		}
 		logger.Info(
 			"WarpTweet tunnel authenticated forward ready",
 			"attempt", event.Attempt,
@@ -638,11 +701,29 @@ func runTunnel(
 		return nil
 	}
 
-	return (supervisor.Supervisor{Logger: logger}).RunPreparedReady(ctx, provider, supervisor.Policy{
+	runErr := (supervisor.Supervisor{Logger: logger}).RunPreparedReady(ctx, provider, supervisor.Policy{
 		Restart:        !once.value,
 		InitialBackoff: manifest.Supervision.InitialBackoff.Value(),
 		MaximumBackoff: manifest.Supervision.MaxBackoff.Value(),
 	}, ready)
+	if managedLifecycle.value {
+		phase := lifecycle.PhaseFailed
+		message := "tunnel controller exited"
+		if runErr == nil || errors.Is(runErr, context.Canceled) {
+			phase = lifecycle.PhaseStopped
+			message = ""
+		} else {
+			message = runErr.Error()
+		}
+		if stateErr := lifecycleStore.Write(lifecycle.State{
+			TunnelID: tunnelID.value, Phase: phase,
+			ListenEndpoint: fmt.Sprintf("%s:%d", spec.ListenAddress, spec.ListenPort),
+			TargetHealth:   lifecycle.TargetHealthNotChecked, Error: message,
+		}); stateErr != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("write managed lifecycle exit: %w", stateErr))
+		}
+	}
+	return runErr
 }
 
 func parseClientSelection(name string, arguments []string, stderr io.Writer) (string, string, error) {
@@ -881,7 +962,7 @@ func writeUsage(writer io.Writer) {
 	_, _ = io.WriteString(writer, `WarpTweet: open-source fail-closed post-quantum TCP tunneling
 
 Usage:
-  warptweet gateway --to <port|ip:port> [--name <label>] [--out path] [--stdout] [--listen ip:port] [--no-invite] [--no-enroll-listen] [--json]
+  warptweet host --to <port|ip:port> [--name <label>] [--out path] [--stdout] [--listen ip:port] [--no-invite] [--json]
   warptweet connect <invite.wtinvite> [--yes] [--proof <proof.json>] [--once]
   warptweet profile
   warptweet validate --config <manifest.wt>
@@ -892,12 +973,6 @@ Usage:
   warptweet doctor --config <client.wt> --tunnel <id>
   warptweet doctor-server --config <server.wt>
   warptweet run --config <client.wt> --tunnel <id> [--once]
-  warptweet server init --listen <ip:port> --target <ip:port>
-  warptweet server invite --target <ip:port> --name <name>
-  warptweet server enroll-listen [--listen ip:port]
-  warptweet server accept-enrollment --request <request.json>
-  warptweet server revoke <client-or-invite-id>
-  warptweet server status
   warptweet enroll <invite.wtinvite> [--yes] [--prepare-only] [--proof <proof.json>]
   warptweet up <tunnel-id> [--once]
   warptweet status [<tunnel-id>] [--json]

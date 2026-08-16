@@ -116,20 +116,108 @@ func TestOrderedClientPolicyDrivesRenderAndArguments(t *testing.T) {
 	}
 }
 
-func TestArgumentsDoNotEmbedSSHConfigQuotes(t *testing.T) {
+func TestArgumentsQuotePathsForOpenSSHConfigTokenizer(t *testing.T) {
 	t.Parallel()
 
 	arguments, err := Arguments(validClientSpec(t))
 	if err != nil {
 		t.Fatalf("Arguments: %v", err)
 	}
+	var sawIdentity bool
 	for _, argument := range arguments {
-		if strings.Contains(argument, `"`) {
-			t.Fatalf("argument contains an ssh_config quote that OpenSSH -o would parse literally: %q", argument)
-		}
 		if strings.HasPrefix(argument, "GSSAPIAuthentication=") {
 			t.Fatalf("arguments contain an option unavailable in the pinned no-GSSAPI engine: %q", argument)
 		}
+		if strings.HasPrefix(argument, "IdentityFile=") {
+			sawIdentity = true
+			// Linux fixed path has no spaces and stays unquoted; Darwin Application
+			// Support paths must be quoted. validClientSpec uses the Linux path.
+			if strings.Contains(argument, " ") &&
+				(!strings.HasPrefix(argument, `IdentityFile="`) || !strings.HasSuffix(argument, `"`)) {
+				t.Fatalf("IdentityFile with spaces must be ssh_config-quoted: %q", argument)
+			}
+		}
+		if strings.HasPrefix(argument, "ProxyJump=") && strings.Contains(argument, `"`) {
+			t.Fatalf("ProxyJump none must not be quoted: %q", argument)
+		}
+	}
+	if !sawIdentity {
+		t.Fatal("IdentityFile argument missing")
+	}
+
+	for _, test := range []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "bare path without spaces",
+			input: "/etc/warptweet/identity/client",
+			want:  "/etc/warptweet/identity/client",
+		},
+		{
+			name:  "yes",
+			input: "yes",
+			want:  "yes",
+		},
+		{
+			name:  "no",
+			input: "no",
+			want:  "no",
+		},
+		{
+			name:  "none",
+			input: "none",
+			want:  "none",
+		},
+		{
+			name:  "empty",
+			input: "",
+			want:  `""`,
+		},
+		{
+			name:  "spaced path",
+			input: `/Library/Application Support/WarpTweet/state/identity/client`,
+			want:  `"/Library/Application Support/WarpTweet/state/identity/client"`,
+		},
+		{
+			name:  "tab",
+			input: "left\tright",
+			want:  "\"left\tright\"",
+		},
+		{
+			name:  "backslash",
+			input: `path\with\slash`,
+			want:  `"path\\with\\slash"`,
+		},
+		{
+			name:  "equals sign",
+			input: "name=value",
+			want:  `"name=value"`,
+		},
+		{
+			name:  "hash",
+			input: "token#comment",
+			want:  `"token#comment"`,
+		},
+		{
+			name:  "quote",
+			input: `say"hi`,
+			want:  `"say\"hi"`,
+		},
+		{
+			name:  "control character",
+			input: "a\x01b",
+			want:  "\"a\x01b\"",
+		},
+	} {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			if got := quoteArgumentToken(test.input); got != test.want {
+				t.Fatalf("quoteArgumentToken(%q) = %q, want %q", test.input, got, test.want)
+			}
+		})
 	}
 }
 

@@ -12,13 +12,13 @@ func TestSanitizeInviteLabel(t *testing.T) {
 	t.Parallel()
 
 	cases := map[string]string{
-		"":                    "host",
-		"  ":                  "host",
-		"Studio Mac":          "studio-mac",
-		"Curtis-MacBook":      "curtis-macbook",
-		"DB_1.local":          "db-1-local",
-		"---":                 "host",
-		"123db":               "n123db",
+		"":                      "host",
+		"  ":                    "host",
+		"Studio Mac":            "studio-mac",
+		"Curtis-MacBook":        "curtis-macbook",
+		"DB_1.local":            "db-1-local",
+		"---":                   "host",
+		"123db":                 "n123db",
 		strings.Repeat("a", 60): strings.Repeat("a", 48),
 	}
 	for input, want := range cases {

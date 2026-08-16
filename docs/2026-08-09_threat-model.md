@@ -105,7 +105,7 @@ The following events are required to terminate connection establishment or an ac
 - a packet is malformed, has an unexpected length, contains trailing data, or creates unreasonable resource demand;
 - authorization state is missing, stale beyond policy, revoked, or only partially installed.
 
-The implementation MUST NOT reconnect using a classical-only algorithm after any such failure. Direct controller supervision can retry the same profile without a count limit and caps retry frequency with bounded exponential backoff. The packaged service uses `run --once`; systemd restart limits own the operational circuit breaker and alert boundary.
+The implementation MUST NOT reconnect using a classical-only algorithm after any such failure. Direct controller supervision stops after ten consecutive failed launches, resets that count after a stable run, and caps retry frequency with bounded exponential backoff. Packaged services use `run --once`; service-manager restart limits own the operational circuit breaker and alert boundary.
 
 ## Packet and denial-of-service analysis
 
@@ -129,7 +129,7 @@ Being below the packet limit does not make parsing cheap or safe. The implementa
 - keep pre-authentication processes sandboxed and least-privileged;
 - require strict KEX behavior and reject non-KEX traffic during key exchange;
 - close a connection that attempts repeated rekeys or channel creation outside policy;
-- bound restart frequency and resource use; the current controller does not bound total restart count, so deployment policy must supply a circuit breaker where required.
+- bound restart frequency and resource use; direct controller supervision stops after ten consecutive failed launches, while service-manager restart limits remain the operational circuit breaker for packaged `run --once` deployments.
 
 OpenSSH 10.4 includes additional handling for non-KEX messages during post-authentication rekey and several denial-of-service fixes, documented in its [release notes](https://www.openssh.com/txt/release-10.4). Pinning the release does not replace deployment-level resource controls.
 

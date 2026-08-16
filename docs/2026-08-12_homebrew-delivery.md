@@ -4,15 +4,14 @@
 
 Deliver a public, reproducible path in which a macOS user can visit
 `warptweet.com`, install WarpTweet with Homebrew, enroll into a managed Linux
-gateway, and open one declared loopback TCP tunnel without hand-editing SSH
+host, and open one declared loopback TCP tunnel without hand-editing SSH
 configuration or weakening the WarpTweet cryptographic profile.
 
 The target experience is:
 
 ```sh
 brew install --cask warptweet/tap/warptweet
-warptweet enroll <single-use-invite>
-warptweet up database-primary
+warptweet connect <single-use-invite.wtinvite>
 ```
 
 The final command reports the local application endpoint, for example
@@ -26,24 +25,22 @@ the exact downloadable artifacts.
 
 ## Current blockers
 
-The repository can build the Go controller, but a Homebrew-installed macOS
-client cannot currently run a tunnel:
+The controller, Darwin artifact inspection, authenticated Darwin engine build,
+client state policy, lifecycle commands, typed provisioner, package assembler,
+cask renderer, Linux `host`, and pinned-TLS enrollment path are implemented in
+source. The public path remains blocked by release evidence and external
+publication state:
 
-- production client preflight, state validation, ownership checks, and
-  executable inspection fail closed outside Linux;
-- the sole profile requires an ELF engine and Linux-specific static-linkage
-  evidence;
-- production paths are fixed to `/opt/warptweet`, `/etc/warptweet`, and
-  `/run/warptweet`;
-- the authenticated OpenSSH plus OpenSSL build is Linux-only;
-- no signed macOS OpenSSH engine bundle or installer exists;
-- no `enroll`, `up`, `status`, `down`, key-generation, rotation, revocation, or
-  server-bootstrap command exists;
-- enrollment still requires manual two-sided key and host-pin provisioning;
-- there is no release tag, public source remote, release artifact, Homebrew tap,
-  formula, cask, signing identity, notarization receipt, or update channel;
-- the repository worktree is currently untracked and the CLI version is
-  `0.1.0-dev`.
+- no signed release tag or published source/artifact URLs are bound in the
+  repository;
+- no current clean-host proof exists for signed and notarized arm64 and amd64
+  packages, the zero-password-after-install flow, or upgrade/uninstall;
+- no signed Linux package repository or completed server package matrix exists;
+- no complete package-to-package dual-host evidence document exists for exact
+  published digests;
+- no published tap/cask, release SBOM, provenance attestation, or verified
+  update channel exists;
+- the CLI version remains `0.1.0-dev` and the website CTA remains dark.
 
 A formula that installs only the current controller is not the product. The
 website CTA becomes active only when the installed client can complete the
@@ -226,7 +223,7 @@ package-owned paths are:
 | `/Library/Application Support/WarpTweet/state/identity/client` | protected composite private key |
 | `/Library/Application Support/WarpTweet/state/trust/known_hosts` | root-owned exact host pin |
 | `/Library/Application Support/WarpTweet/state/trust/known_hosts.empty` | exactly empty ambient trust |
-| `/Library/Caches/com.warptweet.tunnel/<id>` | bounded readiness runtime directory |
+| `/Library/Caches/wt/<id>` | short, bounded readiness runtime directory |
 
 The final choice of service identity MUST be explicit:
 
@@ -314,8 +311,8 @@ Acceptance:
 
 ### 6. Linux server packages and bootstrap, 8 points
 
-Status: package assembly recipe, maintainer scripts, and server
-init/invite/revoke/status CLI are present. Hosted signed package install
+Status: package assembly recipe, maintainer scripts, and the public `host`
+bootstrap are present. Hosted signed package install
 evidence remains a release gate.
 
 Build native signed `.deb` and `.rpm` packages for Linux amd64 and arm64. The
@@ -323,17 +320,17 @@ packages install the existing fixed `/opt/warptweet` and `/etc/warptweet`
 layout, exact OpenSSH server bundle, system users, privilege-separation jail,
 systemd units, licenses, receipts, and bundle manifest.
 
-Add:
+Public bootstrap:
 
 ```text
-warptweet server init
-warptweet server invite --target <numeric-ip>:<port> --name <name>
+warptweet host --to <port|numeric-ip:port> --name <name>
 warptweet server revoke <client-id>
 warptweet server status
 ```
 
-`server init` MUST generate the composite host key locally and print its public
-fingerprint without exporting private bytes. `server invite` MUST create one
+`host` MUST generate or reuse the composite host key locally, establish the
+restricted SSH listener and pinned-TLS enrollment listener, and print the
+public fingerprint without exporting private bytes. It MUST create one
 single-use, short-lived enrollment authorization bound to:
 
 - server identity and exact composite host public-key blob;
@@ -342,8 +339,7 @@ single-use, short-lived enrollment authorization bound to:
 - dedicated principal;
 - wire and platform artifact profile IDs;
 - issuance time, expiry, nonce, and one-use status;
-- an authenticated server enrollment endpoint or a signature chain rooted in
-  an already authenticated bootstrap key.
+- the exact TLS 1.3 enrollment SPKI pin carried by the invite.
 
 Do not put a private key, bearer credential suitable for repeated use, password,
 or classical recovery path in the invite. A QR or compact text encoding MAY be
@@ -358,7 +354,7 @@ Acceptance:
 
 - clean Ubuntu and supported RPM-family systems install and remove correctly;
 - server package preflight and systemd confinement gates pass;
-- the gateway rejects shell, exec, subsystem, SFTP, SCP, remote, dynamic,
+- the host rejects shell, exec, subsystem, SFTP, SCP, remote, dynamic,
   agent, X11, stream-local, and TUN forwarding;
 - server firewall and `PermitOpen` restrict egress to the exact target;
 - invite reuse, expiry, mutation, wrong server, wrong target, and wrong profile
@@ -366,9 +362,10 @@ Acceptance:
 
 ### 7. Enrollment and lifecycle CLI, 13 points
 
-Status: enroll/up/status/down/rotate/revoke/uninstall command surface and local
-lifecycle state machine are present. Network enroll/rotate/revoke use the
-packaged enrollment HTTP endpoint (port 29722) with management tokens. Live
+Status: connect/enroll/up/status/down/rotate/revoke/uninstall command surface,
+local lifecycle state machine, and typed macOS provisioner are present. Network
+enroll/rotate/revoke use the invite-pinned HTTPS endpoint (port 29722) with
+client-generated management capabilities. Live
 package-to-package evidence remains WP8.
 
 Add the following user commands with strict, typed outputs:
@@ -412,7 +409,7 @@ Lifecycle behavior:
   Backoff, Stopping, Stopped, Failed, and target health `not_checked`;
 - `down` terminates and reaps the exact process and removes no trust or identity;
 - rotation activates the new composite identity before revoking the old one;
-- revocation is durable on the gateway before local state reports completion;
+- revocation is durable on the host before local state reports completion;
 - recovery issues a new composite identity and never falls back to a classical
   credential;
 - diagnostic output never includes key bytes, invite secrets, passphrases, or
@@ -497,7 +494,7 @@ brew install --cask warptweet/tap/warptweet
 The page MUST then show the real next action:
 
 ```sh
-warptweet enroll <single-use-invite>
+warptweet connect <single-use-invite.wtinvite>
 ```
 
 Add architecture-aware download metadata but do not use browser fingerprinting
@@ -573,7 +570,7 @@ This work is complete only when a new supported macOS machine can:
 
 1. install the signed WarpTweet cask;
 2. authenticate and consume a single-use invite from a packaged managed Linux
-   gateway;
+   host;
 3. generate its composite identity locally;
 4. atomically activate exact host trust and tunnel policy;
 5. pass platform and engine preflight;

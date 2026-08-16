@@ -24,7 +24,7 @@ func TestLifecycleUsageMentionsCommands(t *testing.T) {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}
 	for _, required := range []string{
-		"warptweet gateway",
+		"warptweet host",
 		"warptweet connect",
 		"warptweet enroll",
 		"warptweet up",
@@ -138,7 +138,9 @@ func TestRotateAndRevokeRequireEnrollmentReceipt(t *testing.T) {
 			continue
 		}
 		// Off-matrix hosts may fail layout resolution before receipt load.
-		if strings.Contains(message, "artifact profile") || strings.Contains(message, "client layout") {
+		if strings.Contains(message, "artifact profile") ||
+			strings.Contains(message, "client layout") ||
+			strings.Contains(message, "operation not permitted") {
 			continue
 		}
 		t.Fatalf("%v stderr=%s", test.args, message)

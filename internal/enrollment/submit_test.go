@@ -2,6 +2,7 @@ package enrollment
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"io"
 	"net"
@@ -34,20 +35,27 @@ func TestSubmitEnrollmentRotateRevokeRoundTrip(t *testing.T) {
 		t.Fatalf("Listen: %v", err)
 	}
 	enrollPort := uint16(listener.Addr().(*net.TCPAddr).Port)
+	certPath := filepath.Join(t.TempDir(), "tls.crt")
+	keyPath := filepath.Join(t.TempDir(), "tls.key")
+	enrollmentPin, _, _, err := EnsureTLSIdentity(certPath, keyPath, []net.IP{net.ParseIP("127.0.0.1")}, now)
+	if err != nil {
+		t.Fatalf("EnsureTLSIdentity: %v", err)
+	}
 
 	invite, record, err := Create(CreateInput{
-		ClientName:        "studio-mac",
-		ServerAddress:     netip.MustParseAddr("127.0.0.1"),
-		ServerPort:        2222,
-		EnrollPort:        enrollPort,
-		TargetAddress:     netip.MustParseAddr("198.51.100.20"),
-		TargetPort:        5432,
-		Principal:         server.DefaultDedicatedUser,
-		ProfileID:         profile.CurrentID,
-		ArtifactProfileID: "darwin-arm64",
-		HostPublicKey:     "ssh-mldsa44-ed25519@openssh.com AAAA host",
-		Now:               now,
-		Secret:            secret,
+		ClientName:              "studio-mac",
+		ServerAddress:           netip.MustParseAddr("127.0.0.1"),
+		ServerPort:              2222,
+		EnrollPort:              enrollPort,
+		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
+		TargetPort:              5432,
+		Principal:               server.DefaultDedicatedUser,
+		ProfileID:               profile.CurrentID,
+		ArtifactProfileID:       "darwin-arm64",
+		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256: enrollmentPin,
+		Now:                     now,
+		Secret:                  secret,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -70,28 +78,25 @@ func TestSubmitEnrollmentRotateRevokeRoundTrip(t *testing.T) {
 			http.Error(writer, err.Error(), http.StatusBadRequest)
 			return
 		}
-		record, token, err := RotateClientPublicKey(clientsDir, manage, manage.NewPublicKey, time.Now().UTC())
+		record, err := RotateClientPublicKey(clientsDir, manage, manage.NewPublicKey, time.Now().UTC(), func(string, string) error {
+			return os.WriteFile(authPath, line, 0o644)
+		})
 		if err != nil {
 			http.Error(writer, err.Error(), http.StatusForbidden)
 			return
 		}
-		if err := os.WriteFile(authPath, line, 0o600); err != nil {
-			http.Error(writer, err.Error(), http.StatusInternalServerError)
-			return
-		}
 		writeJSONResponse(writer, EnrollmentProof{
-			InviteID:        record.InviteID,
-			ClientID:        record.ClientID,
-			HostPublicKey:   invite.HostPublicKey,
-			PublicKey:       record.PublicKey,
-			Target:          "198.51.100.20:5432",
-			Principal:       record.Principal,
-			ProfileID:       record.ProfileID,
-			Nonce:           "",
-			AcceptedAt:      time.Now().UTC().Format(time.RFC3339Nano),
-			ManagementToken: token,
-			ServerAddress:   "127.0.0.1",
-			EnrollPort:      enrollPort,
+			InviteID:      record.InviteID,
+			ClientID:      record.ClientID,
+			HostPublicKey: invite.HostPublicKey,
+			PublicKey:     record.PublicKey,
+			Target:        "198.51.100.20:5432",
+			Principal:     record.Principal,
+			ProfileID:     record.ProfileID,
+			Nonce:         "",
+			AcceptedAt:    time.Now().UTC().Format(time.RFC3339Nano),
+			ServerAddress: "127.0.0.1",
+			EnrollPort:    enrollPort,
 		})
 	})
 	mux.HandleFunc("/v1/revoke", func(writer http.ResponseWriter, httpRequest *http.Request) {
@@ -101,12 +106,13 @@ func TestSubmitEnrollmentRotateRevokeRoundTrip(t *testing.T) {
 			http.Error(writer, err.Error(), http.StatusBadRequest)
 			return
 		}
-		record, err := RevokeClient(clientsDir, manage, time.Now().UTC())
+		record, err := RevokeClient(clientsDir, manage, time.Now().UTC(), func(string) error {
+			return os.WriteFile(authPath, nil, 0o644)
+		})
 		if err != nil {
 			http.Error(writer, err.Error(), http.StatusForbidden)
 			return
 		}
-		_ = os.WriteFile(authPath, nil, 0o600)
 		writeJSONResponse(writer, map[string]any{
 			"status":     "revoked",
 			"client_id":  record.ClientID,
@@ -115,59 +121,62 @@ func TestSubmitEnrollmentRotateRevokeRoundTrip(t *testing.T) {
 		})
 	})
 
+	tlsConfig, err := LoadServerTLSConfig(certPath, keyPath)
+	if err != nil {
+		t.Fatalf("LoadServerTLSConfig: %v", err)
+	}
 	httpServer := &http.Server{Handler: mux}
-	go func() { _ = httpServer.Serve(listener) }()
+	go func() { _ = httpServer.Serve(tls.NewListener(listener, tlsConfig)) }()
 	defer httpServer.Close()
 
 	publicKey := testCompositePublicKey()
 	request := EnrollmentRequest{
-		InviteID:      invite.InviteID,
-		Nonce:         invite.Nonce,
-		ClientName:    invite.ClientName,
-		PublicKey:     publicKey,
-		ProfileID:     profile.CurrentID,
-		TunnelID:      "studio-mac",
-		ListenAddress: "127.0.0.1",
-		ListenPort:    15432,
+		InviteID:        invite.InviteID,
+		Nonce:           invite.Nonce,
+		ClientName:      invite.ClientName,
+		PublicKey:       publicKey,
+		ProfileID:       profile.CurrentID,
+		TunnelID:        "studio-mac",
+		ListenAddress:   "127.0.0.1",
+		ListenPort:      15432,
+		ManagementToken: testManagementToken,
 	}
 	proof, err := SubmitEnrollment(context.Background(), invite, request)
 	if err != nil {
 		t.Fatalf("SubmitEnrollment: %v", err)
 	}
-	if proof.ManagementToken == "" || proof.ClientID == "" {
+	if proof.ClientID == "" {
 		t.Fatalf("proof incomplete: %+v", proof)
 	}
-	if _, err := SubmitEnrollment(context.Background(), invite, request); err == nil {
-		t.Fatal("second enroll reused invite")
+	if again, err := SubmitEnrollment(context.Background(), invite, request); err != nil || again.ClientID != proof.ClientID {
+		t.Fatalf("exact enrollment retry did not converge: proof=%+v err=%v", again, err)
 	}
 
 	rotatedKey := testCompositePublicKeyRotated()
-	rotated, err := SubmitRotate(context.Background(), "127.0.0.1", enrollPort, ManagementRequest{
-		ClientID:        proof.ClientID,
-		ManagementToken: proof.ManagementToken,
-		TunnelID:        "studio-mac",
-		NewPublicKey:    rotatedKey,
+	rotated, err := SubmitRotate(context.Background(), "127.0.0.1", enrollPort, enrollmentPin, ManagementRequest{
+		ClientID:            proof.ClientID,
+		ManagementToken:     testManagementToken,
+		TunnelID:            "studio-mac",
+		NewPublicKey:        rotatedKey,
+		NextManagementToken: testNextManagementToken,
 	})
 	if err != nil {
 		t.Fatalf("SubmitRotate: %v", err)
-	}
-	if rotated.ManagementToken == "" || rotated.ManagementToken == proof.ManagementToken {
-		t.Fatal("rotate did not issue a new token")
 	}
 	if rotated.PublicKey != rotatedKey {
 		t.Fatalf("rotated key=%q", rotated.PublicKey)
 	}
 
-	if err := SubmitRevoke(context.Background(), "127.0.0.1", enrollPort, ManagementRequest{
+	if err := SubmitRevoke(context.Background(), "127.0.0.1", enrollPort, enrollmentPin, ManagementRequest{
 		ClientID:        proof.ClientID,
-		ManagementToken: rotated.ManagementToken,
+		ManagementToken: testNextManagementToken,
 		TunnelID:        "studio-mac",
 	}); err != nil {
 		t.Fatalf("SubmitRevoke: %v", err)
 	}
-	if err := SubmitRevoke(context.Background(), "127.0.0.1", enrollPort, ManagementRequest{
+	if err := SubmitRevoke(context.Background(), "127.0.0.1", enrollPort, enrollmentPin, ManagementRequest{
 		ClientID:        proof.ClientID,
-		ManagementToken: rotated.ManagementToken,
+		ManagementToken: testNextManagementToken,
 		TunnelID:        "studio-mac",
 	}); err != nil {
 		t.Fatalf("second SubmitRevoke should be idempotent: %v", err)
@@ -198,20 +207,27 @@ func TestSubmitEnrollmentFailClosedCases(t *testing.T) {
 		t.Fatalf("Listen: %v", err)
 	}
 	enrollPort := uint16(listener.Addr().(*net.TCPAddr).Port)
+	certPath := filepath.Join(t.TempDir(), "tls.crt")
+	keyPath := filepath.Join(t.TempDir(), "tls.key")
+	enrollmentPin, _, _, err := EnsureTLSIdentity(certPath, keyPath, []net.IP{net.ParseIP("127.0.0.1")}, now)
+	if err != nil {
+		t.Fatalf("EnsureTLSIdentity: %v", err)
+	}
 
 	invite, record, err := Create(CreateInput{
-		ClientName:        "node-a",
-		ServerAddress:     netip.MustParseAddr("127.0.0.1"),
-		ServerPort:        2222,
-		EnrollPort:        enrollPort,
-		TargetAddress:     netip.MustParseAddr("198.51.100.20"),
-		TargetPort:        5432,
-		Principal:         server.DefaultDedicatedUser,
-		ProfileID:         profile.CurrentID,
-		ArtifactProfileID: "linux-amd64",
-		HostPublicKey:     "ssh-mldsa44-ed25519@openssh.com AAAA host",
-		Now:               now,
-		Secret:            secret,
+		ClientName:              "node-a",
+		ServerAddress:           netip.MustParseAddr("127.0.0.1"),
+		ServerPort:              2222,
+		EnrollPort:              enrollPort,
+		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
+		TargetPort:              5432,
+		Principal:               server.DefaultDedicatedUser,
+		ProfileID:               profile.CurrentID,
+		ArtifactProfileID:       "linux-amd64",
+		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256: enrollmentPin,
+		Now:                     now,
+		Secret:                  secret,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -222,19 +238,24 @@ func TestSubmitEnrollmentFailClosedCases(t *testing.T) {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/enroll", newTestEnrollHandler(invite, invitesDir, clientsDir, "", manifest))
+	tlsConfig, err := LoadServerTLSConfig(certPath, keyPath)
+	if err != nil {
+		t.Fatalf("LoadServerTLSConfig: %v", err)
+	}
 	httpServer := &http.Server{Handler: mux}
-	go func() { _ = httpServer.Serve(listener) }()
+	go func() { _ = httpServer.Serve(tls.NewListener(listener, tlsConfig)) }()
 	defer httpServer.Close()
 
 	base := EnrollmentRequest{
-		InviteID:      invite.InviteID,
-		Nonce:         invite.Nonce,
-		ClientName:    invite.ClientName,
-		PublicKey:     testCompositePublicKey(),
-		ProfileID:     profile.CurrentID,
-		TunnelID:      "node-a",
-		ListenAddress: "127.0.0.1",
-		ListenPort:    15432,
+		InviteID:        invite.InviteID,
+		Nonce:           invite.Nonce,
+		ClientName:      invite.ClientName,
+		PublicKey:       testCompositePublicKey(),
+		ProfileID:       profile.CurrentID,
+		TunnelID:        "node-a",
+		ListenAddress:   "127.0.0.1",
+		ListenPort:      15432,
+		ManagementToken: testManagementToken,
 	}
 
 	// Wrong nonce (guaranteed different prefix from the invite nonce)
@@ -292,16 +313,16 @@ func newTestEnrollHandler(
 			TargetPort:       invite.TargetPort,
 			ServerAddress:    "127.0.0.1",
 			Now:              time.Now().UTC(),
+			InstallAuthorization: func(string) error {
+				if authPath == "" {
+					return nil
+				}
+				return os.WriteFile(authPath, line, 0o644)
+			},
 		})
 		if err != nil {
 			http.Error(writer, err.Error(), http.StatusForbidden)
 			return
-		}
-		if authPath != "" {
-			if err := os.WriteFile(authPath, line, 0o600); err != nil {
-				http.Error(writer, err.Error(), http.StatusInternalServerError)
-				return
-			}
 		}
 		writeJSONResponse(writer, result.Proof)
 	}

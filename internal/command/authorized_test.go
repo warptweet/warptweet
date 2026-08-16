@@ -230,7 +230,7 @@ func writeAuthorizedKeyCommandInputs(t *testing.T) (string, string, string) {
 	if err != nil {
 		t.Fatalf("marshal server manifest: %v", err)
 	}
-	manifestPath := filepath.Join(directory, "gateway.wt")
+	manifestPath := filepath.Join(directory, "host.wt")
 	if err := os.WriteFile(manifestPath, manifestData, 0o600); err != nil {
 		t.Fatalf("write server manifest: %v", err)
 	}

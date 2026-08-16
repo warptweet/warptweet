@@ -3,6 +3,7 @@ package enrollment
 import (
 	"encoding/base64"
 	"encoding/binary"
+	"errors"
 	"net/netip"
 	"testing"
 	"time"
@@ -19,17 +20,18 @@ func TestAcceptStoresClientAndRevokeBurnsToken(t *testing.T) {
 	}
 	now := time.Date(2026, 8, 14, 20, 0, 0, 0, time.UTC)
 	invite, record, err := Create(CreateInput{
-		ClientName:        "laptop-1",
-		ServerAddress:     netip.MustParseAddr("192.0.2.10"),
-		ServerPort:        2222,
-		TargetAddress:     netip.MustParseAddr("198.51.100.20"),
-		TargetPort:        5432,
-		Principal:         "warptweet",
-		ProfileID:         profile.CurrentID,
-		ArtifactProfileID: "linux-amd64",
-		HostPublicKey:     "ssh-mldsa44-ed25519@openssh.com AAAA host",
-		Now:               now,
-		Secret:            secret,
+		ClientName:              "laptop-1",
+		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
+		ServerPort:              2222,
+		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
+		TargetPort:              5432,
+		Principal:               "warptweet",
+		ProfileID:               profile.CurrentID,
+		ArtifactProfileID:       "linux-amd64",
+		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
+		Now:                     now,
+		Secret:                  secret,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -44,42 +46,54 @@ func TestAcceptStoresClientAndRevokeBurnsToken(t *testing.T) {
 		Directory:        invites,
 		ClientsDirectory: clients,
 		Request: EnrollmentRequest{
-			InviteID:      invite.InviteID,
-			Nonce:         invite.Nonce,
-			ClientName:    invite.ClientName,
-			PublicKey:     publicKey,
-			ProfileID:     profile.CurrentID,
-			TunnelID:      "laptop-1",
-			ListenAddress: "127.0.0.1",
-			ListenPort:    15432,
+			InviteID:        invite.InviteID,
+			Nonce:           invite.Nonce,
+			ClientName:      invite.ClientName,
+			PublicKey:       publicKey,
+			ProfileID:       profile.CurrentID,
+			TunnelID:        "laptop-1",
+			ListenAddress:   "127.0.0.1",
+			ListenPort:      15432,
+			ManagementToken: testManagementToken,
 		},
-		HostPublicKey: invite.HostPublicKey,
-		Principal:     invite.Principal,
-		ProfileID:     profile.CurrentID,
-		TargetAddress: invite.TargetAddress,
-		TargetPort:    invite.TargetPort,
-		ServerAddress: invite.ServerAddress,
-		Now:           now.Add(time.Minute),
+		HostPublicKey:        invite.HostPublicKey,
+		Principal:            invite.Principal,
+		ProfileID:            profile.CurrentID,
+		TargetAddress:        invite.TargetAddress,
+		TargetPort:           invite.TargetPort,
+		ServerAddress:        invite.ServerAddress,
+		Now:                  now.Add(time.Minute),
+		InstallAuthorization: func(string) error { return nil },
 	})
 	if err != nil {
 		t.Fatalf("Accept: %v", err)
-	}
-	if result.Proof.ManagementToken == "" {
-		t.Fatal("missing management token")
 	}
 	loaded, err := LoadClient(clients, result.ClientID)
 	if err != nil {
 		t.Fatalf("LoadClient: %v", err)
 	}
-	if loaded.Status != ClientStatusActive || loaded.ManagementTokenSHA256 == result.Proof.ManagementToken {
+	if loaded.Status != ClientStatusActive || loaded.ManagementTokenSHA256 != HashManagementToken(testManagementToken) {
 		t.Fatalf("client record insecure or wrong: %+v", loaded)
 	}
 
-	revoked, err := RevokeClient(clients, ManagementRequest{
+	revokeRequest := ManagementRequest{
 		ClientID:        result.ClientID,
-		ManagementToken: result.Proof.ManagementToken,
+		ManagementToken: testManagementToken,
 		TunnelID:        "laptop-1",
-	}, now.Add(2*time.Minute))
+	}
+	if _, err := RevokeClient(clients, revokeRequest, now.Add(2*time.Minute), func(string) error {
+		return errors.New("injected authorization removal failure")
+	}); err == nil {
+		t.Fatal("RevokeClient succeeded despite injected authorization failure")
+	}
+	pendingRevoke, err := LoadClient(clients, result.ClientID)
+	if err != nil {
+		t.Fatalf("LoadClient pending revoke: %v", err)
+	}
+	if pendingRevoke.Status != ClientStatusRevocationPending {
+		t.Fatalf("status=%s, want revocation_pending", pendingRevoke.Status)
+	}
+	revoked, err := RevokeClient(clients, revokeRequest, now.Add(2*time.Minute), func(string) error { return nil })
 	if err != nil {
 		t.Fatalf("RevokeClient: %v", err)
 	}
@@ -88,9 +102,9 @@ func TestAcceptStoresClientAndRevokeBurnsToken(t *testing.T) {
 	}
 	again, err := RevokeClient(clients, ManagementRequest{
 		ClientID:        result.ClientID,
-		ManagementToken: result.Proof.ManagementToken,
+		ManagementToken: testManagementToken,
 		TunnelID:        "laptop-1",
-	}, now.Add(3*time.Minute))
+	}, now.Add(3*time.Minute), func(string) error { return nil })
 	if err != nil {
 		t.Fatalf("second RevokeClient should be idempotent: %v", err)
 	}
@@ -108,17 +122,18 @@ func TestRotateClientIssuesNewToken(t *testing.T) {
 	}
 	now := time.Date(2026, 8, 14, 21, 0, 0, 0, time.UTC)
 	invite, record, err := Create(CreateInput{
-		ClientName:        "studio-mac",
-		ServerAddress:     netip.MustParseAddr("192.0.2.10"),
-		ServerPort:        2222,
-		TargetAddress:     netip.MustParseAddr("198.51.100.20"),
-		TargetPort:        5432,
-		Principal:         "warptweet",
-		ProfileID:         profile.CurrentID,
-		ArtifactProfileID: "linux-amd64",
-		HostPublicKey:     "ssh-mldsa44-ed25519@openssh.com AAAA host",
-		Now:               now,
-		Secret:            secret,
+		ClientName:              "studio-mac",
+		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
+		ServerPort:              2222,
+		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
+		TargetPort:              5432,
+		Principal:               "warptweet",
+		ProfileID:               profile.CurrentID,
+		ArtifactProfileID:       "linux-amd64",
+		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
+		Now:                     now,
+		Secret:                  secret,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -133,46 +148,72 @@ func TestRotateClientIssuesNewToken(t *testing.T) {
 		Directory:        invites,
 		ClientsDirectory: clients,
 		Request: EnrollmentRequest{
-			InviteID:      invite.InviteID,
-			Nonce:         invite.Nonce,
-			ClientName:    invite.ClientName,
-			PublicKey:     firstKey,
-			ProfileID:     profile.CurrentID,
-			TunnelID:      "studio-mac",
-			ListenAddress: "127.0.0.1",
-			ListenPort:    15432,
+			InviteID:        invite.InviteID,
+			Nonce:           invite.Nonce,
+			ClientName:      invite.ClientName,
+			PublicKey:       firstKey,
+			ProfileID:       profile.CurrentID,
+			TunnelID:        "studio-mac",
+			ListenAddress:   "127.0.0.1",
+			ListenPort:      15432,
+			ManagementToken: testManagementToken,
 		},
-		HostPublicKey: invite.HostPublicKey,
-		Principal:     invite.Principal,
-		ProfileID:     profile.CurrentID,
-		TargetAddress: invite.TargetAddress,
-		TargetPort:    invite.TargetPort,
-		Now:           now.Add(time.Minute),
+		HostPublicKey:        invite.HostPublicKey,
+		Principal:            invite.Principal,
+		ProfileID:            profile.CurrentID,
+		TargetAddress:        invite.TargetAddress,
+		TargetPort:           invite.TargetPort,
+		Now:                  now.Add(time.Minute),
+		InstallAuthorization: func(string) error { return nil },
 	})
 	if err != nil {
 		t.Fatalf("Accept: %v", err)
 	}
 	// Distinct key material for rotate.
 	secondKey := testCompositePublicKeyRotated()
-	updated, token, err := RotateClientPublicKey(clients, ManagementRequest{
-		ClientID:        result.ClientID,
-		ManagementToken: result.Proof.ManagementToken,
-		TunnelID:        "studio-mac",
-	}, secondKey, now.Add(2*time.Minute))
+	rotateRequest := ManagementRequest{
+		ClientID:            result.ClientID,
+		ManagementToken:     testManagementToken,
+		TunnelID:            "studio-mac",
+		NextManagementToken: testNextManagementToken,
+	}
+	if _, err := RotateClientPublicKey(clients, rotateRequest, secondKey, now.Add(2*time.Minute), func(string, string) error {
+		return errors.New("injected authorization replacement failure")
+	}); err == nil {
+		t.Fatal("RotateClientPublicKey succeeded despite injected authorization failure")
+	}
+	pendingRotation, err := LoadClient(clients, result.ClientID)
+	if err != nil {
+		t.Fatalf("LoadClient pending rotation: %v", err)
+	}
+	if pendingRotation.Status != ClientStatusRotationPending || pendingRotation.PendingPublicKey != secondKey {
+		t.Fatalf("pending rotation=%+v", pendingRotation)
+	}
+	updated, err := RotateClientPublicKey(clients, rotateRequest, secondKey, now.Add(2*time.Minute), func(string, string) error { return nil })
 	if err != nil {
 		t.Fatalf("RotateClientPublicKey: %v", err)
 	}
-	if token == "" || token == result.Proof.ManagementToken {
-		t.Fatalf("token not rotated")
+	if updated.ManagementTokenSHA256 != HashManagementToken(testNextManagementToken) {
+		t.Fatalf("token hash not rotated")
 	}
 	if updated.PublicKey != secondKey {
 		t.Fatalf("public key not updated")
 	}
-	if _, _, err := RotateClientPublicKey(clients, ManagementRequest{
-		ClientID:        result.ClientID,
-		ManagementToken: result.Proof.ManagementToken,
-		TunnelID:        "studio-mac",
-	}, firstKey, now.Add(3*time.Minute)); err == nil {
+	if _, err := RotateClientPublicKey(
+		clients,
+		rotateRequest,
+		secondKey,
+		now.Add(3*time.Minute),
+		func(string, string) error { return nil },
+	); err != nil {
+		t.Fatalf("exact response-loss rotation retry: %v", err)
+	}
+	if _, err := RotateClientPublicKey(clients, ManagementRequest{
+		ClientID:            result.ClientID,
+		ManagementToken:     testManagementToken,
+		TunnelID:            "studio-mac",
+		NextManagementToken: testNextManagementToken,
+	}, firstKey, now.Add(4*time.Minute), func(string, string) error { return nil }); err == nil {
 		t.Fatal("old management token still accepted")
 	}
 }

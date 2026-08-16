@@ -17,18 +17,19 @@ func TestCreateParseConsumeInviteLifecycle(t *testing.T) {
 	}
 	now := time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC)
 	invite, record, err := Create(CreateInput{
-		ClientName:        "laptop-1",
-		ServerAddress:     netip.MustParseAddr("192.0.2.10"),
-		ServerPort:        2222,
-		TargetAddress:     netip.MustParseAddr("198.51.100.20"),
-		TargetPort:        5432,
-		Principal:         "warptweet",
-		ProfileID:         "profile-v1",
-		ArtifactProfileID: "linux-amd64",
-		HostPublicKey:     "ssh-mldsa44-ed25519@openssh.com AAAA host",
-		TTL:               DefaultTTL,
-		Now:               now,
-		Secret:            secret,
+		ClientName:              "laptop-1",
+		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
+		ServerPort:              2222,
+		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
+		TargetPort:              5432,
+		Principal:               "warptweet",
+		ProfileID:               "profile-v1",
+		ArtifactProfileID:       "linux-amd64",
+		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
+		TTL:                     DefaultTTL,
+		Now:                     now,
+		Secret:                  secret,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -86,17 +87,18 @@ func TestRevokeInvite(t *testing.T) {
 	}
 	now := time.Date(2026, 8, 12, 13, 0, 0, 0, time.UTC)
 	invite, record, err := Create(CreateInput{
-		ClientName:        "laptop-2",
-		ServerAddress:     netip.MustParseAddr("192.0.2.10"),
-		ServerPort:        2222,
-		TargetAddress:     netip.MustParseAddr("198.51.100.20"),
-		TargetPort:        5432,
-		Principal:         "warptweet",
-		ProfileID:         "profile-v1",
-		ArtifactProfileID: "linux-amd64",
-		HostPublicKey:     "ssh-mldsa44-ed25519@openssh.com AAAA host",
-		Now:               now,
-		Secret:            secret,
+		ClientName:              "laptop-2",
+		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
+		ServerPort:              2222,
+		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
+		TargetPort:              5432,
+		Principal:               "warptweet",
+		ProfileID:               "profile-v1",
+		ArtifactProfileID:       "linux-amd64",
+		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
+		Now:                     now,
+		Secret:                  secret,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -122,16 +124,17 @@ func TestCreateRejectsUnsafeInputs(t *testing.T) {
 
 	secret := make([]byte, InviteSecretBytes)
 	_, _, err := Create(CreateInput{
-		ClientName:        "../evil",
-		ServerAddress:     netip.MustParseAddr("192.0.2.10"),
-		ServerPort:        2222,
-		TargetAddress:     netip.MustParseAddr("198.51.100.20"),
-		TargetPort:        5432,
-		Principal:         "warptweet",
-		ProfileID:         "profile",
-		ArtifactProfileID: "linux-amd64",
-		HostPublicKey:     "key",
-		Secret:            secret,
+		ClientName:              "../evil",
+		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
+		ServerPort:              2222,
+		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
+		TargetPort:              5432,
+		Principal:               "warptweet",
+		ProfileID:               "profile",
+		ArtifactProfileID:       "linux-amd64",
+		HostPublicKey:           "key",
+		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
+		Secret:                  secret,
 	})
 	if err == nil {
 		t.Fatal("Create accepted unsafe client name")

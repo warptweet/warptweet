@@ -11,7 +11,7 @@ Phase A implements the spine:
 
 1. Install **pinned** client and server packages from an artifacts directory  
 2. Start a **deterministic TCP echo** fixture on the server loopback  
-3. Run `gateway` (or init/invite) on the server and pull a `.wtinvite` home  
+3. Run `host` on the server and pull the newly minted `.wtinvite` home
 4. Run `connect` on the local Mac package controller  
 5. Prove echo payload through `127.0.0.1`  
 6. Write a `warptweet.release-evidence` JSON (remaining checklist ids stay `not_run`)
@@ -49,7 +49,9 @@ scripts/interop/
 ## Prerequisites
 
 - Remote Linux host with sudo, `python3`, and `dpkg` or `rpm`
-- Local Mac with sudo for `.pkg` install, `python3`, `ssh`, `scp`
+- Local Mac with administrator authorization for the `.pkg` install,
+  `python3`, `ssh`, and `scp`. Client commands after installation run without
+  `sudo` through the package provisioner.
 - Key loaded in `ssh-agent` (`ssh-add -l` shows it)
 - Artifacts directory containing the exact pinned server `.deb`/`.rpm` and client `.pkg`
 - Digests in config matching those files and post-install engine manifests
@@ -70,13 +72,16 @@ reach for both SSH product port and enroll port (default 29722), e.g.
 ```sh
 cp .env.example .env
 # edit WARPTWEET_INTEROP_SERVER_HOST and WARPTWEET_INTEROP_SSH_IDENTITY
+# set WARPTWEET_INTEROP_SSH_KNOWN_HOSTS or WARPTWEET_INTEROP_SSH_HOST_KEY_FINGERPRINT
 # put server .deb and client .pkg in ./artifacts/
 ssh-add --apple-use-keychain   # unlock key once
 make interop
 ```
 
 `make interop` loads `.env`, fills digests/commit/listen defaults, then runs the
-orchestrator. Prefer pinning host keys for anything beyond a personal lab.
+orchestrator. Configure `WARPTWEET_INTEROP_SSH_KNOWN_HOSTS` or
+`WARPTWEET_INTEROP_SSH_HOST_KEY_FINGERPRINT` before running; admin SSH keeps
+`StrictHostKeyChecking=yes` as required by `scripts/interop/config.example.env`.
 
 ## Run (explicit config)
 
@@ -116,5 +121,8 @@ website CTA from Phase A output alone.
 
 - Building packages from this git tree on the hosts  
 - Classical-only / flood / tamper negatives  
-- TLS-pinned enrollment  
 - Marking public release complete  
+
+Enrollment is no longer a non-goal: Phase A uses the invite-pinned TLS 1.3
+control plane. It still does not complete the full negative, rekey, packaging,
+upgrade, and architecture matrix.

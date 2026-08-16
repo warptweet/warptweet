@@ -11,11 +11,8 @@ import (
 	"time"
 )
 
-// SubmitEnrollment posts one enrollment request to the gateway enroll endpoint
-// and returns the binding proof. Transport is plain HTTP on the invite's enroll
-// port; invite possession is the single-use authorization. Credentials and
-// request bodies travel in cleartext and require a trusted network segment
-// until a pinned TLS profile exists.
+// SubmitEnrollment posts one enrollment request to the invite-pinned hybrid TLS
+// endpoint and returns the binding proof.
 func SubmitEnrollment(ctx context.Context, invite Invite, request EnrollmentRequest) (EnrollmentProof, error) {
 	url, err := EnrollmentURL(invite.ServerAddress, invite.EnrollmentPort())
 	if err != nil {
@@ -25,7 +22,7 @@ func SubmitEnrollment(ctx context.Context, invite Invite, request EnrollmentRequ
 	if err != nil {
 		return EnrollmentProof{}, err
 	}
-	payload, err := postJSON(ctx, url, body)
+	payload, err := postJSON(ctx, url, body, invite.EnrollmentTLSSPKISHA256)
 	if err != nil {
 		return EnrollmentProof{}, err
 	}
@@ -36,9 +33,6 @@ func SubmitEnrollment(ctx context.Context, invite Invite, request EnrollmentRequ
 	if err := ValidateEnrollmentProof(proof, invite, request.PublicKey); err != nil {
 		return EnrollmentProof{}, err
 	}
-	if proof.ManagementToken == "" {
-		return EnrollmentProof{}, fmt.Errorf("%w: enrollment proof missing management_token", ErrInvalidInvite)
-	}
 	if proof.ServerAddress == "" {
 		proof.ServerAddress = invite.ServerAddress
 	}
@@ -48,10 +42,8 @@ func SubmitEnrollment(ctx context.Context, invite Invite, request EnrollmentRequ
 	return proof, nil
 }
 
-// SubmitRevoke asks the gateway to revoke one enrolled client.
-// management_token is transmitted in cleartext over plain HTTP and is
-// long-lived; callers must use a trusted network segment and protect the token.
-func SubmitRevoke(ctx context.Context, serverAddress string, enrollPort uint16, request ManagementRequest) error {
+// SubmitRevoke asks the pinned host to revoke one enrolled client.
+func SubmitRevoke(ctx context.Context, serverAddress string, enrollPort uint16, enrollmentTLSSPKISHA256 string, request ManagementRequest) error {
 	url, err := managementURL(serverAddress, enrollPort, "revoke")
 	if err != nil {
 		return err
@@ -60,14 +52,12 @@ func SubmitRevoke(ctx context.Context, serverAddress string, enrollPort uint16, 
 	if err != nil {
 		return err
 	}
-	_, err = postJSON(ctx, url, body)
+	_, err = postJSON(ctx, url, body, enrollmentTLSSPKISHA256)
 	return err
 }
 
-// SubmitRotate asks the gateway to install a new client public key.
-// management_token is transmitted in cleartext over plain HTTP and is
-// long-lived; callers must use a trusted network segment and protect the token.
-func SubmitRotate(ctx context.Context, serverAddress string, enrollPort uint16, request ManagementRequest) (EnrollmentProof, error) {
+// SubmitRotate asks the pinned host to install a new client public key.
+func SubmitRotate(ctx context.Context, serverAddress string, enrollPort uint16, enrollmentTLSSPKISHA256 string, request ManagementRequest) (EnrollmentProof, error) {
 	url, err := managementURL(serverAddress, enrollPort, "rotate")
 	if err != nil {
 		return EnrollmentProof{}, err
@@ -76,7 +66,7 @@ func SubmitRotate(ctx context.Context, serverAddress string, enrollPort uint16, 
 	if err != nil {
 		return EnrollmentProof{}, err
 	}
-	payload, err := postJSON(ctx, url, body)
+	payload, err := postJSON(ctx, url, body, enrollmentTLSSPKISHA256)
 	if err != nil {
 		return EnrollmentProof{}, err
 	}
@@ -84,7 +74,7 @@ func SubmitRotate(ctx context.Context, serverAddress string, enrollPort uint16, 
 	if err := json.Unmarshal(payload, &proof); err != nil {
 		return EnrollmentProof{}, fmt.Errorf("%w: decode rotate proof: %v", ErrInvalidInvite, err)
 	}
-	if proof.ManagementToken == "" || proof.ClientID == "" || proof.PublicKey == "" {
+	if proof.ClientID == "" || proof.PublicKey == "" || proof.PublicKey != strings.TrimSpace(request.NewPublicKey) {
 		return EnrollmentProof{}, fmt.Errorf("%w: rotate proof incomplete", ErrInvalidInvite)
 	}
 	if proof.EnrollPort == 0 {
@@ -104,10 +94,10 @@ func managementURL(serverAddress string, enrollPort uint16, action string) (stri
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("http://%s/v1/%s", joinHostPort(addr, enrollPort), action), nil
+	return fmt.Sprintf("https://%s/v1/%s", joinHostPort(addr, enrollPort), action), nil
 }
 
-func postJSON(ctx context.Context, url string, body []byte) ([]byte, error) {
+func postJSON(ctx context.Context, url string, body []byte, enrollmentTLSSPKISHA256 string) ([]byte, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -119,8 +109,16 @@ func postJSON(ctx context.Context, url string, body []byte) ([]byte, error) {
 	req.Header.Set("Accept", "application/json")
 	req.ContentLength = int64(len(body))
 
+	tlsConfig, err := PinnedClientTLSConfig(enrollmentTLSSPKISHA256, time.Now)
+	if err != nil {
+		return nil, err
+	}
 	client := &http.Client{
 		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			Proxy:           nil,
+			TLSClientConfig: tlsConfig,
+		},
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},

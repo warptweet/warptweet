@@ -9,7 +9,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -21,6 +23,7 @@ import (
 	"warptweet.com/warptweet/internal/knownhosts"
 	"warptweet.com/warptweet/internal/lifecycle"
 	"warptweet.com/warptweet/internal/profile"
+	"warptweet.com/warptweet/internal/provisioner"
 )
 
 func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer) error {
@@ -73,53 +76,53 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 			return errors.New("enrollment aborted")
 		}
 	}
+	var offlineProof json.RawMessage
+	if proofPath.value != "" {
+		proofRaw, err := os.ReadFile(proofPath.value)
+		if err != nil {
+			return err
+		}
+		offlineProof = proofRaw
+	}
+	if handled, err := callInstalledProvisioner(ctx, provisioner.Request{
+		Version:     provisioner.ProtocolVersion,
+		Action:      provisioner.ActionEnroll,
+		Invite:      append(json.RawMessage(nil), raw...),
+		Proof:       offlineProof,
+		ListenPort:  view.ListenPort,
+		PrepareOnly: prepareOnly.value,
+	}, stdout); handled {
+		return err
+	}
 
 	layout, err := productionClientLayout()
 	if err != nil {
 		return err
 	}
-	keygen := keygenPath(layout)
-
-	generationID := time.Now().UTC().Format("20060102T150405Z")
-	stageRoot := filepath.Join(os.TempDir(), "warptweet-enroll-"+generationID)
-	if err := os.MkdirAll(stageRoot, 0o700); err != nil {
-		return err
-	}
-	// Keep stage for prepare-only; otherwise clean up after activation.
-	cleanupStage := !prepareOnly.value
-	if cleanupStage {
-		defer func() { _ = os.RemoveAll(stageRoot) }()
-	}
-
-	identityPath := filepath.Join(stageRoot, "client")
-	cmd := exec.CommandContext(ctx, keygen,
-		"-t", "mldsa44-ed25519",
-		"-f", identityPath,
-		"-N", "",
-		"-C", "warptweet-client-"+view.TunnelID,
+	pending, stageRoot, identityPath, err := loadOrCreatePendingEnrollment(
+		ctx,
+		layout.ClientManifestPath,
+		keygenPath(layout),
+		invite,
+		view.TunnelID,
 	)
-	cmd.Env = []string{"LANG=C", "LC_ALL=C"}
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("generate client key: %w (%s)", err, strings.TrimSpace(string(output)))
-	}
-	publicKeyBytes, err := os.ReadFile(identityPath + ".pub")
 	if err != nil {
 		return err
 	}
-	publicKey := strings.TrimSpace(string(publicKeyBytes))
-	if publicKey == "" || strings.ContainsAny(publicKey, "\r\n") {
-		return errors.New("client public key must be one line")
-	}
+	generationID := pending.Generation
+	publicKey := pending.PublicKey
+	managementToken := pending.ManagementToken
 
 	request := enrollment.EnrollmentRequest{
-		InviteID:      invite.InviteID,
-		Nonce:         invite.Nonce,
-		ClientName:    invite.ClientName,
-		PublicKey:     publicKey,
-		ProfileID:     invite.ProfileID,
-		TunnelID:      view.TunnelID,
-		ListenAddress: view.ListenAddress,
-		ListenPort:    view.ListenPort,
+		InviteID:        invite.InviteID,
+		Nonce:           invite.Nonce,
+		ClientName:      invite.ClientName,
+		PublicKey:       publicKey,
+		ProfileID:       invite.ProfileID,
+		TunnelID:        view.TunnelID,
+		ListenAddress:   view.ListenAddress,
+		ListenPort:      view.ListenPort,
+		ManagementToken: managementToken,
 	}
 	requestJSON, err := enrollment.EncodeEnrollmentRequest(request)
 	if err != nil {
@@ -131,11 +134,7 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 
 	var proof enrollment.EnrollmentProof
 	if proofPath.value != "" {
-		proofRaw, err := os.ReadFile(proofPath.value)
-		if err != nil {
-			return err
-		}
-		if err := json.Unmarshal(proofRaw, &proof); err != nil {
+		if err := json.Unmarshal(offlineProof, &proof); err != nil {
 			return fmt.Errorf("parse enrollment proof: %w", err)
 		}
 		if err := enrollment.ValidateEnrollmentProof(proof, invite, publicKey); err != nil {
@@ -186,15 +185,15 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 
 	if prepareOnly.value {
 		return writeJSON(stdout, map[string]any{
-			"status":              "prepared",
-			"tunnel_id":           view.TunnelID,
-			"listen_endpoint":     listenEndpoint,
-			"service_endpoint":    serviceEndpoint,
-			"enrollment_request":  request,
-			"stage_directory":     stageRoot,
-			"identity_public_key": publicKey,
-			"profile_id":          profile.CurrentID,
-			"target_health":       lifecycle.TargetHealthNotChecked,
+			"status":                  "prepared",
+			"tunnel_id":               view.TunnelID,
+			"listen_endpoint":         listenEndpoint,
+			"service_endpoint":        serviceEndpoint,
+			"enrollment_request_path": filepath.Join(stageRoot, "enrollment-request.json"),
+			"stage_directory":         stageRoot,
+			"identity_public_key":     publicKey,
+			"profile_id":              profile.CurrentID,
+			"target_health":           lifecycle.TargetHealthNotChecked,
 		})
 	}
 
@@ -216,21 +215,25 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		enrollPort = invite.EnrollmentPort()
 	}
 	if err := writeEnrollmentReceipt(layout.ClientManifestPath, enrollmentReceipt{
-		InviteID:         invite.InviteID,
-		ClientID:         proof.ClientID,
-		TunnelID:         view.TunnelID,
-		AcceptedAt:       proof.AcceptedAt,
-		Generation:       generationID,
-		ManagementToken:  proof.ManagementToken,
-		ServerAddress:    firstNonEmptyString(proof.ServerAddress, invite.ServerAddress),
-		EnrollPort:       enrollPort,
-		PublicKey:        publicKey,
-		HostPublicKey:    invite.HostPublicKey,
-		Target:           serviceEndpoint,
-		Principal:        invite.Principal,
-		ProfileID:        invite.ProfileID,
+		InviteID:                invite.InviteID,
+		ClientID:                proof.ClientID,
+		TunnelID:                view.TunnelID,
+		AcceptedAt:              proof.AcceptedAt,
+		Generation:              generationID,
+		ManagementToken:         managementToken,
+		ServerAddress:           firstNonEmptyString(proof.ServerAddress, invite.ServerAddress),
+		EnrollPort:              enrollPort,
+		PublicKey:               publicKey,
+		HostPublicKey:           invite.HostPublicKey,
+		EnrollmentTLSSPKISHA256: invite.EnrollmentTLSSPKISHA256,
+		Target:                  serviceEndpoint,
+		Principal:               invite.Principal,
+		ProfileID:               invite.ProfileID,
 	}); err != nil {
 		return err
+	}
+	if err := os.RemoveAll(stageRoot); err != nil {
+		return fmt.Errorf("remove completed pending enrollment: %w", err)
 	}
 
 	store := lifecycle.Store{Root: layout.ClientRuntimeRoot}
@@ -266,6 +269,12 @@ func runUp(ctx context.Context, arguments []string, stdout, stderr io.Writer, de
 		return errors.New("up requires exactly one tunnel-id")
 	}
 	tunnelID := positionals[0]
+	if handled, err := callInstalledProvisioner(ctx, provisioner.Request{
+		Version: provisioner.ProtocolVersion, Action: provisioner.ActionUp,
+		TunnelID: tunnelID, Once: once.value,
+	}, stdout); handled {
+		return err
+	}
 	if dependencies.loadProductionClientManifest == nil {
 		return errors.New("production client manifest loader is required")
 	}
@@ -323,12 +332,21 @@ func runUp(ctx context.Context, arguments []string, stdout, stderr io.Writer, de
 		// Default to --once for up so package/service managers own restart policy.
 		args = append(args, "--once")
 	}
+	readyRead, readyWrite, err := os.Pipe()
+	if err != nil {
+		return fmt.Errorf("create readiness pipe: %w", err)
+	}
+	defer readyRead.Close()
+	args = append(args, "--ready-fd", "3")
 	cmd := exec.CommandContext(ctx, self, args...)
 	cmd.Env = []string{"LANG=C", "LC_ALL=C"}
+	cmd.ExtraFiles = []*os.File{readyWrite}
 	if err := cmd.Start(); err != nil {
+		_ = readyWrite.Close()
 		_ = store.Write(lifecycle.State{TunnelID: tunnelID, Phase: lifecycle.PhaseFailed, Error: err.Error(), TargetHealth: lifecycle.TargetHealthNotChecked})
 		return err
 	}
+	_ = readyWrite.Close()
 	_ = store.Write(lifecycle.State{
 		TunnelID:       tunnelID,
 		Phase:          lifecycle.PhaseAwaitingReadiness,
@@ -339,7 +357,41 @@ func runUp(ctx context.Context, arguments []string, stdout, stderr io.Writer, de
 
 	done := make(chan error, 1)
 	go func() { done <- cmd.Wait() }()
-	timer := time.NewTimer(2 * time.Second)
+	readyResult := make(chan struct {
+		sshPID int
+		err    error
+	}, 1)
+	go func() {
+		line, readErr := bufio.NewReader(io.LimitReader(readyRead, 128)).ReadString('\n')
+		if readErr != nil {
+			readyResult <- struct {
+				sshPID int
+				err    error
+			}{err: fmt.Errorf("read authenticated readiness: %w", readErr)}
+			return
+		}
+		fields := strings.Fields(line)
+		if len(fields) != 2 || fields[0] != "READY" {
+			readyResult <- struct {
+				sshPID int
+				err    error
+			}{err: errors.New("authenticated readiness message is malformed")}
+			return
+		}
+		sshPID, parseErr := strconv.Atoi(fields[1])
+		if parseErr != nil || sshPID <= 0 {
+			readyResult <- struct {
+				sshPID int
+				err    error
+			}{err: errors.New("authenticated readiness PID is invalid")}
+			return
+		}
+		readyResult <- struct {
+			sshPID int
+			err    error
+		}{sshPID: sshPID}
+	}()
+	timer := time.NewTimer(45 * time.Second)
 	defer timer.Stop()
 	select {
 	case err := <-done:
@@ -361,7 +413,16 @@ func runUp(ctx context.Context, arguments []string, stdout, stderr io.Writer, de
 		if err != nil {
 			return fmt.Errorf("tunnel exited: %w", err)
 		}
-	case <-timer.C:
+	case ready := <-readyResult:
+		if ready.err != nil {
+			processErr := terminateAndReapCommand(cmd, done)
+			_ = store.Write(lifecycle.State{TunnelID: tunnelID, Phase: lifecycle.PhaseFailed, Error: ready.err.Error(), TargetHealth: lifecycle.TargetHealthNotChecked})
+			return errors.Join(ready.err, processErr)
+		}
+		if !processAlive(cmd.Process.Pid) {
+			processErr := <-done
+			return fmt.Errorf("tunnel exited at authenticated readiness boundary: %w", processErr)
+		}
 		_ = store.Write(lifecycle.State{
 			TunnelID:       tunnelID,
 			Phase:          lifecycle.PhaseReady,
@@ -369,9 +430,16 @@ func runUp(ctx context.Context, arguments []string, stdout, stderr io.Writer, de
 			ListenEndpoint: listenEndpoint,
 			TargetHealth:   lifecycle.TargetHealthNotChecked,
 		})
+	case <-timer.C:
+		processErr := terminateAndReapCommand(cmd, done)
+		err := errors.New("timed out waiting for authenticated tunnel readiness")
+		_ = store.Write(lifecycle.State{TunnelID: tunnelID, Phase: lifecycle.PhaseFailed, Error: err.Error(), TargetHealth: lifecycle.TargetHealthNotChecked})
+		return errors.Join(err, processErr)
 	case <-ctx.Done():
-		_ = cmd.Process.Signal(syscall.SIGTERM)
-		return ctx.Err()
+		processErr := terminateAndReapCommand(cmd, done)
+		err := ctx.Err()
+		_ = store.Write(lifecycle.State{TunnelID: tunnelID, Phase: lifecycle.PhaseFailed, Error: err.Error(), TargetHealth: lifecycle.TargetHealthNotChecked})
+		return errors.Join(err, processErr)
 	}
 
 	return writeJSON(stdout, map[string]any{
@@ -382,6 +450,29 @@ func runUp(ctx context.Context, arguments []string, stdout, stderr io.Writer, de
 		"listen_endpoint": listenEndpoint,
 		"target_health":   lifecycle.TargetHealthNotChecked,
 	})
+}
+
+func terminateAndReapCommand(cmd *exec.Cmd, done <-chan error) error {
+	if cmd == nil || cmd.Process == nil {
+		return nil
+	}
+	_ = cmd.Process.Signal(syscall.SIGTERM)
+	timer := time.NewTimer(5 * time.Second)
+	defer timer.Stop()
+	select {
+	case err := <-done:
+		return err
+	case <-timer.C:
+	}
+	_ = cmd.Process.Signal(syscall.SIGKILL)
+	killTimer := time.NewTimer(2 * time.Second)
+	defer killTimer.Stop()
+	select {
+	case err := <-done:
+		return err
+	case <-killTimer.C:
+		return errors.New("tunnel controller did not exit after SIGKILL")
+	}
 }
 
 func runStatus(arguments []string, stdout, stderr io.Writer) error {
@@ -397,14 +488,23 @@ func runStatus(arguments []string, stdout, stderr io.Writer) error {
 		useJSON = asJSON.value
 	}
 
+	if len(positionals) > 1 {
+		return errors.New("status accepts at most one tunnel-id")
+	}
+	tunnelID := ""
+	if len(positionals) == 1 {
+		tunnelID = positionals[0]
+	}
+	if handled, err := callInstalledProvisioner(context.Background(), provisioner.Request{
+		Version: provisioner.ProtocolVersion, Action: provisioner.ActionStatus, TunnelID: tunnelID,
+	}, stdout); handled {
+		return err
+	}
 	layout, err := productionClientLayout()
 	if err != nil {
 		return err
 	}
 	store := lifecycle.Store{Root: layout.ClientRuntimeRoot}
-	if len(positionals) > 1 {
-		return errors.New("status accepts at most one tunnel-id")
-	}
 	if len(positionals) == 1 {
 		state, err := store.Read(positionals[0])
 		if err != nil {
@@ -441,6 +541,11 @@ func runDown(arguments []string, stdout, stderr io.Writer) error {
 		return errors.New("down requires exactly one tunnel-id")
 	}
 	tunnelID := positionals[0]
+	if handled, err := callInstalledProvisioner(context.Background(), provisioner.Request{
+		Version: provisioner.ProtocolVersion, Action: provisioner.ActionDown, TunnelID: tunnelID,
+	}, stdout); handled {
+		return err
+	}
 	layout, err := productionClientLayout()
 	if err != nil {
 		return err
@@ -504,6 +609,11 @@ func runRotate(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	}
 	tunnelID := positionals[0]
 	_ = stderr
+	if handled, err := callInstalledProvisioner(ctx, provisioner.Request{
+		Version: provisioner.ProtocolVersion, Action: provisioner.ActionRotate, TunnelID: tunnelID,
+	}, stdout); handled {
+		return err
+	}
 
 	layout, err := productionClientLayout()
 	if err != nil {
@@ -528,47 +638,30 @@ func runRotate(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		return errors.New("enrollment receipt missing management token; re-enroll before rotate")
 	}
 
-	keygen := keygenPath(layout)
-	generationID := time.Now().UTC().Format("20060102T150405Z")
-	stageRoot := filepath.Join(os.TempDir(), "warptweet-rotate-"+generationID)
-	if err := os.MkdirAll(stageRoot, 0o700); err != nil {
-		return err
-	}
-	defer func() { _ = os.RemoveAll(stageRoot) }()
-
-	identityPath := filepath.Join(stageRoot, "client")
-	cmd := exec.CommandContext(ctx, keygen,
-		"-t", "mldsa44-ed25519",
-		"-f", identityPath,
-		"-N", "",
-		"-C", "warptweet-client-"+tunnelID,
-	)
-	cmd.Env = []string{"LANG=C", "LC_ALL=C"}
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("generate rotated client key: %w (%s)", err, strings.TrimSpace(string(output)))
-	}
-	publicKeyBytes, err := os.ReadFile(identityPath + ".pub")
+	pending, stageRoot, identityPath, err := loadOrCreatePendingRotation(ctx, layout.ClientManifestPath, keygenPath(layout), receipt, tunnelID)
 	if err != nil {
 		return err
 	}
-	publicKey := strings.TrimSpace(string(publicKeyBytes))
-	if publicKey == "" || strings.ContainsAny(publicKey, "\r\n") {
-		return errors.New("client public key must be one line")
-	}
+	generationID := pending.Generation
+	publicKey := pending.PublicKey
 
-	proof, err := enrollment.SubmitRotate(ctx, receipt.ServerAddress, receipt.enrollPortOrDefault(), enrollment.ManagementRequest{
-		ClientID:        receipt.ClientID,
-		ManagementToken: receipt.ManagementToken,
-		TunnelID:        tunnelID,
-		NewPublicKey:    publicKey,
+	if receipt.EnrollmentTLSSPKISHA256 == "" {
+		return errors.New("enrollment receipt missing TLS SPKI pin; re-enroll before rotate")
+	}
+	proof, err := enrollment.SubmitRotate(ctx, receipt.ServerAddress, receipt.enrollPortOrDefault(), receipt.EnrollmentTLSSPKISHA256, enrollment.ManagementRequest{
+		ClientID:            receipt.ClientID,
+		ManagementToken:     pending.CurrentManagementToken,
+		TunnelID:            tunnelID,
+		NewPublicKey:        publicKey,
+		NextManagementToken: pending.NextManagementToken,
 	})
 	if err != nil {
-		return fmt.Errorf("gateway rotate: %w", err)
+		return fmt.Errorf("host rotate: %w", err)
 	}
 
-	// Persist gateway-accepted credentials before activation so a failed
+	// Persist host-accepted credentials before activation so a failed
 	// activate still retains the new management token and public key.
-	receipt.ManagementToken = proof.ManagementToken
+	receipt.ManagementToken = pending.NextManagementToken
 	receipt.PublicKey = publicKey
 	receipt.AcceptedAt = proof.AcceptedAt
 	if proof.EnrollPort != 0 {
@@ -606,6 +699,9 @@ func runRotate(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	if err := writeEnrollmentReceipt(layout.ClientManifestPath, receipt); err != nil {
 		return err
 	}
+	if err := os.RemoveAll(stageRoot); err != nil {
+		return fmt.Errorf("remove completed pending rotation: %w", err)
+	}
 	_ = store.Write(lifecycle.State{
 		TunnelID:     tunnelID,
 		Phase:        lifecycle.PhaseStopped,
@@ -633,6 +729,11 @@ func runRevokeTunnel(ctx context.Context, arguments []string, stdout, stderr io.
 	}
 	tunnelID := positionals[0]
 	_ = stderr
+	if handled, err := callInstalledProvisioner(ctx, provisioner.Request{
+		Version: provisioner.ProtocolVersion, Action: provisioner.ActionRevoke, TunnelID: tunnelID,
+	}, stdout); handled {
+		return err
+	}
 
 	layout, err := productionClientLayout()
 	if err != nil {
@@ -654,14 +755,17 @@ func runRevokeTunnel(ctx context.Context, arguments []string, stdout, stderr io.
 		return err
 	}
 	if receipt.ManagementToken == "" || receipt.ClientID == "" {
-		return errors.New("enrollment receipt missing management token; use server revoke on the gateway")
+		return errors.New("enrollment receipt missing management token; use server revoke on the host")
 	}
-	if err := enrollment.SubmitRevoke(ctx, receipt.ServerAddress, receipt.enrollPortOrDefault(), enrollment.ManagementRequest{
+	if receipt.EnrollmentTLSSPKISHA256 == "" {
+		return errors.New("enrollment receipt missing TLS SPKI pin; use server revoke on the host")
+	}
+	if err := enrollment.SubmitRevoke(ctx, receipt.ServerAddress, receipt.enrollPortOrDefault(), receipt.EnrollmentTLSSPKISHA256, enrollment.ManagementRequest{
 		ClientID:        receipt.ClientID,
 		ManagementToken: receipt.ManagementToken,
 		TunnelID:        tunnelID,
 	}); err != nil {
-		return fmt.Errorf("gateway revoke: %w", err)
+		return fmt.Errorf("host revoke: %w", err)
 	}
 
 	receipt.ManagementToken = ""
@@ -679,27 +783,211 @@ func runRevokeTunnel(ctx context.Context, arguments []string, stdout, stderr io.
 		"status":        "revoked",
 		"tunnel_id":     tunnelID,
 		"client_id":     receipt.ClientID,
-		"gateway":       "acknowledged",
+		"host":          "acknowledged",
 		"identity":      "preserved_local",
 		"target_health": lifecycle.TargetHealthNotChecked,
 	})
 }
 
 type enrollmentReceipt struct {
-	InviteID         string `json:"invite_id"`
-	ClientID         string `json:"client_id"`
-	TunnelID         string `json:"tunnel_id"`
-	AcceptedAt       string `json:"accepted_at"`
-	Generation       string `json:"generation"`
-	ManagementToken  string `json:"management_token,omitempty"`
-	ServerAddress    string `json:"server_address"`
-	EnrollPort       uint16 `json:"enroll_port,omitempty"`
-	PublicKey        string `json:"public_key,omitempty"`
-	HostPublicKey    string `json:"host_public_key,omitempty"`
-	Target           string `json:"target,omitempty"`
-	Principal        string `json:"principal,omitempty"`
-	ProfileID        string `json:"profile_id,omitempty"`
-	RevokedAt        string `json:"revoked_at,omitempty"`
+	InviteID                string `json:"invite_id"`
+	ClientID                string `json:"client_id"`
+	TunnelID                string `json:"tunnel_id"`
+	AcceptedAt              string `json:"accepted_at"`
+	Generation              string `json:"generation"`
+	ManagementToken         string `json:"management_token,omitempty"`
+	ServerAddress           string `json:"server_address"`
+	EnrollPort              uint16 `json:"enroll_port,omitempty"`
+	PublicKey               string `json:"public_key,omitempty"`
+	HostPublicKey           string `json:"host_public_key,omitempty"`
+	EnrollmentTLSSPKISHA256 string `json:"enrollment_tls_spki_sha256"`
+	Target                  string `json:"target,omitempty"`
+	Principal               string `json:"principal,omitempty"`
+	ProfileID               string `json:"profile_id,omitempty"`
+	RevokedAt               string `json:"revoked_at,omitempty"`
+}
+
+type pendingRotation struct {
+	ClientID               string `json:"client_id"`
+	TunnelID               string `json:"tunnel_id"`
+	Generation             string `json:"generation"`
+	PublicKey              string `json:"public_key"`
+	CurrentManagementToken string `json:"current_management_token"`
+	NextManagementToken    string `json:"next_management_token"`
+}
+
+type pendingEnrollment struct {
+	InviteID        string `json:"invite_id"`
+	TunnelID        string `json:"tunnel_id"`
+	Generation      string `json:"generation"`
+	PublicKey       string `json:"public_key"`
+	ManagementToken string `json:"management_token"`
+}
+
+func loadOrCreatePendingEnrollment(
+	ctx context.Context,
+	clientManifestPath string,
+	keygen string,
+	invite enrollment.Invite,
+	tunnelID string,
+) (pendingEnrollment, string, string, error) {
+	root := filepath.Join(enrollmentReceiptDir(clientManifestPath), "pending-enrollment")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return pendingEnrollment{}, "", "", err
+	}
+	directory := filepath.Join(root, invite.InviteID)
+	statePath := filepath.Join(directory, "enrollment.json")
+	identityPath := filepath.Join(directory, "client")
+	var pending pendingEnrollment
+	found, err := loadPendingJSONState(statePath, &pending)
+	if err != nil {
+		return pendingEnrollment{}, "", "", fmt.Errorf("parse pending enrollment: %w", err)
+	}
+	if found {
+		if pending.InviteID != invite.InviteID || pending.TunnelID != tunnelID ||
+			enrollment.ValidateManagementToken(pending.ManagementToken) != nil {
+			return pendingEnrollment{}, "", "", errors.New("pending enrollment does not match the invite")
+		}
+		if err := verifyPendingIdentityPublicKey(identityPath, pending.PublicKey, "pending enrollment public key changed"); err != nil {
+			return pendingEnrollment{}, "", "", err
+		}
+		return pending, directory, identityPath, nil
+	}
+	publicKey, err := createPendingClientIdentity(ctx, keygen, directory, identityPath, "warptweet-client-"+tunnelID, "generate client key")
+	if err != nil {
+		return pendingEnrollment{}, "", "", err
+	}
+	token, err := enrollment.GenerateManagementToken()
+	if err != nil {
+		return pendingEnrollment{}, "", "", err
+	}
+	pending = pendingEnrollment{
+		InviteID:        invite.InviteID,
+		TunnelID:        tunnelID,
+		Generation:      time.Now().UTC().Format("20060102T150405.000000000Z"),
+		PublicKey:       publicKey,
+		ManagementToken: token,
+	}
+	if err := writePendingJSONState(statePath, pending); err != nil {
+		return pendingEnrollment{}, "", "", err
+	}
+	return pending, directory, identityPath, nil
+}
+
+func loadOrCreatePendingRotation(
+	ctx context.Context,
+	clientManifestPath string,
+	keygen string,
+	receipt enrollmentReceipt,
+	tunnelID string,
+) (pendingRotation, string, string, error) {
+	root := filepath.Join(enrollmentReceiptDir(clientManifestPath), "pending-rotation")
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		return pendingRotation{}, "", "", err
+	}
+	directory := filepath.Join(root, tunnelID)
+	statePath := filepath.Join(directory, "rotation.json")
+	identityPath := filepath.Join(directory, "client")
+	var pending pendingRotation
+	found, err := loadPendingJSONState(statePath, &pending)
+	if err != nil {
+		return pendingRotation{}, "", "", fmt.Errorf("parse pending rotation: %w", err)
+	}
+	if found {
+		if pending.ClientID != receipt.ClientID || pending.TunnelID != tunnelID ||
+			(pending.CurrentManagementToken != receipt.ManagementToken && pending.NextManagementToken != receipt.ManagementToken) ||
+			enrollment.ValidateManagementToken(pending.CurrentManagementToken) != nil ||
+			enrollment.ValidateManagementToken(pending.NextManagementToken) != nil {
+			return pendingRotation{}, "", "", errors.New("pending rotation does not match the enrollment receipt")
+		}
+		if err := verifyPendingIdentityPublicKey(identityPath, pending.PublicKey, "pending rotation public key changed"); err != nil {
+			return pendingRotation{}, "", "", err
+		}
+		return pending, directory, identityPath, nil
+	}
+	publicKey, err := createPendingClientIdentity(ctx, keygen, directory, identityPath, "warptweet-client-"+tunnelID, "generate rotated client key")
+	if err != nil {
+		return pendingRotation{}, "", "", err
+	}
+	nextToken, err := enrollment.GenerateManagementToken()
+	if err != nil {
+		return pendingRotation{}, "", "", err
+	}
+	pending = pendingRotation{
+		ClientID:               receipt.ClientID,
+		TunnelID:               tunnelID,
+		Generation:             time.Now().UTC().Format("20060102T150405.000000000Z"),
+		PublicKey:              publicKey,
+		CurrentManagementToken: receipt.ManagementToken,
+		NextManagementToken:    nextToken,
+	}
+	if err := writePendingJSONState(statePath, pending); err != nil {
+		return pendingRotation{}, "", "", err
+	}
+	return pending, directory, identityPath, nil
+}
+
+func loadPendingJSONState(statePath string, destination any) (bool, error) {
+	raw, err := os.ReadFile(statePath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func verifyPendingIdentityPublicKey(identityPath, wantPublicKey, mismatchMessage string) error {
+	publicKeyBytes, err := os.ReadFile(identityPath + ".pub")
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(string(publicKeyBytes)) != wantPublicKey {
+		return errors.New(mismatchMessage)
+	}
+	return nil
+}
+
+func createPendingClientIdentity(ctx context.Context, keygen, directory, identityPath, comment, failurePrefix string) (string, error) {
+	if err := os.RemoveAll(directory); err != nil {
+		return "", err
+	}
+	if err := os.Mkdir(directory, 0o700); err != nil {
+		return "", err
+	}
+	cmd := exec.CommandContext(ctx, keygen,
+		"-t", "mldsa44-ed25519",
+		"-f", identityPath,
+		"-N", "",
+		"-C", comment,
+	)
+	cmd.Env = []string{"LANG=C", "LC_ALL=C"}
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return "", fmt.Errorf("%s: %w (%s)", failurePrefix, err, strings.TrimSpace(string(output)))
+	}
+	publicKeyBytes, err := os.ReadFile(identityPath + ".pub")
+	if err != nil {
+		return "", err
+	}
+	publicKey := strings.TrimSpace(string(publicKeyBytes))
+	if publicKey == "" || strings.ContainsAny(publicKey, "\r\n") {
+		return "", errors.New("client public key must be one line")
+	}
+	return publicKey, nil
+}
+
+func writePendingJSONState(statePath string, value any) error {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return err
+	}
+	return writeFileAtomic(statePath, append(raw, '\n'), 0o600)
 }
 
 func (receipt enrollmentReceipt) enrollPortOrDefault() uint16 {
@@ -832,7 +1120,8 @@ func activateGeneration(
 			return err
 		}
 	}
-	if err := copyFile(stageIdentity, identityPath, 0o440); err != nil {
+	// OpenSSH refuses private keys with group/other bits (authfile "too open").
+	if err := copyFile(stageIdentity, identityPath, 0o600); err != nil {
 		return err
 	}
 	if err := copyFile(stageIdentity+".pub", identityPath+".pub", 0o440); err != nil {
@@ -844,7 +1133,19 @@ func activateGeneration(
 	if err := copyFile(stageKnownHosts, knownHostsPath, 0o440); err != nil {
 		return err
 	}
-	return copyFile(stageEmpty, emptyTrustPath, 0o440)
+	if err := copyFile(stageEmpty, emptyTrustPath, 0o440); err != nil {
+		return err
+	}
+	return ownClientStateFiles(
+		identityPath,
+		filepath.Dir(identityPath),
+		filepath.Dir(knownHostsPath),
+		identityPath,
+		identityPath+".pub",
+		manifestPath,
+		knownHostsPath,
+		emptyTrustPath,
+	)
 }
 
 func copyFile(source, destination string, mode os.FileMode) error {
@@ -853,6 +1154,58 @@ func copyFile(source, destination string, mode os.FileMode) error {
 		return err
 	}
 	return writeFileAtomic(destination, contents, mode)
+}
+
+// ownClientStateFiles makes the private key service-owned at 0600 and keeps
+// policy/trust root-owned with the service group able to read them.
+func ownClientStateFiles(privateIdentityPath string, paths ...string) error {
+	if os.Geteuid() != 0 {
+		return nil
+	}
+	groupName := installlayout.ClientServiceGroup
+	if runtime.GOOS == "darwin" {
+		groupName = installlayout.DarwinClientServiceGroup
+	}
+	group, err := user.LookupGroup(groupName)
+	if err != nil {
+		return fmt.Errorf("lookup service group %q: %w", groupName, err)
+	}
+	gid, err := strconv.Atoi(group.Gid)
+	if err != nil {
+		return fmt.Errorf("parse service group id %q: %w", group.Gid, err)
+	}
+	userName := installlayout.ClientServiceUser
+	if runtime.GOOS == "darwin" {
+		userName = installlayout.DarwinClientServiceUser
+	}
+	serviceUser, err := user.Lookup(userName)
+	if err != nil {
+		return fmt.Errorf("lookup service user %q: %w", userName, err)
+	}
+	uid, err := strconv.Atoi(serviceUser.Uid)
+	if err != nil {
+		return fmt.Errorf("parse service user id %q: %w", serviceUser.Uid, err)
+	}
+	cleanedIdentity := filepath.Clean(privateIdentityPath)
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		if _, err := os.Lstat(path); err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return err
+		}
+		ownerUID := 0
+		if filepath.Clean(path) == cleanedIdentity {
+			ownerUID = uid
+		}
+		if err := os.Chown(path, ownerUID, gid); err != nil {
+			return fmt.Errorf("chown %s: %w", path, err)
+		}
+	}
+	return nil
 }
 
 func keygenPath(layout artifactprofile.Layout) string {

@@ -30,6 +30,7 @@ func TestLinuxPackageBuildScriptContract(t *testing.T) {
 		`dpkg-deb`,
 		`var/lib/warptweet/invites`,
 		`Package: warptweet`,
+		`dpkg-deb --root-owner-group`,
 	} {
 		if !strings.Contains(contents, required) {
 			t.Errorf("linux package script omits %q", required)
@@ -77,9 +78,20 @@ func TestLinuxPackageScriptsForbidNetwork(t *testing.T) {
 		`*NP*`,
 		`/var/empty/warptweet-sshd`,
 		`/var/lib/warptweet/invites`,
+		`usermod -L warptweet-client`,
+		`usermod -L warptweet-sshd`,
 	} {
 		if !strings.Contains(postinst, required) {
 			t.Errorf("postinst omits %q", required)
+		}
+	}
+	enrollmentUnit := string(readFile(t, filepath.Join(root, "packaging/systemd/warptweet-enroll.service")))
+	for _, required := range []string{
+		`ReadWritePaths=/var/lib/warptweet /opt/warptweet/etc/authorized_keys /etc/warptweet/enrollment`,
+		`ExecStart=/opt/warptweet/bin/warptweet server enroll-listen`,
+	} {
+		if !strings.Contains(enrollmentUnit, required) {
+			t.Errorf("enrollment unit omits %q", required)
 		}
 	}
 }

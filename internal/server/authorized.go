@@ -15,8 +15,8 @@ const (
 	// OpenSSH's authorized_keys line-size limit.
 	MaxAuthorizedKeyInputBytes = 8 << 10
 	// MaxAuthorizedKeysBytes bounds validation of the complete product-owned
-	// authorization file. The v1 server policy permits exactly one entry.
-	MaxAuthorizedKeysBytes = 8 << 10
+	// authorization file while permitting a managed set of enrolled clients.
+	MaxAuthorizedKeysBytes = 1 << 20
 
 	// ManagedClientMarker is the only comment accepted on a managed client
 	// authorization entry.
@@ -79,16 +79,16 @@ func RenderAuthorizedKey(config Config, publicKey []byte) ([]byte, error) {
 	return renderManagedAuthorizedKey(config, selectedProfile.AuthenticationKeyType, fields[1]), nil
 }
 
-// ValidateAuthorizedKeys requires one byte-for-byte canonical authorization
-// entry produced by RenderAuthorizedKey for config. Blank lines, comments,
-// alternate option ordering, and additional client keys are rejected.
+// ValidateAuthorizedKeys requires zero or more byte-for-byte canonical,
+// distinct authorization entries produced by RenderAuthorizedKey for config.
+// An empty file is the valid pre-enrollment state.
 func ValidateAuthorizedKeys(config Config, contents []byte) (AuthorizedKeysReport, error) {
 	selectedProfile, err := validate(config)
 	if err != nil {
 		return AuthorizedKeysReport{}, fmt.Errorf("validate authorized keys: %w", err)
 	}
 	if len(contents) == 0 {
-		return AuthorizedKeysReport{}, invalidAuthorizedKey("authorized_keys input is empty")
+		return AuthorizedKeysReport{KeyCount: 0}, nil
 	}
 	if len(contents) > MaxAuthorizedKeysBytes {
 		return AuthorizedKeysReport{}, invalidAuthorizedKey(
@@ -102,56 +102,40 @@ func ValidateAuthorizedKeys(config Config, contents []byte) (AuthorizedKeysRepor
 			"authorized_keys entry must end with exactly one LF",
 		)
 	}
-	line := contents[:len(contents)-1]
-	if len(line) == 0 || bytes.IndexByte(line, '\r') >= 0 || bytes.IndexByte(line, '\n') >= 0 {
-		return AuthorizedKeysReport{}, invalidAuthorizedKey(
-			"authorized_keys must contain exactly one LF-terminated entry",
-		)
-	}
-	for index, value := range line {
-		if value < 0x20 || value == 0x7f {
-			return AuthorizedKeysReport{}, invalidAuthorizedKey(
-				"authorized_keys contains a control character at byte %d",
-				index,
-			)
-		}
-	}
-
 	prefix := managedAuthorizedKeyPrefix(config, selectedProfile.AuthenticationKeyType)
 	suffix := " " + ManagedClientMarker
-	text := string(line)
-	if !strings.HasPrefix(text, prefix) || !strings.HasSuffix(text, suffix) {
-		return AuthorizedKeysReport{}, invalidAuthorizedKey(
-			"authorized_keys entry does not match the canonical managed format",
-		)
+	lines := bytes.Split(contents[:len(contents)-1], []byte{'\n'})
+	seen := make(map[string]struct{}, len(lines))
+	for lineIndex, line := range lines {
+		if len(line) == 0 || len(line) > MaxAuthorizedKeyInputBytes || bytes.IndexByte(line, '\r') >= 0 {
+			return AuthorizedKeysReport{}, invalidAuthorizedKey("authorized_keys line %d has invalid length or terminator", lineIndex+1)
+		}
+		for byteIndex, value := range line {
+			if value < 0x20 || value == 0x7f {
+				return AuthorizedKeysReport{}, invalidAuthorizedKey("authorized_keys line %d contains a control character at byte %d", lineIndex+1, byteIndex)
+			}
+		}
+		text := string(line)
+		if !strings.HasPrefix(text, prefix) || !strings.HasSuffix(text, suffix) {
+			return AuthorizedKeysReport{}, invalidAuthorizedKey("authorized_keys line %d does not match the canonical managed format", lineIndex+1)
+		}
+		blob := strings.TrimSuffix(strings.TrimPrefix(text, prefix), suffix)
+		if blob == "" || strings.ContainsAny(blob, " \t") {
+			return AuthorizedKeysReport{}, invalidAuthorizedKey("authorized_keys line %d contains an invalid public-key blob field", lineIndex+1)
+		}
+		if _, duplicate := seen[blob]; duplicate {
+			return AuthorizedKeysReport{}, invalidAuthorizedKey("authorized_keys line %d duplicates an earlier client key", lineIndex+1)
+		}
+		seen[blob] = struct{}{}
+		if err := sshwire.ValidatePublicKeyBlob(blob, selectedProfile.AuthenticationKeyType, selectedProfile.RawPublicKeyBytes); err != nil {
+			return AuthorizedKeysReport{}, invalidAuthorizedKey("validate authorized_keys line %d public-key blob: %v", lineIndex+1, err)
+		}
+		canonical := renderManagedAuthorizedKey(config, selectedProfile.AuthenticationKeyType, blob)
+		if len(canonical) == 0 || canonical[len(canonical)-1] != '\n' || !bytes.Equal(line, canonical[:len(canonical)-1]) {
+			return AuthorizedKeysReport{}, invalidAuthorizedKey("authorized_keys line %d is not byte-for-byte canonical", lineIndex+1)
+		}
 	}
-	blob := strings.TrimSuffix(strings.TrimPrefix(text, prefix), suffix)
-	if blob == "" || strings.ContainsAny(blob, " \t") {
-		return AuthorizedKeysReport{}, invalidAuthorizedKey(
-			"authorized_keys entry contains an invalid public-key blob field",
-		)
-	}
-	if err := sshwire.ValidatePublicKeyBlob(
-		blob,
-		selectedProfile.AuthenticationKeyType,
-		selectedProfile.RawPublicKeyBytes,
-	); err != nil {
-		return AuthorizedKeysReport{}, invalidAuthorizedKey(
-			"validate authorized_keys public-key blob: %v",
-			err,
-		)
-	}
-	canonical := renderManagedAuthorizedKey(
-		config,
-		selectedProfile.AuthenticationKeyType,
-		blob,
-	)
-	if !bytes.Equal(contents, canonical) {
-		return AuthorizedKeysReport{}, invalidAuthorizedKey(
-			"authorized_keys entry is not byte-for-byte canonical",
-		)
-	}
-	return AuthorizedKeysReport{KeyCount: 1}, nil
+	return AuthorizedKeysReport{KeyCount: len(lines)}, nil
 }
 
 func renderManagedAuthorizedKey(config Config, algorithm, blob string) []byte {

@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"warptweet.com/warptweet/internal/config"
 	"warptweet.com/warptweet/internal/installlayout"
@@ -69,12 +70,14 @@ const (
 )
 
 type clientNodePolicy struct {
-	description string
-	directory   bool
-	mode        os.FileMode
-	group       clientNodeGroup
-	minimumSize int64
-	maximumSize int64
+	description         string
+	directory           bool
+	mode                os.FileMode
+	group               clientNodeGroup
+	serviceOwned        bool
+	minimumSize         int64
+	maximumSize         int64
+	allowRootAdminGroup bool
 }
 
 type openedClientFile struct {
@@ -156,10 +159,11 @@ func darwinProductionClientStateLayout() clientStateLayout {
 				group:       clientNodeRootGroup,
 			},
 			"/Library/Application Support": {
-				description: "Application Support client-state ancestor",
-				directory:   true,
-				mode:        0o755,
-				group:       clientNodeRootGroup,
+				description:         "Application Support client-state ancestor",
+				directory:           true,
+				mode:                0o755,
+				group:               clientNodeRootGroup,
+				allowRootAdminGroup: true,
 			},
 			installlayout.DarwinApplicationSupportRoot: {
 				description: "WarpTweet application support root",
@@ -202,10 +206,12 @@ func manifestClientNodePolicy() clientNodePolicy {
 func identityClientNodePolicy() clientNodePolicy {
 	return clientNodePolicy{
 		description: "client identity file",
-		mode:        0o440,
-		group:       clientNodeServiceGroup,
-		minimumSize: 1,
-		maximumSize: maxClientIdentityBytes,
+		// OpenSSH requires private keys without group/other bits.
+		mode:         0o600,
+		group:        clientNodeServiceGroup,
+		serviceOwned: true,
+		minimumSize:  1,
+		maximumSize:  maxClientIdentityBytes,
 	}
 }
 
@@ -692,14 +698,27 @@ func validateClientNode(
 	if policy.group == clientNodeServiceGroup {
 		expectedGID = identity.gid
 	}
-	if metadata.uid != 0 || metadata.gid != expectedGID {
-		return fmt.Errorf(
-			"%s ownership is %d:%d, want 0:%d",
-			policy.description,
-			metadata.uid,
-			metadata.gid,
-			expectedGID,
-		)
+	expectedUID := uint32(0)
+	if policy.serviceOwned {
+		expectedUID = identity.uid
+	}
+	if metadata.uid != expectedUID || metadata.gid != expectedGID {
+		// macOS keeps /Library/Application Support as root:admin (gid 80).
+		if !(runtime.GOOS == "darwin" &&
+			policy.directory &&
+			policy.allowRootAdminGroup &&
+			policy.group == clientNodeRootGroup &&
+			metadata.uid == 0 &&
+			metadata.gid == 80) {
+			return fmt.Errorf(
+				"%s ownership is %d:%d, want %d:%d",
+				policy.description,
+				metadata.uid,
+				metadata.gid,
+				expectedUID,
+				expectedGID,
+			)
+		}
 	}
 	if metadata.hasAccessACL || metadata.hasDefaultACL {
 		return fmt.Errorf("%s must not have a POSIX ACL", policy.description)

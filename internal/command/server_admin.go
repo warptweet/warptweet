@@ -18,7 +18,6 @@ import (
 
 	"warptweet.com/warptweet/internal/enrollment"
 	"warptweet.com/warptweet/internal/installlayout"
-	"warptweet.com/warptweet/internal/profile"
 	"warptweet.com/warptweet/internal/server"
 )
 
@@ -30,13 +29,9 @@ const (
 
 func runServer(ctx context.Context, arguments []string, stdout, stderr io.Writer) error {
 	if len(arguments) == 0 {
-		return errors.New("server requires a subcommand: init, invite, enroll-listen, accept-enrollment, revoke, status")
+		return errors.New("server requires an internal subcommand: enroll-listen, accept-enrollment, revoke, status")
 	}
 	switch arguments[0] {
-	case "init":
-		return runServerInit(ctx, arguments[1:], stdout, stderr)
-	case "invite":
-		return runServerInvite(ctx, arguments[1:], stdout, stderr)
 	case "enroll-listen":
 		return runServerEnrollListen(ctx, arguments[1:], stdout, stderr)
 	case "accept-enrollment":
@@ -45,185 +40,11 @@ func runServer(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		return runServerRevoke(arguments[1:], stdout, stderr)
 	case "status":
 		return runServerStatus(ctx, arguments[1:], stdout, stderr)
+	case "init", "invite":
+		return fmt.Errorf("server %s was replaced by warptweet host", arguments[0])
 	default:
 		return fmt.Errorf("unknown server subcommand %q", arguments[0])
 	}
-}
-
-func runServerInit(ctx context.Context, arguments []string, stdout, stderr io.Writer) error {
-	flags := newFlagSet("server init", stderr)
-	listen := onceStringFlag{name: "--listen"}
-	target := onceStringFlag{name: "--target"}
-	flags.Var(&listen, "listen", "numeric server listen address:port")
-	flags.Var(&target, "target", "numeric authorized target address:port")
-	if err := parseFlags(flags, arguments); err != nil {
-		return err
-	}
-	if listen.value == "" || target.value == "" {
-		return errors.New("server init requires --listen and --target")
-	}
-	listenEndpoint, err := parseEndpoint(listen.value)
-	if err != nil {
-		return fmt.Errorf("listen: %w", err)
-	}
-	targetEndpoint, err := parseEndpoint(target.value)
-	if err != nil {
-		return fmt.Errorf("target: %w", err)
-	}
-
-	if err := os.MkdirAll(filepath.Dir(installlayout.ServerHostKeyPath), 0o755); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(installlayout.AuthorizedKeysDirectory, 0o755); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(installlayout.ServerManifestPath), 0o755); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(inviteDirectory, 0o700); err != nil {
-		return err
-	}
-	if err := os.MkdirAll(serverStateDirectory, 0o700); err != nil {
-		return err
-	}
-
-	if _, err := os.Lstat(installlayout.ServerHostKeyPath); err == nil {
-		return fmt.Errorf("host key already exists at %s", installlayout.ServerHostKeyPath)
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-
-	keygen := installlayout.SSHKeygenPath
-	if _, err := os.Stat(keygen); err != nil {
-		return fmt.Errorf("bundled ssh-keygen is required at %s: %w", keygen, err)
-	}
-	cmd := exec.CommandContext(
-		ctx,
-		keygen,
-		"-t", "mldsa44-ed25519",
-		"-f", installlayout.ServerHostKeyPath,
-		"-N", "",
-		"-C", "warptweet-host",
-	)
-	cmd.Env = []string{"LANG=C", "LC_ALL=C"}
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("generate host key: %w (%s)", err, strings.TrimSpace(string(output)))
-	}
-	if err := os.Chmod(installlayout.ServerHostKeyPath, 0o600); err != nil {
-		return err
-	}
-	if err := os.Chown(installlayout.ServerHostKeyPath, 0, 0); err != nil && os.Geteuid() == 0 {
-		return err
-	}
-
-	publicKey, err := deriveHostPublicKey(ctx, installlayout.ServerHostKeyPath)
-	if err != nil {
-		return err
-	}
-	fingerprint := sha256.Sum256([]byte(publicKey))
-	if err := os.WriteFile(installlayout.ServerHostKeyPath+".pub", append([]byte(publicKey), '\n'), 0o644); err != nil {
-		return err
-	}
-
-	secret, err := enrollment.GenerateSecret()
-	if err != nil {
-		return err
-	}
-	if err := enrollment.WriteSecret(inviteSecretPath, secret); err != nil {
-		return err
-	}
-
-	sshdDigest := strings.Repeat("0", 64)
-	bundleDigest := strings.Repeat("0", 64)
-	if digest, err := fileSHA256(installlayout.SSHDPath); err == nil {
-		sshdDigest = digest
-	}
-	if digest, err := fileSHA256(installlayout.OpenSSHBundleManifestPath); err == nil {
-		bundleDigest = digest
-	}
-
-	manifest := server.Config{
-		Kind:                        server.ManifestKind,
-		SchemaVersion:               server.CurrentSchemaVersion,
-		ProfileID:                   profile.CurrentID,
-		SSHDBinarySHA256:            sshdDigest,
-		OpenSSHBundleManifestSHA256: bundleDigest,
-		Listen: server.Endpoint{
-			Address: listenEndpoint.Addr(),
-			Port:    server.Port(listenEndpoint.Port()),
-		},
-		Target: server.Endpoint{
-			Address: targetEndpoint.Addr(),
-			Port:    server.Port(targetEndpoint.Port()),
-		},
-		DedicatedUser:      server.DefaultDedicatedUser,
-		HostKeyPath:        installlayout.ServerHostKeyPath,
-		AuthorizedKeysPath: filepath.Join(installlayout.AuthorizedKeysDirectory, server.DefaultDedicatedUser),
-	}
-	if err := server.Validate(manifest); err != nil {
-		return err
-	}
-	if err := writeServerManifestAtomic(installlayout.ServerManifestPath, manifest); err != nil {
-		return err
-	}
-	if err := os.WriteFile(manifest.AuthorizedKeysPath, nil, 0o600); err != nil {
-		return err
-	}
-
-	return writeJSON(stdout, map[string]any{
-		"status":                 "initialized",
-		"host_key_path":          installlayout.ServerHostKeyPath,
-		"host_public_key_sha256": hex.EncodeToString(fingerprint[:]),
-		"manifest_path":          installlayout.ServerManifestPath,
-		"invite_secret_path":     inviteSecretPath,
-		"listen":                 listenEndpoint.String(),
-		"target":                 targetEndpoint.String(),
-		"dedicated_user":         manifest.DedicatedUser,
-	})
-}
-
-func runServerInvite(ctx context.Context, arguments []string, stdout, stderr io.Writer) error {
-	flags := newFlagSet("server invite", stderr)
-	target := onceStringFlag{name: "--target"}
-	name := onceStringFlag{name: "--name"}
-	flags.Var(&target, "target", "numeric authorized target address:port")
-	flags.Var(&name, "name", "client name label")
-	if err := parseFlags(flags, arguments); err != nil {
-		return err
-	}
-	if target.value == "" || name.value == "" {
-		return errors.New("server invite requires --target and --name")
-	}
-	targetEndpoint, err := parseEndpoint(target.value)
-	if err != nil {
-		return fmt.Errorf("target: %w", err)
-	}
-	manifest, err := server.Load(installlayout.ServerManifestPath)
-	if err != nil {
-		return err
-	}
-	label := enrollment.SanitizeInviteLabel(name.value)
-	invite, record, err := mintServerInvite(ctx, label, targetEndpoint, manifest, "")
-	if err != nil {
-		return err
-	}
-	if err := enrollment.Store(inviteDirectory, record); err != nil {
-		return err
-	}
-	raw, err := enrollment.Encode(invite)
-	if err != nil {
-		return err
-	}
-	var inviteObject any
-	if err := json.Unmarshal(raw, &inviteObject); err != nil {
-		return err
-	}
-	return writeJSON(stdout, map[string]any{
-		"status":     "issued",
-		"invite_id":  invite.InviteID,
-		"expires_at": invite.ExpiresAt,
-		"invite":     inviteObject,
-	})
 }
 
 func runServerRevoke(arguments []string, stdout, stderr io.Writer) error {
@@ -377,7 +198,7 @@ func writeServerManifestAtomic(path string, manifest server.Config) error {
 }
 
 func clearAuthorizedKeys(path string) error {
-	return writeFileAtomic(path, nil, 0o600)
+	return writeFileAtomic(path, nil, 0o644)
 }
 
 func writeFileAtomic(path string, contents []byte, mode os.FileMode) error {

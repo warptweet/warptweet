@@ -4,16 +4,20 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"warptweet.com/warptweet/internal/command"
 	"warptweet.com/warptweet/internal/installlayout"
+	"warptweet.com/warptweet/internal/provisioner"
 )
 
 func main() {
@@ -47,6 +51,18 @@ func run(arguments []string, stdout, stderr io.Writer) int {
 			"service_group":        installlayout.DarwinClientServiceGroup,
 			"runtime_root":         installlayout.DarwinClientRuntimeRoot,
 		})
+	case "serve":
+		if len(arguments) != 1 {
+			_, _ = fmt.Fprintln(stderr, "warptweet-provisioner: serve accepts no arguments")
+			return 2
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		if err := (&provisioner.Server{}).Serve(ctx); err != nil {
+			_, _ = fmt.Fprintf(stderr, "warptweet-provisioner: %v\n", err)
+			return 1
+		}
+		return 0
 	case "help", "-h", "--help":
 		writeUsage(stdout)
 		return 0
@@ -85,9 +101,11 @@ func verifyLayout() error {
 	}
 	requiredFiles := []string{
 		installlayout.DarwinControllerPath,
+		installlayout.DarwinProvisionerPath,
 		installlayout.DarwinSSHPath,
 		installlayout.DarwinSSHKeygenPath,
 		installlayout.DarwinClientGlobalKnownHostsPath,
+		filepath.Join(installlayout.DarwinLaunchDaemonRoot, installlayout.DarwinProvisionerLabel+".plist"),
 	}
 	for _, path := range requiredFiles {
 		info, err := os.Lstat(path)
@@ -136,5 +154,6 @@ warptweet-provisioner: privileged WarpTweet activation helper
 Usage:
   warptweet-provisioner version
   warptweet-provisioner verify-layout
+  warptweet-provisioner serve
 `)+"\n")
 }

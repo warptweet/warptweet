@@ -68,6 +68,7 @@ mkdir -p \
     "$WT_ROOT/opt/warptweet/etc/authorized_keys" \
     "$WT_ROOT/opt/warptweet/share" \
     "$WT_ROOT/etc/warptweet" \
+    "$WT_ROOT/etc/warptweet/enrollment" \
     "$WT_ROOT/lib/systemd/system" \
     "$WT_ROOT/var/empty/warptweet-sshd" \
     "$WT_ROOT/var/lib/warptweet/invites" \
@@ -111,8 +112,8 @@ Priority: optional
 Architecture: $WT_DEB_ARCH
 Maintainer: WarpTweet Maintainers <security@warptweet.com>
 Depends: adduser, systemd
-Description: WarpTweet managed-endpoint post-quantum TCP tunnel gateway
- WarpTweet installs a fixed-layout OpenSSH gateway and controller for one
+Description: WarpTweet managed-endpoint post-quantum TCP tunnel host
+ WarpTweet installs a fixed-layout OpenSSH host and controller for one
  declared local-forward target. Classical fallback is not provided.
 EOF
 
@@ -120,13 +121,13 @@ cat >"$WT_OUTPUT_INPUT/warptweet.spec" <<EOF
 Name: warptweet
 Version: ${WT_VERSION%%-*}
 Release: 1%{?dist}
-Summary: WarpTweet managed-endpoint post-quantum TCP tunnel gateway
+Summary: WarpTweet managed-endpoint post-quantum TCP tunnel host
 License: Apache-2.0
 URL: https://warptweet.com/
 BuildArch: $WT_RPM_ARCH
 
 %description
-WarpTweet installs a fixed-layout OpenSSH gateway and controller for one
+WarpTweet installs a fixed-layout OpenSSH host and controller for one
 declared local-forward target. Classical fallback is not provided.
 
 %install
@@ -162,7 +163,7 @@ if command -v dpkg-deb >/dev/null 2>&1; then
     install -m 0644 "$WT_OUTPUT_INPUT/control" "$WT_DEB_ROOT/DEBIAN/control"
     install -m 0755 "$WT_OUTPUT_INPUT/postinst.sh" "$WT_DEB_ROOT/DEBIAN/postinst"
     install -m 0755 "$WT_OUTPUT_INPUT/prerm.sh" "$WT_DEB_ROOT/DEBIAN/prerm"
-    dpkg-deb --build "$WT_DEB_ROOT" \
+    dpkg-deb --root-owner-group --build "$WT_DEB_ROOT" \
         "$WT_OUTPUT_INPUT/warptweet_${WT_VERSION}_${WT_DEB_ARCH}.deb"
 fi
 

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/netip"
@@ -18,6 +19,139 @@ import (
 	"warptweet.com/warptweet/internal/server"
 )
 
+func TestAcceptResumesPendingAuthorizationWithoutBurningInvite(t *testing.T) {
+	t.Parallel()
+
+	secret, err := GenerateSecret()
+	if err != nil {
+		t.Fatalf("GenerateSecret: %v", err)
+	}
+	now := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)
+	invite, record, err := Create(CreateInput{
+		ClientName:              "retry-client",
+		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
+		ServerPort:              2222,
+		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
+		TargetPort:              5432,
+		Principal:               "warptweet",
+		ProfileID:               profile.CurrentID,
+		ArtifactProfileID:       "linux-amd64",
+		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
+		Now:                     now,
+		Secret:                  secret,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	invites := t.TempDir()
+	clients := t.TempDir()
+	if err := Store(invites, record); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	request := EnrollmentRequest{
+		InviteID:        invite.InviteID,
+		Nonce:           invite.Nonce,
+		ClientName:      invite.ClientName,
+		PublicKey:       testCompositePublicKey(),
+		ProfileID:       profile.CurrentID,
+		TunnelID:        "retry-client",
+		ListenAddress:   "127.0.0.1",
+		ListenPort:      15432,
+		ManagementToken: testManagementToken,
+	}
+	input := AcceptInput{
+		Directory:        invites,
+		ClientsDirectory: clients,
+		Request:          request,
+		HostPublicKey:    invite.HostPublicKey,
+		Principal:        invite.Principal,
+		ProfileID:        profile.CurrentID,
+		TargetAddress:    invite.TargetAddress,
+		TargetPort:       invite.TargetPort,
+		ServerAddress:    invite.ServerAddress,
+		Now:              now.Add(time.Minute),
+		InstallAuthorization: func(string) error {
+			return errors.New("injected authorization failure")
+		},
+	}
+	if _, err := Accept(input); err == nil {
+		t.Fatal("Accept succeeded despite injected authorization failure")
+	}
+	storedInvite, err := Load(invites, invite.InviteID)
+	if err != nil {
+		t.Fatalf("Load invite: %v", err)
+	}
+	if storedInvite.Status != StatusIssued {
+		t.Fatalf("invite status=%q, want issued", storedInvite.Status)
+	}
+	clientID := clientIDFor(invite.InviteID, request.PublicKey)
+	pending, err := LoadClient(clients, clientID)
+	if err != nil {
+		t.Fatalf("LoadClient pending: %v", err)
+	}
+	if pending.Status != ClientStatusEnrollmentPending {
+		t.Fatalf("client status=%q, want enrollment_pending", pending.Status)
+	}
+
+	installCalls := 0
+	input.InstallAuthorization = func(got string) error {
+		installCalls++
+		if got != request.PublicKey {
+			t.Fatalf("authorization key mismatch")
+		}
+		return nil
+	}
+	result, err := Accept(input)
+	if err != nil {
+		t.Fatalf("Accept retry: %v", err)
+	}
+	if installCalls != 1 || result.ClientID != clientID {
+		t.Fatalf("retry calls=%d result=%+v", installCalls, result)
+	}
+	active, err := LoadClient(clients, clientID)
+	if err != nil {
+		t.Fatalf("LoadClient active: %v", err)
+	}
+	if active.Status != ClientStatusActive {
+		t.Fatalf("client status=%q, want active", active.Status)
+	}
+	consumed, err := Load(invites, invite.InviteID)
+	if err != nil {
+		t.Fatalf("Load consumed invite: %v", err)
+	}
+	if consumed.Status != StatusConsumed {
+		t.Fatalf("invite status=%q, want consumed", consumed.Status)
+	}
+
+	if _, err := Accept(input); err != nil {
+		t.Fatalf("exact response-loss retry: %v", err)
+	}
+	if installCalls != 2 {
+		t.Fatalf("exact retry did not reconcile authorization: calls=%d", installCalls)
+	}
+
+	// Simulate the durable boundary where client activation and authorization
+	// succeeded but the final invite-consumption write did not. Exact retry must
+	// converge from the already-active record rather than conflict with itself.
+	consumed.Status = StatusIssued
+	consumed.ClientID = ""
+	consumed.ConsumedAt = ""
+	if err := writeJSONAtomic(recordPath(invites, invite.InviteID), consumed, 0o600); err != nil {
+		t.Fatalf("restore issued invite fixture: %v", err)
+	}
+	if _, err := Accept(input); err != nil {
+		t.Fatalf("active-client/final-invite-write retry: %v", err)
+	}
+	finalInvite, err := Load(invites, invite.InviteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finalInvite.Status != StatusConsumed || installCalls != 3 {
+		t.Fatalf("final invite=%+v install calls=%d", finalInvite, installCalls)
+	}
+}
+
 func TestAcceptConsumesInviteOnce(t *testing.T) {
 	t.Parallel()
 
@@ -27,17 +161,18 @@ func TestAcceptConsumesInviteOnce(t *testing.T) {
 	}
 	now := time.Date(2026, 8, 14, 18, 0, 0, 0, time.UTC)
 	invite, record, err := Create(CreateInput{
-		ClientName:        "laptop-1",
-		ServerAddress:     netip.MustParseAddr("192.0.2.10"),
-		ServerPort:        2222,
-		TargetAddress:     netip.MustParseAddr("198.51.100.20"),
-		TargetPort:        5432,
-		Principal:         "warptweet",
-		ProfileID:         profile.CurrentID,
-		ArtifactProfileID: "linux-amd64",
-		HostPublicKey:     "ssh-mldsa44-ed25519@openssh.com AAAA host",
-		Now:               now,
-		Secret:            secret,
+		ClientName:              "laptop-1",
+		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
+		ServerPort:              2222,
+		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
+		TargetPort:              5432,
+		Principal:               "warptweet",
+		ProfileID:               profile.CurrentID,
+		ArtifactProfileID:       "linux-amd64",
+		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
+		Now:                     now,
+		Secret:                  secret,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -49,14 +184,15 @@ func TestAcceptConsumesInviteOnce(t *testing.T) {
 
 	publicKey := testCompositePublicKey()
 	request := EnrollmentRequest{
-		InviteID:      invite.InviteID,
-		Nonce:         invite.Nonce,
-		ClientName:    invite.ClientName,
-		PublicKey:     publicKey,
-		ProfileID:     profile.CurrentID,
-		TunnelID:      "laptop-1",
-		ListenAddress: "127.0.0.1",
-		ListenPort:    15432,
+		InviteID:        invite.InviteID,
+		Nonce:           invite.Nonce,
+		ClientName:      invite.ClientName,
+		PublicKey:       publicKey,
+		ProfileID:       profile.CurrentID,
+		TunnelID:        "laptop-1",
+		ListenAddress:   "127.0.0.1",
+		ListenPort:      15432,
+		ManagementToken: testManagementToken,
 	}
 	result, err := Accept(AcceptInput{
 		Directory:     directory,
@@ -67,6 +203,9 @@ func TestAcceptConsumesInviteOnce(t *testing.T) {
 		TargetAddress: invite.TargetAddress,
 		TargetPort:    invite.TargetPort,
 		Now:           now.Add(time.Minute),
+		InstallAuthorization: func(string) error {
+			return nil
+		},
 	})
 	if err != nil {
 		t.Fatalf("Accept: %v", err)
@@ -83,6 +222,9 @@ func TestAcceptConsumesInviteOnce(t *testing.T) {
 		TargetAddress: invite.TargetAddress,
 		TargetPort:    invite.TargetPort,
 		Now:           now.Add(2 * time.Minute),
+		InstallAuthorization: func(string) error {
+			return nil
+		},
 	}); err == nil {
 		t.Fatal("Accept allowed reuse")
 	}
@@ -97,17 +239,18 @@ func TestAcceptRejectsNonceMismatch(t *testing.T) {
 	}
 	now := time.Date(2026, 8, 14, 18, 30, 0, 0, time.UTC)
 	invite, record, err := Create(CreateInput{
-		ClientName:        "node-a",
-		ServerAddress:     netip.MustParseAddr("192.0.2.10"),
-		ServerPort:        2222,
-		TargetAddress:     netip.MustParseAddr("198.51.100.20"),
-		TargetPort:        5432,
-		Principal:         "warptweet",
-		ProfileID:         profile.CurrentID,
-		ArtifactProfileID: "linux-amd64",
-		HostPublicKey:     "ssh-mldsa44-ed25519@openssh.com AAAA host",
-		Now:               now,
-		Secret:            secret,
+		ClientName:              "node-a",
+		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
+		ServerPort:              2222,
+		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
+		TargetPort:              5432,
+		Principal:               "warptweet",
+		ProfileID:               profile.CurrentID,
+		ArtifactProfileID:       "linux-amd64",
+		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
+		Now:                     now,
+		Secret:                  secret,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -117,14 +260,15 @@ func TestAcceptRejectsNonceMismatch(t *testing.T) {
 		t.Fatalf("Store: %v", err)
 	}
 	request := EnrollmentRequest{
-		InviteID:      invite.InviteID,
-		Nonce:         "00" + invite.Nonce[2:],
-		ClientName:    invite.ClientName,
-		PublicKey:     testCompositePublicKey(),
-		ProfileID:     profile.CurrentID,
-		TunnelID:      "node-a",
-		ListenAddress: "127.0.0.1",
-		ListenPort:    15432,
+		InviteID:        invite.InviteID,
+		Nonce:           "00" + invite.Nonce[2:],
+		ClientName:      invite.ClientName,
+		PublicKey:       testCompositePublicKey(),
+		ProfileID:       profile.CurrentID,
+		TunnelID:        "node-a",
+		ListenAddress:   "127.0.0.1",
+		ListenPort:      15432,
+		ManagementToken: testManagementToken,
 	}
 	if _, err := Accept(AcceptInput{
 		Directory:     directory,
@@ -135,6 +279,9 @@ func TestAcceptRejectsNonceMismatch(t *testing.T) {
 		TargetAddress: invite.TargetAddress,
 		TargetPort:    invite.TargetPort,
 		Now:           now.Add(time.Minute),
+		InstallAuthorization: func(string) error {
+			return nil
+		},
 	}); err == nil {
 		t.Fatal("Accept accepted nonce mismatch")
 	}
@@ -149,17 +296,18 @@ func TestEnrollmentHTTPHandlerAcceptsValidRequest(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	invite, record, err := Create(CreateInput{
-		ClientName:        "studio-mac",
-		ServerAddress:     netip.MustParseAddr("192.0.2.10"),
-		ServerPort:        2222,
-		TargetAddress:     netip.MustParseAddr("198.51.100.20"),
-		TargetPort:        5432,
-		Principal:         server.DefaultDedicatedUser,
-		ProfileID:         profile.CurrentID,
-		ArtifactProfileID: "darwin-arm64",
-		HostPublicKey:     "ssh-mldsa44-ed25519@openssh.com AAAA host",
-		Now:               now,
-		Secret:            secret,
+		ClientName:              "studio-mac",
+		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
+		ServerPort:              2222,
+		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
+		TargetPort:              5432,
+		Principal:               server.DefaultDedicatedUser,
+		ProfileID:               profile.CurrentID,
+		ArtifactProfileID:       "darwin-arm64",
+		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
+		Now:                     now,
+		Secret:                  secret,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -173,14 +321,15 @@ func TestEnrollmentHTTPHandlerAcceptsValidRequest(t *testing.T) {
 
 	publicKey := testCompositePublicKey()
 	request := EnrollmentRequest{
-		InviteID:      invite.InviteID,
-		Nonce:         invite.Nonce,
-		ClientName:    invite.ClientName,
-		PublicKey:     publicKey,
-		ProfileID:     profile.CurrentID,
-		TunnelID:      "studio-mac",
-		ListenAddress: "127.0.0.1",
-		ListenPort:    15432,
+		InviteID:        invite.InviteID,
+		Nonce:           invite.Nonce,
+		ClientName:      invite.ClientName,
+		PublicKey:       publicKey,
+		ProfileID:       profile.CurrentID,
+		TunnelID:        "studio-mac",
+		ListenAddress:   "127.0.0.1",
+		ListenPort:      15432,
+		ManagementToken: testManagementToken,
 	}
 	body, err := EncodeEnrollmentRequest(request)
 	if err != nil {
@@ -208,13 +357,12 @@ func TestEnrollmentHTTPHandlerAcceptsValidRequest(t *testing.T) {
 			TargetAddress: invite.TargetAddress,
 			TargetPort:    invite.TargetPort,
 			Now:           time.Now().UTC(),
+			InstallAuthorization: func(string) error {
+				return os.WriteFile(authPath, line, 0o600)
+			},
 		})
 		if err != nil {
 			http.Error(writer, err.Error(), http.StatusForbidden)
-			return
-		}
-		if err := os.WriteFile(authPath, line, 0o600); err != nil {
-			http.Error(writer, err.Error(), http.StatusInternalServerError)
 			return
 		}
 		writer.Header().Set("Content-Type", "application/json")
@@ -246,14 +394,14 @@ func TestEnrollmentURL(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EnrollmentURL: %v", err)
 	}
-	if url != "http://192.0.2.10:29722/v1/enroll" {
+	if url != "https://192.0.2.10:29722/v1/enroll" {
 		t.Fatalf("url=%s", url)
 	}
 	url, err = EnrollmentURL("2001:db8::10", DefaultEnrollmentPort)
 	if err != nil {
 		t.Fatalf("EnrollmentURL ipv6: %v", err)
 	}
-	if url != "http://[2001:db8::10]:29722/v1/enroll" {
+	if url != "https://[2001:db8::10]:29722/v1/enroll" {
 		t.Fatalf("url=%s", url)
 	}
 }

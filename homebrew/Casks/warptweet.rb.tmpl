@@ -26,8 +26,10 @@ cask "warptweet" do
 
   depends_on macos: ">= :ventura"
 
-  uninstall launchctl: "com.warptweet.client",
-            pkgutil:   "com.warptweet.client",
+  binary "/Library/Application Support/WarpTweet/bin/warptweet",
+         target: "warptweet"
+
+  uninstall pkgutil: "com.warptweet.client",
             script:    {
               executable: "/Library/Application Support/WarpTweet/share/uninstall.sh",
               args:       [],
@@ -43,6 +45,9 @@ cask "warptweet" do
   caveats <<~EOS
     WarpTweet installs a package-owned layout under:
       /Library/Application Support/WarpTweet
+
+    Start from the invite created by the service host:
+      warptweet connect <name>.wtinvite
 
     Identity material is preserved across uninstall unless you run:
       sudo "/Library/Application Support/WarpTweet/share/uninstall.sh" --destroy-identity

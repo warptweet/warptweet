@@ -39,6 +39,7 @@ ensure_user warptweet-sshd /var/empty/warptweet-sshd /usr/sbin/nologin
 
 install -d -o root -g root -m 0755 /opt/warptweet
 install -d -o root -g root -m 0755 /etc/warptweet
+install -d -o root -g root -m 0700 /etc/warptweet/enrollment
 install -d -o root -g root -m 0755 /opt/warptweet/etc
 install -d -o root -g root -m 0755 /opt/warptweet/etc/authorized_keys
 install -d -o root -g root -m 0755 /var/empty/warptweet-sshd
@@ -48,17 +49,21 @@ install -d -o root -g root -m 0700 /var/lib/warptweet/clients
 install -d -o root -g root -m 0700 /var/lib/warptweet/server
 install -d -o root -g root -m 0755 /run/warptweet
 install -d -o root -g root -m 0750 /run/warptweet/server
+touch /opt/warptweet/etc/authorized_keys/warptweet
+chown root:root /opt/warptweet/etc/authorized_keys/warptweet
+chmod 0644 /opt/warptweet/etc/authorized_keys/warptweet
 
 # Public-key-only lock for the tunnel account where supported.
 if command -v usermod >/dev/null 2>&1; then
     usermod -p '*NP*' warptweet >/dev/null 2>&1 || true
-    usermod -p '*NP*' warptweet-client >/dev/null 2>&1 || true
+	usermod -L warptweet-client >/dev/null 2>&1 || true
+	usermod -L warptweet-sshd >/dev/null 2>&1 || true
 fi
 
 if command -v systemctl >/dev/null 2>&1; then
     systemctl daemon-reload >/dev/null 2>&1 || true
     # Enable enrollment control plane when package-installed; start only after
-    # server init has written server.wt, host key, and invite MAC secret.
+    # warptweet host has written server.wt, host key, and enrollment state.
     systemctl enable warptweet-enroll.service >/dev/null 2>&1 || true
 fi
 

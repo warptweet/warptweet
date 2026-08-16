@@ -236,7 +236,6 @@ func TestValidateAuthorizedKeysRejectsNoncanonicalOrUnsafeInput(t *testing.T) {
 		name  string
 		input []byte
 	}{
-		{name: "empty", input: nil},
 		{name: "oversized", input: bytes.Repeat([]byte{'a'}, MaxAuthorizedKeysBytes+1)},
 		{name: "missing terminal LF", input: bytes.TrimSuffix(valid, []byte{'\n'})},
 		{
@@ -248,7 +247,7 @@ func TestValidateAuthorizedKeysRejectsNoncanonicalOrUnsafeInput(t *testing.T) {
 			),
 		},
 		{name: "trailing blank line", input: append(append([]byte(nil), valid...), '\n')},
-		{name: "second key", input: append(append([]byte(nil), valid...), valid...)},
+		{name: "duplicate key", input: append(append([]byte(nil), valid...), valid...)},
 		{name: "comment line", input: append([]byte("# comment\n"), valid...)},
 		{
 			name: "reordered options",
@@ -324,6 +323,39 @@ func TestValidateAuthorizedKeysRejectsNoncanonicalOrUnsafeInput(t *testing.T) {
 				t.Fatalf("error does not wrap ErrInvalidAuthorizedKey: %v", err)
 			}
 		})
+	}
+}
+
+func TestValidateAuthorizedKeysAcceptsEmptyAndMultipleDistinctClients(t *testing.T) {
+	t.Parallel()
+
+	config := validConfig()
+	empty, err := ValidateAuthorizedKeys(config, nil)
+	if err != nil || empty.KeyCount != 0 {
+		t.Fatalf("empty pre-enrollment state: report=%+v err=%v", empty, err)
+	}
+	selected, err := profile.Lookup(profile.CurrentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstBlob := authorizedKeyBlob(selected.AuthenticationKeyType, selected.RawPublicKeyBytes, nil)
+	secondRaw, err := base64.StdEncoding.DecodeString(firstBlob)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondRaw[len(secondRaw)-1] = 1
+	secondBlob := base64.StdEncoding.EncodeToString(secondRaw)
+	first, err := RenderAuthorizedKey(config, []byte(selected.AuthenticationKeyType+" "+firstBlob))
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := RenderAuthorizedKey(config, []byte(selected.AuthenticationKeyType+" "+secondBlob))
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, err := ValidateAuthorizedKeys(config, append(first, second...))
+	if err != nil || report.KeyCount != 2 {
+		t.Fatalf("multiple clients: report=%+v err=%v", report, err)
 	}
 }
 

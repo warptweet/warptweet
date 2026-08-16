@@ -52,12 +52,26 @@ interop_assert_package_ctrl() {
     case "$_path" in
         /opt/warptweet/* | /usr/local/* | /opt/homebrew/* | /Library/*) ;;
         *)
-            interop_die "$_label controller must be a package path, not source-tree: $_path"
+            interop_die "$_label controller path must be package-owned (got: $_path)"
             ;;
     esac
-    if [ ! -x "$_path" ]; then
-        interop_die "$_label controller not executable: $_path"
+    [ -x "$_path" ] || interop_die "$_label controller not executable: $_path"
+}
+
+# Run the installed client controller as the logged-in operator. The signed
+# package's root provisioner owns privileged state mutation; the public CLI
+# never needs sudo or an AppleScript authorization prompt after installation.
+interop_client_cmd() {
+    _out=${INTEROP_CLIENT_OUT:-/tmp/wt-interop-client.out}
+    _err=${INTEROP_CLIENT_ERR:-/tmp/wt-interop-client.err}
+    : >"$_out"
+    : >"$_err"
+    if ! "$WARPTWEET_INTEROP_CLIENT_CTRL" "$@" >"$_out" 2>"$_err"; then
+        cat "$_out"
+        cat "$_err" >&2
+        return 1
     fi
+    cat "$_out"
 }
 
 interop_record_result() {
@@ -107,7 +121,13 @@ interop_load_config() {
     : "${WARPTWEET_INTEROP_SERVER_PACKAGE_FILE:?required}"
     : "${WARPTWEET_INTEROP_CLIENT_PACKAGE_FILE:?required}"
     : "${WARPTWEET_INTEROP_SERVER_CTRL:=/opt/warptweet/bin/warptweet}"
-    : "${WARPTWEET_INTEROP_CLIENT_CTRL:=/opt/warptweet/bin/warptweet}"
+    if [ -z "${WARPTWEET_INTEROP_CLIENT_CTRL:-}" ]; then
+        if [ "$(uname -s)" = Darwin ]; then
+            WARPTWEET_INTEROP_CLIENT_CTRL="/Library/Application Support/WarpTweet/bin/warptweet"
+        else
+            WARPTWEET_INTEROP_CLIENT_CTRL=/opt/warptweet/bin/warptweet
+        fi
+    fi
     : "${WARPTWEET_INTEROP_SERVER_LISTEN:?WARPTWEET_INTEROP_SERVER_LISTEN is required (ip:port)}"
     : "${WARPTWEET_INTEROP_ECHO_PORT:=18432}"
     : "${WARPTWEET_INTEROP_CLIENT_NAME:=interop-mac}"

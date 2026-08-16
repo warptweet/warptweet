@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	defaultStableWindow   = time.Minute
-	defaultStartupTimeout = 30 * time.Second
+	defaultStableWindow    = time.Minute
+	defaultStartupTimeout  = 30 * time.Second
+	defaultMaximumAttempts = 10
 )
 
 // Policy controls bounded restart behavior for an established tunnel.
@@ -24,6 +25,11 @@ type Policy struct {
 	MaximumBackoff time.Duration
 	StableWindow   time.Duration
 	StartupTimeout time.Duration
+	// MaximumAttempts bounds consecutive failed launches. Zero selects the
+	// fixed safe default. A stable run resets the consecutive-failure count,
+	// but the subsequent exit still counts as the first attempt in the new
+	// sequence.
+	MaximumAttempts int
 }
 
 // Command is the closed executable invocation prepared by the engine package.
@@ -225,6 +231,11 @@ func (supervisor Supervisor) RunPrepared(
 
 	backoff := policy.InitialBackoff
 	attempt := 0
+	consecutiveFailures := 0
+	maximumAttempts := policy.MaximumAttempts
+	if maximumAttempts == 0 {
+		maximumAttempts = defaultMaximumAttempts
+	}
 	for {
 		command, err := provider(ctx)
 		if err != nil {
@@ -256,6 +267,15 @@ func (supervisor Supervisor) RunPrepared(
 		}
 		if runtime >= stableWindow {
 			backoff = policy.InitialBackoff
+			consecutiveFailures = 0
+		}
+		consecutiveFailures++
+		if consecutiveFailures >= maximumAttempts {
+			lastErr := err
+			if lastErr == nil {
+				lastErr = errors.New("tunnel process exited successfully while restart was required")
+			}
+			return fmt.Errorf("tunnel process reached %d consecutive failed attempts: %w", maximumAttempts, lastErr)
 		}
 
 		attributes := []any{"attempt", attempt, "restart_backoff", backoff.String()}
@@ -307,6 +327,11 @@ func (supervisor Supervisor) RunPreparedReady(
 
 	backoff := policy.InitialBackoff
 	attempt := 0
+	consecutiveFailures := 0
+	maximumAttempts := policy.MaximumAttempts
+	if maximumAttempts == 0 {
+		maximumAttempts = defaultMaximumAttempts
+	}
 	for {
 		supervisor.transition(ctx, StatePreparing, attempt+1, 0, nil)
 		prepared, err := provider(ctx)
@@ -340,6 +365,7 @@ func (supervisor Supervisor) RunPreparedReady(
 		}
 		if result.readyRuntime >= stableWindow {
 			backoff = policy.InitialBackoff
+			consecutiveFailures = 0
 		}
 		if result.terminal || isTerminalFailure(result.err) {
 			supervisor.transition(ctx, StateFailed, attempt, result.pid, result.err)
@@ -348,6 +374,11 @@ func (supervisor Supervisor) RunPreparedReady(
 		if !policy.Restart {
 			supervisor.transition(ctx, StateFailed, attempt, result.pid, result.err)
 			return fmt.Errorf("managed tunnel attempt failed: %w", result.err)
+		}
+		consecutiveFailures++
+		if consecutiveFailures >= maximumAttempts {
+			supervisor.transition(ctx, StateFailed, attempt, result.pid, result.err)
+			return fmt.Errorf("managed tunnel reached %d consecutive failed attempts: %w", maximumAttempts, result.err)
 		}
 
 		supervisor.Logger.Warn(
@@ -617,6 +648,9 @@ func validatePolicy(policy Policy) error {
 	}
 	if policy.StartupTimeout < 0 {
 		return errors.New("startup timeout must not be negative")
+	}
+	if policy.MaximumAttempts < 0 {
+		return errors.New("maximum attempts must not be negative")
 	}
 	return nil
 }

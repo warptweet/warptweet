@@ -50,6 +50,41 @@ func TestPackageInteropScriptContract(t *testing.T) {
 	}
 }
 
+func TestDualHostInteropUsesInstalledProvisionerWithoutClientElevation(t *testing.T) {
+	t.Parallel()
+
+	root := repositoryRoot(t)
+	common := string(readFile(t, filepath.Join(root, "scripts", "interop", "lib", "common.sh")))
+	packages := string(readFile(t, filepath.Join(root, "scripts", "interop", "lib", "package.sh")))
+	configuration := string(readFile(t, filepath.Join(root, "scripts", "interop", "config.example.env")))
+
+	if !strings.Contains(common, `"$WARPTWEET_INTEROP_CLIENT_CTRL" "$@"`) {
+		t.Error("interop common.sh omits the client controller invocation")
+	}
+	if !strings.Contains(configuration, `/Library/Application Support/WarpTweet/bin/warptweet`) {
+		t.Error("interop config.example.env omits the installed controller path")
+	}
+	for _, required := range []string{
+		`/var/run/warptweet/provisioner.sock`,
+		`dscl . -read /Groups/admin PrimaryGroupID`,
+		`"0:$_admin_gid:660"`,
+	} {
+		if !strings.Contains(packages, required) {
+			t.Errorf("interop package verification omits %q", required)
+		}
+	}
+	for _, forbidden := range []string{
+		"interop_ensure_client_state_writable",
+		"dseditgroup -o edit -a",
+		"chown -R \"$_user\":_warptweet",
+		"do shell script cmd with administrator privileges",
+	} {
+		if strings.Contains(common, forbidden) || strings.Contains(packages, forbidden) {
+			t.Errorf("interop retains privileged client workaround %q", forbidden)
+		}
+	}
+}
+
 func TestReleaseEvidenceChecklistMatchesHomebrewDelivery(t *testing.T) {
 	t.Parallel()
 

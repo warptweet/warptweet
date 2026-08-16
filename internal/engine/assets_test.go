@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -152,10 +153,10 @@ func TestValidateAssetsWithDependenciesRejectsFilesystemAuthorityViolations(t *t
 				state.t.Fatalf("Chmod: %v", err)
 			}
 		},
-		"non-root file owner": func(state *clientAssetTestState) {
+		"identity owned by root instead of service": func(state *clientAssetTestState) {
 			state.wrapMetadata(func(path string, metadata *clientFileMetadata) {
 				if path == state.spec.IdentityFile {
-					metadata.uid = state.identity.uid
+					metadata.uid = 0
 				}
 			})
 		},
@@ -363,6 +364,9 @@ func newClientAssetTestState(t *testing.T) clientAssetTestState {
 			if serviceGroupPaths[path] {
 				metadata.gid = identity.gid
 			}
+			if path == layout.identityPath {
+				metadata.uid = identity.uid
+			}
 			return metadata, nil
 		},
 	}
@@ -410,7 +414,12 @@ func writeClientAssetTestFile(t *testing.T, path string, contents []byte) {
 	if err := os.WriteFile(path, contents, 0o640); err != nil {
 		t.Fatalf("WriteFile %q: %v", path, err)
 	}
-	if err := os.Chmod(path, 0o440); err != nil {
+	mode := os.FileMode(0o440)
+	if filepath.Base(path) == "client" && !strings.HasSuffix(path, ".pub") {
+		// Private identity keys must be 0600 for OpenSSH.
+		mode = 0o600
+	}
+	if err := os.Chmod(path, mode); err != nil {
 		t.Fatalf("Chmod %q: %v", path, err)
 	}
 }

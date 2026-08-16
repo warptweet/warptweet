@@ -8,7 +8,7 @@ export LC_ALL
 # - Remote Linux server over ssh-agent
 # - Install pinned packages from artifacts (Option B)
 # - Deterministic echo fixture on server loopback
-# - gateway → invite → connect → payload
+# - host → invite → connect → payload
 #
 # This produces a release-evidence JSON. Phase A almost always leaves some
 # checklist ids as not_run; that is intentional until the full WP8 matrix lands.
@@ -81,46 +81,32 @@ fi
 if interop_ssh "sudo '$WARPTWEET_INTEROP_SERVER_CTRL' doctor-server --config /etc/warptweet/server.wt" >/tmp/wt-interop-doctor-server.out 2>/tmp/wt-interop-doctor-server.err; then
     interop_record_result engine-identity-trust-preflight positive pass "doctor-server preflight_ready (or accepted)"
 else
-    # gateway may create server.wt; try after gateway if this fails.
-    interop_log "doctor-server before gateway failed (may be ok pre-init); will retry after gateway"
+    # host may create server.wt; try after host if this fails.
+    interop_log "doctor-server before host failed (may be ok pre-init); will retry after host"
     _NEED_DOCTOR_RETRY=1
 fi
 
 # --- Echo fixture ---
 interop_ensure_echo_fixture "$WARPTWEET_INTEROP_ECHO_PORT"
 
-# --- Gateway + invite on remote ---
+# --- Host + invite on remote ---
 _remote_invite="/tmp/${WARPTWEET_INTEROP_CLIENT_NAME}.wtinvite"
 interop_ssh "sudo rm -f '$_remote_invite'"
 
-# Prefer gateway; fall back to server init + invite if gateway cannot bind enroll.
-_minted=0
-if interop_ssh "sudo rm -f '$_remote_invite' && sudo '$WARPTWEET_INTEROP_SERVER_CTRL' gateway --to 127.0.0.1:${WARPTWEET_INTEROP_ECHO_PORT} --listen '${WARPTWEET_INTEROP_SERVER_LISTEN}' --name '${WARPTWEET_INTEROP_CLIENT_NAME}' --out '$_remote_invite'" >/tmp/wt-interop-gateway.out 2>/tmp/wt-interop-gateway.err; then
-    interop_log "gateway ok"
-    _minted=1
-else
-    interop_log "gateway failed; trying server init + invite"
-    if ! interop_ssh "sudo '$WARPTWEET_INTEROP_SERVER_CTRL' server init --listen '${WARPTWEET_INTEROP_SERVER_LISTEN}' --target 127.0.0.1:${WARPTWEET_INTEROP_ECHO_PORT}" >/tmp/wt-interop-init.out 2>/tmp/wt-interop-init.err; then
-        interop_log "server init returned non-zero (may already exist)"
-    fi
-    _enroll_host=$(printf '%s' "$WARPTWEET_INTEROP_SERVER_LISTEN" | sed 's/:[0-9]*$//')
-    interop_ssh "sudo systemctl start warptweet-enroll.service >/dev/null 2>&1 || (sudo '$WARPTWEET_INTEROP_SERVER_CTRL' server enroll-listen --listen '${_enroll_host}:29722' >/tmp/wt-enroll-listen.log 2>&1 &)"
-    sleep 1
-    if interop_ssh "sudo '$WARPTWEET_INTEROP_SERVER_CTRL' server invite --target 127.0.0.1:${WARPTWEET_INTEROP_ECHO_PORT} --name '${WARPTWEET_INTEROP_CLIENT_NAME}'" >"$WARPTWEET_INTEROP_WORK/invite-wrap.json" 2>/tmp/wt-interop-invite.err; then
-        python3 - "$WARPTWEET_INTEROP_WORK/invite-wrap.json" "$WARPTWEET_INTEROP_INVITE" <<'PY'
-import json, sys
-doc = json.load(open(sys.argv[1]))
-inv = doc.get("invite", doc)
-json.dump(inv, open(sys.argv[2], "w"), separators=(",", ":"))
-open(sys.argv[2], "a").write("\n")
-PY
-        _minted=1
-    fi
+# `host` is the sole public bootstrap path. It must establish both listeners
+# before reporting the invite.
+if ! interop_ssh "sudo rm -f '$_remote_invite' && sudo '$WARPTWEET_INTEROP_SERVER_CTRL' host --to 127.0.0.1:${WARPTWEET_INTEROP_ECHO_PORT} --listen '${WARPTWEET_INTEROP_SERVER_LISTEN}' --name '${WARPTWEET_INTEROP_CLIENT_NAME}' --out '$_remote_invite'" >/tmp/wt-interop-host.out 2>/tmp/wt-interop-host.err; then
+    interop_record_result invite-enroll-single-use positive fail "warptweet host failed: $(tr '\n' ' ' </tmp/wt-interop-host.err | cut -c1-200)"
+    interop_emit_evidence || true
+    interop_die "host failed"
 fi
+interop_log "host ready"
 
-if [ "$_minted" -eq 1 ] && [ ! -s "$WARPTWEET_INTEROP_INVITE" ]; then
-    # gateway wrote root-owned invite on remote; pull via sudo cat
-    interop_ssh "sudo cat '$_remote_invite'" >"$WARPTWEET_INTEROP_INVITE" || true
+# Always pull the invite minted this run (do not reuse a leftover local file).
+if ! interop_ssh "sudo cat '$_remote_invite'" >"$WARPTWEET_INTEROP_INVITE"; then
+    interop_record_result invite-enroll-single-use positive fail "invite retrieval failed"
+    interop_emit_evidence || true
+    interop_die "invite retrieval failed"
 fi
 if [ ! -s "$WARPTWEET_INTEROP_INVITE" ]; then
     interop_record_result invite-enroll-single-use positive fail "invite file not retrieved"
@@ -130,49 +116,38 @@ fi
 chmod 0600 "$WARPTWEET_INTEROP_INVITE"
 interop_log "invite at $WARPTWEET_INTEROP_INVITE"
 
-# gateway mints invite + enroll listener; it does not start sshd. Render config,
-# harden fixed-layout ownership (dpkg non-root builds can leave wrong owners),
-# and start the tunnel unit so client up can reach listen.
-interop_ssh "sudo chown -R root:root /opt/warptweet /var/empty /var/lib/warptweet 2>/dev/null || true
-sudo install -d -o root -g root -m 0755 /var/empty/warptweet-sshd /run/warptweet/server
-sudo chmod 755 /var/empty
-sudo '$WARPTWEET_INTEROP_SERVER_CTRL' render-server --config /etc/warptweet/server.wt | sudo tee /opt/warptweet/etc/sshd_config >/dev/null
-sudo chmod 0644 /opt/warptweet/etc/sshd_config
-sudo systemctl enable warptweet-sshd.service >/dev/null 2>&1 || true
-sudo systemctl restart warptweet-sshd.service
-sudo systemctl restart warptweet-enroll.service >/dev/null 2>&1 || true
-"
-if ! interop_ssh "ss -lntp 2>/dev/null | grep -q ':${WARPTWEET_INTEROP_SERVER_LISTEN##*:}' || netstat -lntp 2>/dev/null | grep -q ':${WARPTWEET_INTEROP_SERVER_LISTEN##*:}'"; then
-    interop_log "warning: server listen ${WARPTWEET_INTEROP_SERVER_LISTEN} not observed after warptweet-sshd restart"
+# Re-read the two readiness boundaries that `host` has established.
+_listen_port=${WARPTWEET_INTEROP_SERVER_LISTEN##*:}
+if ! interop_ssh "ss -lntp 2>/dev/null | grep -q ':$_listen_port' || netstat -lntp 2>/dev/null | grep -q ':$_listen_port'"; then
+    interop_record_result engine-identity-trust-preflight positive fail "host reported ready without SSH listener"
+    interop_emit_evidence || true
+    interop_die "SSH listener missing after host"
 fi
-
-if [ "${_NEED_DOCTOR_RETRY:-0}" = "1" ]; then
-    if interop_ssh "sudo '$WARPTWEET_INTEROP_SERVER_CTRL' doctor-server --config /etc/warptweet/server.wt" >/tmp/wt-interop-doctor-server2.out 2>/tmp/wt-interop-doctor-server2.err; then
-        interop_record_result engine-identity-trust-preflight positive pass "doctor-server after gateway"
-    else
-        # Client doctor still counts toward the case if server doctor is blocked in lab.
-        if "$WARPTWEET_INTEROP_CLIENT_CTRL" doctor --config /etc/warptweet/client.wt --tunnel "$WARPTWEET_INTEROP_CLIENT_NAME" >/tmp/wt-interop-doctor-client.out 2>/tmp/wt-interop-doctor-client.err; then
-            interop_record_result engine-identity-trust-preflight positive pass "client doctor only (server doctor failed in lab)"
-        else
-            interop_record_result engine-identity-trust-preflight positive fail "doctor failed on server and client"
-        fi
-    fi
+if ! interop_ssh "ss -lntp 2>/dev/null | grep -q ':29722' || netstat -lntp 2>/dev/null | grep -q ':29722'"; then
+    interop_record_result invite-enroll-single-use positive fail "host reported ready without enrollment listener"
+    interop_emit_evidence || true
+    interop_die "enrollment listener missing after host"
 fi
-
-# Ensure enroll endpoint is up (unit or detached).
-interop_ssh "sudo systemctl start warptweet-enroll.service >/dev/null 2>&1 || true"
+if interop_ssh "sudo '$WARPTWEET_INTEROP_SERVER_CTRL' doctor-server --config /etc/warptweet/server.wt" >/tmp/wt-interop-doctor-server2.out 2>/tmp/wt-interop-doctor-server2.err; then
+    interop_record_result engine-identity-trust-preflight positive pass "doctor-server after host"
+else
+    interop_record_result engine-identity-trust-preflight positive fail "doctor-server failed after host"
+    interop_emit_evidence || true
+    interop_die "doctor-server failed after host"
+fi
 
 # --- Connect on local Mac ---
 interop_assert_package_ctrl "$WARPTWEET_INTEROP_CLIENT_CTRL" "client"
-# Flags before the invite path: Go flag.Parse stops at the first positional.
-if ! "$WARPTWEET_INTEROP_CLIENT_CTRL" connect --yes "$WARPTWEET_INTEROP_INVITE" >/tmp/wt-interop-connect.out 2>/tmp/wt-interop-connect.err; then
+# Flags before positionals: Go flag.Parse stops at the first positional.
+if ! INTEROP_CLIENT_OUT=/tmp/wt-interop-connect.out INTEROP_CLIENT_ERR=/tmp/wt-interop-connect.err \
+    interop_client_cmd connect --yes "$WARPTWEET_INTEROP_INVITE" >/dev/null; then
     interop_record_result invite-enroll-single-use positive fail "connect failed: $(tr '\n' ' ' </tmp/wt-interop-connect.err | cut -c1-200)"
     interop_emit_evidence || true
     interop_die "connect failed"
 fi
-
 # Single-use: second enroll/connect with same invite must fail.
-if "$WARPTWEET_INTEROP_CLIENT_CTRL" enroll --yes "$WARPTWEET_INTEROP_INVITE" >/tmp/wt-interop-reuse.out 2>/tmp/wt-interop-reuse.err; then
+if INTEROP_CLIENT_OUT=/tmp/wt-interop-reuse.out INTEROP_CLIENT_ERR=/tmp/wt-interop-reuse.err \
+    interop_client_cmd enroll --yes "$WARPTWEET_INTEROP_INVITE" >/dev/null; then
     interop_record_result invite-enroll-single-use positive fail "invite reuse succeeded"
 else
     interop_record_result invite-enroll-single-use positive pass "connect ok; invite reuse rejected"
@@ -181,8 +156,9 @@ fi
 # Parse local open endpoint from connect output.
 _open=$(sed -n 's/^open[[:space:]]*//p' /tmp/wt-interop-connect.out | head -1 | tr -d '\r')
 if [ -z "$_open" ]; then
-    # JSON enroll path may not print human form if connect failed partially
-    _open=$("$WARPTWEET_INTEROP_CLIENT_CTRL" status "$WARPTWEET_INTEROP_CLIENT_NAME" --json 2>/dev/null | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('listen_endpoint') or d.get('ListenEndpoint') or '')" 2>/dev/null || true)
+    INTEROP_CLIENT_OUT=/tmp/wt-interop-status.json INTEROP_CLIENT_ERR=/tmp/wt-interop-status.err \
+        interop_client_cmd status --json "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null || true
+    _open=$(python3 -c "import sys,json; d=json.load(open('/tmp/wt-interop-status.json')); print(d.get('listen_endpoint') or d.get('ListenEndpoint') or '')" 2>/dev/null || true)
 fi
 if [ -z "$_open" ]; then
     interop_record_result deterministic-target-payload positive fail "could not determine local listen endpoint"
@@ -192,7 +168,8 @@ fi
 interop_log "local open $_open"
 
 # Best-effort readiness signal: status phase Ready or payload success.
-if "$WARPTWEET_INTEROP_CLIENT_CTRL" status "$WARPTWEET_INTEROP_CLIENT_NAME" --json >/tmp/wt-interop-status.json 2>/tmp/wt-interop-status.err; then
+if INTEROP_CLIENT_OUT=/tmp/wt-interop-status.json INTEROP_CLIENT_ERR=/tmp/wt-interop-status.err \
+    interop_client_cmd status --json "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null; then
     if grep -q 'Ready' /tmp/wt-interop-status.json 2>/dev/null; then
         interop_record_result pid-bound-readiness positive pass "status reports Ready"
     else
@@ -214,10 +191,14 @@ fi
 # --- Optional lifecycle ---
 if [ "${WARPTWEET_INTEROP_RUN_LIFECYCLE}" = "1" ]; then
     _life_ok=1
-    "$WARPTWEET_INTEROP_CLIENT_CTRL" down "$WARPTWEET_INTEROP_CLIENT_NAME" >/tmp/wt-interop-down.out 2>/tmp/wt-interop-down.err || _life_ok=0
-    "$WARPTWEET_INTEROP_CLIENT_CTRL" rotate "$WARPTWEET_INTEROP_CLIENT_NAME" >/tmp/wt-interop-rotate.out 2>/tmp/wt-interop-rotate.err || _life_ok=0
-    "$WARPTWEET_INTEROP_CLIENT_CTRL" up "$WARPTWEET_INTEROP_CLIENT_NAME" --once >/tmp/wt-interop-up.out 2>/tmp/wt-interop-up.err || _life_ok=0
-    "$WARPTWEET_INTEROP_CLIENT_CTRL" revoke "$WARPTWEET_INTEROP_CLIENT_NAME" >/tmp/wt-interop-revoke.out 2>/tmp/wt-interop-revoke.err || _life_ok=0
+    INTEROP_CLIENT_OUT=/tmp/wt-interop-down.out INTEROP_CLIENT_ERR=/tmp/wt-interop-down.err \
+        interop_client_cmd down "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null || _life_ok=0
+    INTEROP_CLIENT_OUT=/tmp/wt-interop-rotate.out INTEROP_CLIENT_ERR=/tmp/wt-interop-rotate.err \
+        interop_client_cmd rotate "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null || _life_ok=0
+    INTEROP_CLIENT_OUT=/tmp/wt-interop-up.out INTEROP_CLIENT_ERR=/tmp/wt-interop-up.err \
+        interop_client_cmd up --once "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null || _life_ok=0
+    INTEROP_CLIENT_OUT=/tmp/wt-interop-revoke.out INTEROP_CLIENT_ERR=/tmp/wt-interop-revoke.err \
+        interop_client_cmd revoke "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null || _life_ok=0
     if [ "$_life_ok" -eq 1 ]; then
         interop_record_result stop-restart-rotate-revoke-upgrade positive pass "down/rotate/up/revoke completed (upgrade not in Phase A)"
     else

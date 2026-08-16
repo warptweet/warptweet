@@ -8,10 +8,34 @@
       <strong>WarpTweet route</strong>
     </header>
     <dl>
-      <div><dt>From</dt><dd><code>127.0.0.1:15432</code></dd></div>
-      <div><dt>Via</dt><dd><code>server.example:2222</code></dd></div>
-      <div><dt>To</dt><dd><code>127.0.0.1:5432</code></dd></div>
-      <div><dt>Profile</dt><dd>Hybrid / 01</dd></div>
+      <div>
+        <dt>From</dt>
+        <dd>
+          <code>127.0.0.1:15432</code>
+          <small>Local listener on Machine A</small>
+        </dd>
+      </div>
+      <div>
+        <dt>Via</dt>
+        <dd>
+          <code>server.example:2222</code>
+          <small>WarpTweet server endpoint</small>
+        </dd>
+      </div>
+      <div>
+        <dt>To</dt>
+        <dd>
+          <code>127.0.0.1:5432</code>
+          <small>Declared service on Machine B</small>
+        </dd>
+      </div>
+      <div>
+        <dt>Profile</dt>
+        <dd>
+          Hybrid / 01
+          <small>ML-KEM-768 + X25519 · ML-DSA-44 + Ed25519</small>
+        </dd>
+      </div>
     </dl>
   </article>
 
@@ -21,7 +45,7 @@
       their machines.
     </p>
     <dl>
-      <div><dt>Profile</dt><dd>The shared cryptographic contract</dd></div>
+      <div><dt>Profile</dt><dd>The exact hybrid suite both ends must share</dd></div>
       <div><dt>Server</dt><dd>The remote WarpTweet endpoint</dd></div>
       <div><dt>Tunnel ID</dt><dd>The name used by the CLI</dd></div>
       <div><dt>Listen</dt><dd>The local application address</dd></div>

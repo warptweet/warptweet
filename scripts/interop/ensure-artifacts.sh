@@ -169,6 +169,22 @@ ensure_client_pkg() {
     go build -trimpath -o "$WT_REPO_ROOT/bin/warptweet" "$WT_REPO_ROOT/cmd/warptweet"
     go build -trimpath -o "$WT_REPO_ROOT/bin/warptweet-provisioner" "$WT_REPO_ROOT/cmd/warptweet-provisioner"
 
+    # Sign with Developer ID when available (matches productionCodeSigningTeamID).
+    _sign_id=${WARPTWEET_CODESIGN_IDENTITY:-"Developer ID Application: Baldwinson Corporation (CP4268Q8UF)"}
+    if command -v codesign >/dev/null 2>&1 && security find-identity -v -p codesigning 2>/dev/null | grep -Fq "$_sign_id"; then
+        ensure_log "codesigning client payload with $_sign_id"
+        for _bin in \
+            "$WT_REPO_ROOT/bin/warptweet" \
+            "$WT_REPO_ROOT/bin/warptweet-provisioner" \
+            "$_stage/Library/Application Support/WarpTweet/libexec/openssh/bin/ssh" \
+            "$_stage/Library/Application Support/WarpTweet/libexec/openssh/bin/ssh-keygen"; do
+            [ -f "$_bin" ] || continue
+            codesign --force --options runtime --timestamp --sign "$_sign_id" "$_bin"
+        done
+    else
+        ensure_log "warning: codesign identity not available; package will fail production Team ID checks"
+    fi
+
     _pkg=$WARPTWEET_INTEROP_ARTIFACTS/warptweet-client_${WARPTWEET_RELEASE_VERSION}_${_darwin_token}.pkg
     if [ -e "$_pkg" ]; then
         rm -f "$_pkg"

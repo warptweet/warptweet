@@ -13,43 +13,46 @@ import (
 )
 
 const (
-	// ClientStatusActive is an authorized enrolled client.
-	ClientStatusActive = "active"
-	// ClientStatusRevoked is a durably revoked client.
-	ClientStatusRevoked = "revoked"
+	ClientStatusEnrollmentPending = "enrollment_pending"
+	ClientStatusActive            = "active"
+	ClientStatusRotationPending   = "rotation_pending"
+	ClientStatusRevocationPending = "revocation_pending"
+	ClientStatusRevoked           = "revoked"
 
-	// ManagementTokenBytes is the raw management token size.
 	ManagementTokenBytes = 32
 )
 
-// ClientRecord is durable server-side enrollment state for one client.
-// It never stores the raw management token.
+// ClientRecord is durable server-side enrollment state for one client. Raw
+// management capabilities are never stored here.
 type ClientRecord struct {
-	ClientID                string `json:"client_id"`
-	TunnelID                string `json:"tunnel_id"`
-	InviteID                string `json:"invite_id"`
-	PublicKey               string `json:"public_key"`
-	PublicKeySHA256         string `json:"public_key_sha256"`
-	ManagementTokenSHA256   string `json:"management_token_sha256"`
-	Principal               string `json:"principal"`
-	ProfileID               string `json:"profile_id"`
-	ServerAddress           string `json:"server_address"`
-	Status                  string `json:"status"`
-	AcceptedAt              string `json:"accepted_at"`
-	RevokedAt               string `json:"revoked_at,omitempty"`
-	Generation              string `json:"generation,omitempty"`
-	RotatedFromClientID     string `json:"rotated_from_client_id,omitempty"`
+	ClientID                      string `json:"client_id"`
+	TunnelID                      string `json:"tunnel_id"`
+	InviteID                      string `json:"invite_id"`
+	PublicKey                     string `json:"public_key"`
+	PublicKeySHA256               string `json:"public_key_sha256"`
+	ManagementTokenSHA256         string `json:"management_token_sha256"`
+	Principal                     string `json:"principal"`
+	ProfileID                     string `json:"profile_id"`
+	ServerAddress                 string `json:"server_address"`
+	Status                        string `json:"status"`
+	AcceptedAt                    string `json:"accepted_at"`
+	RevokedAt                     string `json:"revoked_at,omitempty"`
+	Generation                    string `json:"generation,omitempty"`
+	PreviousPublicKey             string `json:"previous_public_key,omitempty"`
+	PreviousManagementTokenSHA256 string `json:"previous_management_token_sha256,omitempty"`
+	PendingPublicKey              string `json:"pending_public_key,omitempty"`
+	PendingManagementTokenSHA256  string `json:"pending_management_token_sha256,omitempty"`
+	OperationStartedAt            string `json:"operation_started_at,omitempty"`
 }
 
-// ManagementRequest authenticates client-initiated revoke/rotate calls.
 type ManagementRequest struct {
-	ClientID         string `json:"client_id"`
-	ManagementToken  string `json:"management_token"`
-	TunnelID         string `json:"tunnel_id"`
-	NewPublicKey     string `json:"new_public_key,omitempty"`
+	ClientID            string `json:"client_id"`
+	ManagementToken     string `json:"management_token"`
+	TunnelID            string `json:"tunnel_id"`
+	NewPublicKey        string `json:"new_public_key,omitempty"`
+	NextManagementToken string `json:"next_management_token,omitempty"`
 }
 
-// GenerateManagementToken returns a fresh client management token (hex).
 func GenerateManagementToken() (string, error) {
 	raw := make([]byte, ManagementTokenBytes)
 	if _, err := rand.Read(raw); err != nil {
@@ -58,19 +61,25 @@ func GenerateManagementToken() (string, error) {
 	return hex.EncodeToString(raw), nil
 }
 
-// HashManagementToken returns the durable SHA-256 hex digest of a token.
+// ValidateManagementToken validates the public wire and persisted capability
+// shape without logging or returning the capability itself.
+func ValidateManagementToken(token string) error {
+	if !isManagementToken(token) {
+		return fmt.Errorf("%w: management token must be 64 lowercase hex characters", ErrInvalidInvite)
+	}
+	return nil
+}
+
 func HashManagementToken(token string) string {
 	sum := sha256.Sum256([]byte(strings.TrimSpace(token)))
 	return hex.EncodeToString(sum[:])
 }
 
-// PublicKeyDigest returns SHA-256 hex of the public key line.
 func PublicKeyDigest(publicKey string) string {
 	sum := sha256.Sum256([]byte(strings.TrimSpace(publicKey)))
 	return hex.EncodeToString(sum[:])
 }
 
-// StoreClient persists one client record exclusively by client_id.
 func StoreClient(directory string, record ClientRecord) error {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return err
@@ -85,7 +94,6 @@ func StoreClient(directory string, record ClientRecord) error {
 	return writeJSONAtomic(path, record, 0o600)
 }
 
-// LoadClient reads one client record.
 func LoadClient(directory, clientID string) (ClientRecord, error) {
 	if !isHexID(clientID) {
 		return ClientRecord{}, fmt.Errorf("%w: client_id is invalid", ErrInvalidInvite)
@@ -101,7 +109,6 @@ func LoadClient(directory, clientID string) (ClientRecord, error) {
 	return record, nil
 }
 
-// UpdateClient overwrites one existing client record under lock.
 func UpdateClient(directory string, record ClientRecord) error {
 	if !isHexID(record.ClientID) {
 		return fmt.Errorf("%w: client_id is invalid", ErrInvalidInvite)
@@ -117,8 +124,31 @@ func UpdateClient(directory string, record ClientRecord) error {
 	return writeJSONAtomic(clientPath(directory, record.ClientID), record, 0o600)
 }
 
-// AuthenticateManagement verifies a management token against a stored client.
 func AuthenticateManagement(directory string, request ManagementRequest) (ClientRecord, error) {
+	if err := validateManagementRequestShape(request); err != nil {
+		return ClientRecord{}, err
+	}
+	unlock, err := lockClient(directory, request.ClientID)
+	if err != nil {
+		return ClientRecord{}, err
+	}
+	defer unlock()
+	record, err := LoadClient(directory, request.ClientID)
+	if err != nil {
+		return ClientRecord{}, fmt.Errorf("%w: unknown client", ErrInvalidInvite)
+	}
+	if err := authenticateClientRecord(record, request); err != nil {
+		return ClientRecord{}, err
+	}
+	return record, nil
+}
+
+// RevokeClient persists revocation intent before removing authorization. Exact
+// retries authenticated by the previous token remain idempotent.
+func RevokeClient(directory string, request ManagementRequest, now time.Time, removeAuthorization func(string) error) (ClientRecord, error) {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
 	if err := validateManagementRequestShape(request); err != nil {
 		return ClientRecord{}, err
 	}
@@ -132,91 +162,136 @@ func AuthenticateManagement(directory string, request ManagementRequest) (Client
 	if err != nil {
 		return ClientRecord{}, fmt.Errorf("%w: unknown client", ErrInvalidInvite)
 	}
-	if err := authenticateClientRecord(record, request); err != nil {
+	if record.TunnelID != request.TunnelID {
+		return ClientRecord{}, fmt.Errorf("%w: tunnel_id mismatch", ErrInvalidInvite)
+	}
+	if record.Status == ClientStatusRevoked {
+		if !managementTokenMatches(record.PreviousManagementTokenSHA256, request.ManagementToken) {
+			return ClientRecord{}, fmt.Errorf("%w: management token mismatch", ErrInvalidInvite)
+		}
+		if removeAuthorization == nil {
+			return ClientRecord{}, fmt.Errorf("remove authorization callback is required")
+		}
+		if err := removeAuthorization(record.PublicKey); err != nil {
+			return ClientRecord{}, err
+		}
+		return record, nil
+	}
+	if record.Status != ClientStatusActive && record.Status != ClientStatusRevocationPending {
+		return ClientRecord{}, fmt.Errorf("%w: client status is %q", ErrInvalidInvite, record.Status)
+	}
+	if !managementTokenMatches(record.ManagementTokenSHA256, request.ManagementToken) {
+		return ClientRecord{}, fmt.Errorf("%w: management token mismatch", ErrInvalidInvite)
+	}
+	if record.Status == ClientStatusActive {
+		record.Status = ClientStatusRevocationPending
+		record.OperationStartedAt = now.Format(time.RFC3339Nano)
+		if err := writeJSONAtomic(clientPath(directory, record.ClientID), record, 0o600); err != nil {
+			return ClientRecord{}, err
+		}
+	}
+	if removeAuthorization == nil {
+		return ClientRecord{}, fmt.Errorf("remove authorization callback is required")
+	}
+	if err := removeAuthorization(record.PublicKey); err != nil {
+		return ClientRecord{}, err
+	}
+	burned := make([]byte, ManagementTokenBytes)
+	if _, err := rand.Read(burned); err != nil {
+		return ClientRecord{}, fmt.Errorf("generate burned management token: %w", err)
+	}
+	record.PreviousManagementTokenSHA256 = record.ManagementTokenSHA256
+	record.ManagementTokenSHA256 = HashManagementToken(hex.EncodeToString(burned))
+	record.Status = ClientStatusRevoked
+	record.RevokedAt = now.Format(time.RFC3339Nano)
+	record.OperationStartedAt = ""
+	if err := writeJSONAtomic(clientPath(directory, record.ClientID), record, 0o600); err != nil {
 		return ClientRecord{}, err
 	}
 	return record, nil
 }
 
-// RevokeClient marks a client revoked after management auth.
-func RevokeClient(directory string, request ManagementRequest, now time.Time) (ClientRecord, error) {
+// RotateClientPublicKey persists rotation intent before changing
+// authorization. The client selects the next capability, allowing exact
+// response-loss retries without transmitting any server-generated secret.
+func RotateClientPublicKey(directory string, request ManagementRequest, newPublicKey string, now time.Time, replaceAuthorization func(string, string) error) (ClientRecord, error) {
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	if !isHexID(request.ClientID) {
-		return ClientRecord{}, fmt.Errorf("%w: client_id is invalid", ErrInvalidInvite)
+	if err := validateManagementRequestShape(request); err != nil {
+		return ClientRecord{}, err
 	}
+	newPublicKey = strings.TrimSpace(newPublicKey)
+	if err := validatePublicKeyLine(newPublicKey); err != nil {
+		return ClientRecord{}, err
+	}
+	if !isManagementToken(request.NextManagementToken) {
+		return ClientRecord{}, fmt.Errorf("%w: next_management_token must be 64 lowercase hex characters", ErrInvalidInvite)
+	}
+
 	unlock, err := lockClient(directory, request.ClientID)
 	if err != nil {
 		return ClientRecord{}, err
 	}
 	defer unlock()
-
 	record, err := LoadClient(directory, request.ClientID)
 	if err != nil {
 		return ClientRecord{}, fmt.Errorf("%w: unknown client", ErrInvalidInvite)
 	}
-	if record.Status == ClientStatusRevoked {
+	if record.TunnelID != request.TunnelID {
+		return ClientRecord{}, fmt.Errorf("%w: tunnel_id mismatch", ErrInvalidInvite)
+	}
+	nextHash := HashManagementToken(request.NextManagementToken)
+	currentHash := HashManagementToken(request.ManagementToken)
+
+	if record.Status == ClientStatusActive && record.PublicKey == newPublicKey &&
+		record.ManagementTokenSHA256 == nextHash && record.PreviousManagementTokenSHA256 == currentHash {
+		if replaceAuthorization == nil {
+			return ClientRecord{}, fmt.Errorf("replace authorization callback is required")
+		}
+		if err := replaceAuthorization(record.PreviousPublicKey, newPublicKey); err != nil {
+			return ClientRecord{}, err
+		}
 		return record, nil
 	}
-	if err := authenticateClientRecord(record, request); err != nil {
+	if record.Status != ClientStatusActive && record.Status != ClientStatusRotationPending {
+		return ClientRecord{}, fmt.Errorf("%w: client status is %q", ErrInvalidInvite, record.Status)
+	}
+	if !managementTokenMatches(record.ManagementTokenSHA256, request.ManagementToken) {
+		return ClientRecord{}, fmt.Errorf("%w: management token mismatch", ErrInvalidInvite)
+	}
+	if record.Status == ClientStatusActive {
+		record.PendingPublicKey = newPublicKey
+		record.PendingManagementTokenSHA256 = nextHash
+		record.Status = ClientStatusRotationPending
+		record.OperationStartedAt = now.Format(time.RFC3339Nano)
+		if err := writeJSONAtomic(clientPath(directory, record.ClientID), record, 0o600); err != nil {
+			return ClientRecord{}, err
+		}
+	} else if record.PendingPublicKey != newPublicKey || record.PendingManagementTokenSHA256 != nextHash {
+		return ClientRecord{}, fmt.Errorf("%w: rotation retry does not match pending state", ErrInvalidInvite)
+	}
+	if replaceAuthorization == nil {
+		return ClientRecord{}, fmt.Errorf("replace authorization callback is required")
+	}
+	oldPublicKey := record.PublicKey
+	if err := replaceAuthorization(oldPublicKey, newPublicKey); err != nil {
 		return ClientRecord{}, err
 	}
-	record.Status = ClientStatusRevoked
-	record.RevokedAt = now.Format(time.RFC3339Nano)
-	// Burn the token hash so replay fails closed.
-	record.ManagementTokenSHA256 = HashManagementToken(record.ClientID + ":revoked:" + record.RevokedAt)
+	record.PreviousPublicKey = oldPublicKey
+	record.PreviousManagementTokenSHA256 = record.ManagementTokenSHA256
+	record.PublicKey = newPublicKey
+	record.PublicKeySHA256 = PublicKeyDigest(newPublicKey)
+	record.ManagementTokenSHA256 = nextHash
+	record.PendingPublicKey = ""
+	record.PendingManagementTokenSHA256 = ""
+	record.OperationStartedAt = ""
+	record.Status = ClientStatusActive
+	record.Generation = now.Format("20060102T150405Z")
 	if err := writeJSONAtomic(clientPath(directory, record.ClientID), record, 0o600); err != nil {
 		return ClientRecord{}, err
 	}
 	return record, nil
-}
-
-// RotateClientPublicKey replaces the active public key and issues a new token.
-func RotateClientPublicKey(
-	directory string,
-	request ManagementRequest,
-	newPublicKey string,
-	now time.Time,
-) (ClientRecord, string, error) {
-	if now.IsZero() {
-		now = time.Now().UTC()
-	}
-	if !isHexID(request.ClientID) {
-		return ClientRecord{}, "", fmt.Errorf("%w: client_id is invalid", ErrInvalidInvite)
-	}
-	newPublicKey = strings.TrimSpace(newPublicKey)
-	if err := validatePublicKeyLine(newPublicKey); err != nil {
-		return ClientRecord{}, "", err
-	}
-
-	unlock, err := lockClient(directory, request.ClientID)
-	if err != nil {
-		return ClientRecord{}, "", err
-	}
-	defer unlock()
-
-	record, err := LoadClient(directory, request.ClientID)
-	if err != nil {
-		return ClientRecord{}, "", fmt.Errorf("%w: unknown client", ErrInvalidInvite)
-	}
-	if err := authenticateClientRecord(record, request); err != nil {
-		return ClientRecord{}, "", err
-	}
-
-	token, err := GenerateManagementToken()
-	if err != nil {
-		return ClientRecord{}, "", err
-	}
-	record.RotatedFromClientID = record.ClientID
-	record.PublicKey = newPublicKey
-	record.PublicKeySHA256 = PublicKeyDigest(newPublicKey)
-	record.ManagementTokenSHA256 = HashManagementToken(token)
-	record.Generation = now.Format("20060102T150405Z")
-	if err := writeJSONAtomic(clientPath(directory, record.ClientID), record, 0o600); err != nil {
-		return ClientRecord{}, "", err
-	}
-	return record, token, nil
 }
 
 func validateManagementRequestShape(request ManagementRequest) error {
@@ -225,6 +300,9 @@ func validateManagementRequestShape(request ManagementRequest) error {
 	}
 	if !isHexID(request.ClientID) {
 		return fmt.Errorf("%w: client_id is invalid", ErrInvalidInvite)
+	}
+	if !isManagementToken(request.ManagementToken) {
+		return fmt.Errorf("%w: management_token must be 64 lowercase hex characters", ErrInvalidInvite)
 	}
 	return nil
 }
@@ -236,18 +314,24 @@ func authenticateClientRecord(record ClientRecord, request ManagementRequest) er
 	if record.TunnelID != request.TunnelID {
 		return fmt.Errorf("%w: tunnel_id mismatch", ErrInvalidInvite)
 	}
-	want := record.ManagementTokenSHA256
-	if want == "" {
-		return fmt.Errorf("%w: management token mismatch", ErrInvalidInvite)
-	}
-	got := HashManagementToken(request.ManagementToken)
-	if subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
+	if !managementTokenMatches(record.ManagementTokenSHA256, request.ManagementToken) {
 		return fmt.Errorf("%w: management token mismatch", ErrInvalidInvite)
 	}
 	return nil
 }
 
-// ListClients returns client records.
+func managementTokenMatches(wantHash, token string) bool {
+	if wantHash == "" || !isManagementToken(token) {
+		return false
+	}
+	got := HashManagementToken(token)
+	return subtle.ConstantTimeCompare([]byte(got), []byte(wantHash)) == 1
+}
+
+func isManagementToken(token string) bool {
+	return len(token) == ManagementTokenBytes*2 && isLowerHexDigest(token)
+}
+
 func ListClients(directory string) ([]ClientRecord, error) {
 	entries, err := os.ReadDir(directory)
 	if err != nil {

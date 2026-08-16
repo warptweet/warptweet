@@ -63,6 +63,10 @@ func TestDarwinInstallLayoutIsAbsoluteAndWithinSocketBudget(t *testing.T) {
 		DarwinSSHKeygenPath,
 		DarwinClientRuntimeRoot,
 		DarwinOpenSSHBundleManifestPath,
+		DarwinProvisionerPath,
+		DarwinProvisionerRunRoot,
+		DarwinProvisionerSocket,
+		DarwinLaunchDaemonRoot,
 	} {
 		if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 			t.Errorf("darwin path %q is not clean and absolute", path)
@@ -70,6 +74,9 @@ func TestDarwinInstallLayoutIsAbsoluteAndWithinSocketBudget(t *testing.T) {
 	}
 	if DarwinClientServiceUser != "_warptweet" || DarwinClientServiceGroup != "_warptweet" {
 		t.Fatalf("unexpected darwin service identity %q/%q", DarwinClientServiceUser, DarwinClientServiceGroup)
+	}
+	if len(DarwinProvisionerSocket) >= 104 {
+		t.Fatalf("darwin provisioner socket path length = %d, want < 104", len(DarwinProvisionerSocket))
 	}
 	maximumControlPath := DarwinClientRuntimeRoot + "/" + strings.Repeat("a", 64) + "/c"
 	if got := len(maximumControlPath) + 17; got > 107 {

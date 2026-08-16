@@ -10,7 +10,7 @@ WarpTweet welcomes focused contributions that preserve its managed-endpoint, fai
 - [Threat model](docs/2026-08-09_threat-model.md)
 - [Cryptographic profile v1](docs/2026-08-09_crypto-profile.md)
 - [Client tunnels manifest v1 schema](schemas/client-tunnels-v1.schema.json)
-- [Server gateway manifest v1 schema](schemas/server-gateway-v1.schema.json)
+- [Server policy manifest v1 schema](schemas/server-gateway-v1.schema.json)
 
 ## Non-negotiable invariants
 

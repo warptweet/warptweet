@@ -102,21 +102,22 @@ func darwinUserShell(userName string) (string, error) {
 
 func inspectDarwinClientFileMetadata(
 	_ string,
-	_ *os.File,
+	file *os.File,
 	info os.FileInfo,
 ) (clientFileMetadata, error) {
 	status, ok := info.Sys().(*syscall.Stat_t)
 	if !ok {
 		return clientFileMetadata{}, errors.New("file metadata does not contain Darwin stat data")
 	}
-	// Darwin ACL presence is rejected by inspecting the elevated ACL bit when
-	// available. Extended ACL APIs are installer/package concerns; unexpected
-	// mode bits with setuid/setgid/sticky are already rejected by shared policy.
+	hasExtendedACL, err := darwinFileHasExtendedACL(file)
+	if err != nil {
+		return clientFileMetadata{}, fmt.Errorf("inspect Darwin extended ACL: %w", err)
+	}
 	return clientFileMetadata{
 		uid:           status.Uid,
 		gid:           status.Gid,
 		linkCount:     uint64(status.Nlink),
-		hasAccessACL:  false,
+		hasAccessACL:  hasExtendedACL,
 		hasDefaultACL: false,
 	}, nil
 }

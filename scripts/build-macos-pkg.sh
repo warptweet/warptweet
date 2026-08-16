@@ -31,6 +31,13 @@ WT_PROVISIONER_INPUT=$3
 WT_OUTPUT_PKG_INPUT=$4
 WT_VERSION=${WARPTWEET_VERSION:-0.1.0-dev}
 WT_PACKAGE_ID=com.warptweet.client
+WT_TEAM_ID=CP4268Q8UF
+if [ "${WARPTWEET_REQUIRE_NOTARIZED_PKG:-}" = "1" ]; then
+    if [ -z "${WARPTWEET_INSTALLER_IDENTITY:-}" ] || [ -z "${WARPTWEET_NOTARY_PROFILE:-}" ]; then
+        echo "installer identity and WARPTWEET_NOTARY_PROFILE are required for release notarization" >&2
+        exit 77
+    fi
+fi
 WT_ARCH=$(uname -m)
 case "$WT_ARCH" in
     arm64) WT_ARCH_TOKEN=darwin-arm64 ;;
@@ -98,6 +105,26 @@ for WT_REQUIRED in "$WT_STAGE_SSH" "$WT_STAGE_KEYGEN" "$WT_STAGE_MANIFEST"; do
         exit 66
     fi
 done
+
+verify_release_codesign() {
+    WT_SIGNED_PATH=$1
+    codesign --verify --strict --verbose=2 "$WT_SIGNED_PATH"
+    WT_SIGNING_DETAILS=$(codesign --display --verbose=4 "$WT_SIGNED_PATH" 2>&1)
+    if ! printf '%s\n' "$WT_SIGNING_DETAILS" | grep -Fxq "TeamIdentifier=$WT_TEAM_ID"; then
+        echo "release payload has the wrong or missing TeamIdentifier: $WT_SIGNED_PATH" >&2
+        exit 77
+    fi
+}
+
+if [ "${WARPTWEET_REQUIRE_SIGNED_PKG:-}" = "1" ]; then
+    command -v codesign >/dev/null 2>&1 || {
+        echo "codesign is required for release package assembly" >&2
+        exit 69
+    }
+    for WT_SIGNED_INPUT in "$WT_CONTROLLER" "$WT_PROVISIONER" "$WT_STAGE_SSH" "$WT_STAGE_KEYGEN"; do
+        verify_release_codesign "$WT_SIGNED_INPUT"
+    done
+fi
 for WT_FORBIDDEN in \
     "$WT_OPENSSH_STAGE/Library/Application Support/WarpTweet/libexec/openssh/sbin/sshd" \
     "$WT_OPENSSH_STAGE/Library/Application Support/WarpTweet/libexec/openssh/libexec/sshd-auth" \
@@ -150,8 +177,8 @@ install -m 0755 "$WT_PROVISIONER" \
     "$WT_ROOT/Library/Application Support/WarpTweet/bin/warptweet-provisioner"
 install -m 0755 "$WT_REPOSITORY_ROOT/packaging/macos/scripts/uninstall.sh" \
     "$WT_ROOT/Library/Application Support/WarpTweet/share/uninstall.sh"
-install -m 0644 "$WT_REPOSITORY_ROOT/packaging/macos/launchd/com.warptweet.client.plist" \
-    "$WT_ROOT/Library/LaunchDaemons/com.warptweet.client.plist"
+install -m 0644 "$WT_REPOSITORY_ROOT/packaging/macos/launchd/com.warptweet.provisioner.plist" \
+    "$WT_ROOT/Library/LaunchDaemons/com.warptweet.provisioner.plist"
 
 install -m 0755 "$WT_REPOSITORY_ROOT/packaging/macos/scripts/preinstall" "$WT_SCRIPTS/preinstall"
 install -m 0755 "$WT_REPOSITORY_ROOT/packaging/macos/scripts/postinstall" "$WT_SCRIPTS/postinstall"
@@ -192,6 +219,13 @@ if [ -n "${WARPTWEET_INSTALLER_IDENTITY:-}" ]; then
         echo "productsign is required when WARPTWEET_INSTALLER_IDENTITY is set" >&2
         exit 69
     fi
+    case "$WARPTWEET_INSTALLER_IDENTITY" in
+        *"($WT_TEAM_ID)") ;;
+        *)
+            echo "installer identity must belong to WarpTweet Team ID $WT_TEAM_ID" >&2
+            exit 77
+            ;;
+    esac
     WT_SIGNED_PKG="$WT_WORK/signed.pkg"
     productsign --sign "$WARPTWEET_INSTALLER_IDENTITY" "$WT_UNSIGNED_PKG" "$WT_SIGNED_PKG"
     WT_FINAL_SOURCE=$WT_SIGNED_PKG
@@ -210,7 +244,6 @@ elif [ "${WARPTWEET_REQUIRE_SIGNED_PKG:-}" = "1" ]; then
     echo "WARPTWEET_INSTALLER_IDENTITY is required for release package signing" >&2
     exit 77
 fi
-
 if [ -e "$WT_OUTPUT_PKG" ] || [ -L "$WT_OUTPUT_PKG" ]; then
     echo "output package appeared before publication" >&2
     exit 73

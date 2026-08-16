@@ -35,20 +35,19 @@ fi
 
 WT_ROOT="/Library/Application Support/WarpTweet"
 WT_STATE="$WT_ROOT/state"
-WT_PLIST="/Library/LaunchDaemons/com.warptweet.client.plist"
+WT_PROVISIONER_PLIST="/Library/LaunchDaemons/com.warptweet.provisioner.plist"
 WT_PKG_ID="com.warptweet.client"
 
-if [ -f "$WT_PLIST" ]; then
-    launchctl bootout system/com.warptweet.client >/dev/null 2>&1 || true
-    launchctl unload "$WT_PLIST" >/dev/null 2>&1 || true
-fi
+for WT_TUNNEL_PLIST in /Library/LaunchDaemons/com.warptweet.tunnel.*.plist; do
+    [ -e "$WT_TUNNEL_PLIST" ] || continue
+    WT_LABEL=${WT_TUNNEL_PLIST##*/}
+    WT_LABEL=${WT_LABEL%.plist}
+    launchctl bootout "system/$WT_LABEL" >/dev/null 2>&1 || true
+    rm -f "$WT_TUNNEL_PLIST"
+done
+launchctl bootout system/com.warptweet.provisioner >/dev/null 2>&1 || true
 
-# Stop any remaining controller processes owned by the package paths.
-if [ -x "$WT_ROOT/bin/warptweet" ]; then
-    pkill -f "$WT_ROOT/bin/warptweet" >/dev/null 2>&1 || true
-fi
-
-rm -f "$WT_PLIST"
+rm -f "$WT_PROVISIONER_PLIST" /var/run/warptweet/provisioner.sock
 rm -rf "$WT_ROOT/bin" "$WT_ROOT/libexec" "$WT_ROOT/share"
 
 if [ "$WT_DESTROY_IDENTITY" -eq 1 ]; then

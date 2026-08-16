@@ -29,4 +29,10 @@ const (
 	DarwinClientRuntimeRoot  = "/Library/Caches/wt"
 	DarwinClientServiceUser  = "_warptweet"
 	DarwinClientServiceGroup = "_warptweet"
+	DarwinProvisionerPath    = DarwinApplicationSupportRoot + "/bin/warptweet-provisioner"
+	DarwinProvisionerRunRoot = "/var/run/warptweet"
+	DarwinProvisionerSocket  = DarwinProvisionerRunRoot + "/provisioner.sock"
+	DarwinLaunchDaemonRoot   = "/Library/LaunchDaemons"
+	DarwinProvisionerLabel   = "com.warptweet.provisioner"
+	DarwinTunnelLabelPrefix  = "com.warptweet.tunnel."
 )

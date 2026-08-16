@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.warptweet.provisioner</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Library/Application Support/WarpTweet/bin/warptweet-provisioner</string>
+		<string>serve</string>
+	</array>
+	<key>UserName</key>
+	<string>root</string>
+	<key>GroupName</key>
+	<string>wheel</string>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>KeepAlive</key>
+	<true/>
+	<key>ThrottleInterval</key>
+	<integer>5</integer>
+	<key>Umask</key>
+	<integer>63</integer>
+	<key>ProcessType</key>
+	<string>Background</string>
+	<key>StandardErrorPath</key>
+	<string>/Library/Logs/WarpTweet/provisioner.err.log</string>
+	<key>StandardOutPath</key>
+	<string>/Library/Logs/WarpTweet/provisioner.out.log</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>LANG</key><string>C</string>
+		<key>LC_ALL</key><string>C</string>
+	</dict>
+</dict>
+</plist>

@@ -1,6 +1,6 @@
-# Linux server packages and bootstrap
+# Linux host packages and bootstrap
 
-Status: package recipes and server admin CLI, 2026-08-12
+Status: package and `host` contracts implemented in source, 2026-08-15
 
 ## Package assembly
 
@@ -11,92 +11,79 @@ Status: package recipes and server admin CLI, 2026-08-12
   /absolute/path/to/new-output-directory
 ```
 
-The output tree contains:
+The output tree contains the fixed `/opt/warptweet` engine, controller,
+authenticated receipts, systemd units, and maintainer scripts. Debian assembly
+uses `dpkg-deb --root-owner-group`; installed package verification must still
+prove the package database, file ownership, modes, signatures, and exact
+artifact digests on a clean host.
 
-- fixed `/opt/warptweet` inventory from the authenticated OpenSSH stage
-- controller at `/opt/warptweet/bin/warptweet`
-- systemd units `warptweet-sshd.service`, `warptweet-enroll.service`, and
-  `warptweet-tunnel@.service`
-- empty invite/client/state directories under `/var/lib/warptweet`
-- `control` metadata for `dpkg-deb`
-- `warptweet.spec` for RPM-family release automation
-- `postinst` / `prerm` maintainer scripts
+System-account creation is an installation-time contract: maintainer scripts
+create `warptweet`, `warptweet-client`, and `warptweet-sshd` system identities
+and reload systemd. They do not contact the network. Package installation alone
+does not open a WarpTweet listener.
 
-When `dpkg-deb` is available, a `.deb` is produced. Maintainer scripts create
-`warptweet`, `warptweet-client`, and `warptweet-sshd` system accounts, lock the
-tunnel account with the public-key-only `*NP*` sentinel where supported, and
-reload systemd units. Scripts never download packages or contact the network.
+## Public bootstrap
 
-## Server bootstrap CLI
+The only public host bootstrap is:
 
 ```text
-warptweet server init --listen <ip:port> --target <ip:port>
-warptweet server invite --target <ip:port> --name <name>
-warptweet server enroll-listen [--listen ip:port]
+warptweet host --to <port|numeric-ip:port> [--name <client-label>]
+```
+
+`host` performs one convergent operation:
+
+1. generates or reuses the composite host identity through the bundled
+   `ssh-keygen -t mldsa44-ed25519`;
+2. creates the invite MAC secret and the pinned TLS 1.3 enrollment identity;
+3. writes the fixed server manifest and an initially empty managed
+   `authorized_keys` file;
+4. reconciles pending client authorization state;
+5. renders and preflights the restricted `sshd` configuration;
+6. starts the packaged `warptweet-sshd.service` and requires the declared TCP
+   listener, or uses the same pinned direct process only in an unpackaged lab;
+7. starts `warptweet-enroll.service` and requires its pinned-TLS endpoint; and
+8. writes one single-use `<label>.wtinvite`, unless `--no-invite` was selected.
+
+`host ready` is emitted only after both listeners are accepting. There is no
+public flag that bypasses enrollment readiness. A port-only target is local to
+the host, so `--to 5432` means `127.0.0.1:5432`.
+
+## Invite and enrollment contract
+
+The `.wtinvite` binds the exact host public key, enrollment TLS SPKI pin,
+server endpoint, target, principal, wire profile, artifact profile, expiry,
+nonce, and single-use MAC. It contains no private key or reusable management
+capability and is mode 0600 because possession authorizes one enrollment.
+
+Enrollment, rotation, and revocation use TLS 1.3 with the invite-pinned Ed25519
+SPKI and hybrid `X25519MLKEM768` key agreement. The client generates the
+management capability locally; the server stores only its SHA-256 digest.
+
+The packaged enrollment listener is an internal service surface:
+
+```text
+warptweet server enroll-listen [--listen numeric-ip:port]
 warptweet server accept-enrollment --request <request.json>
 warptweet server revoke <client-or-invite-id>
 warptweet server status
-warptweet gateway --to <port|ip:port>
 ```
 
-### `server init`
+It implements `POST /v1/enroll`, `/v1/rotate`, and `/v1/revoke`. Client and
+authorization mutations are journaled as pending before effective
+`authorized_keys` changes, reconciled on restart, and idempotent for exact
+retries. Empty `authorized_keys` is a valid pre-enrollment state while
+public-key authentication remains mandatory.
 
-- Generates a composite host key with the bundled `ssh-keygen -t mldsa44-ed25519`
-- Writes the public key beside the private key
-- Creates a server-local invite MAC secret at `/etc/warptweet/invite.mac-key`
-- Writes `/etc/warptweet/server.wt` for the fixed layout
-- Prints host public-key SHA-256 without exporting private bytes
-
-### `server invite`
-
-Creates one single-use, short-lived invite bound to:
-
-- server listen endpoint
-- exact authorized target
-- dedicated principal
-- wire `profile_id` and platform `artifact_profile_id`
-- host public key line
-- issuance time, expiry, nonce, and HMAC
-
-Invites never contain private keys, passwords, or reusable bearer tokens. Server
-state is stored under `/var/lib/warptweet/invites`.
-
-### `server revoke`
-
-Revokes an invite by id when present; otherwise clears the managed
-`authorized_keys` file transactionally.
-
-### `server status`
-
-Reports manifest presence, host-key presence, listen/target, enroll URL/port,
-invite counts by status, and enrolled client counts by status.
-
-### `server enroll-listen` / `warptweet-enroll.service`
-
-HTTP control plane on the invite `enroll_port` (default **29722**):
-
-- `POST /v1/enroll` — consume single-use invite, install `authorized_keys`
-- `POST /v1/rotate` — replace client key with management-token auth
-- `POST /v1/revoke` — clear authorization with management-token auth
-
-Package install enables `warptweet-enroll.service`. It starts successfully only
-after `server init` (or `gateway`) has written `server.wt`, the host key, and
-`invite.mac-key`. Operators may also run `systemctl start warptweet-enroll`
-after bootstrap. `gateway` can start a detached listener for unpackaged labs;
-packaged hosts should prefer the unit.
-
-### `server accept-enrollment`
-
-One-shot offline accept for air-gapped operators (writes proof JSON to stdout).
-
-## Activation invariant
-
-Authorized-key and invite state updates use temp file, fsync, rename, parent
-fsync. A failed preflight leaves the prior active generation unchanged when
-service reload is gated by `doctor-server` in the systemd unit.
+`server enroll-listen` exists for the packaged unit. `server init` and
+`server invite` are deliberately rejected; callers use `warptweet host` so
+identity, policy, both listeners, and invite output cannot drift into separate
+operator steps.
 
 ## Evidence boundary
 
-These recipes and commands are not evidence that a signed `.deb`/`.rpm` was
-published or that two-endpoint package install succeeded. Hosted package
-interop remains a later release gate.
+Source assembly does not prove a published package. Release evidence must bind
+signed repository metadata or package signatures, exact package digests,
+root-owned installed files, both systemd listeners, package-only
+`host -> connect`, encrypted enrollment, readiness, payload, lifecycle
+recovery, negative policy cases, uninstall, and rollback on clean amd64 and
+arm64 hosts in the declared matrix.

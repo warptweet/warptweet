@@ -53,11 +53,16 @@ func RenderCask(input CaskInput) (string, error) {
 	}
 	if !strings.Contains(rendered, `sha256 "`+strings.ToLower(input.SHA256ARM64)+`"`) ||
 		!strings.Contains(rendered, `sha256 "`+strings.ToLower(input.SHA256AMD64)+`"`) ||
-		!strings.Contains(rendered, `pkgutil:   "com.warptweet.client"`) ||
+		!strings.Contains(rendered, `pkgutil: "com.warptweet.client"`) ||
+		!strings.Contains(rendered, `binary "/Library/Application Support/WarpTweet/bin/warptweet"`) ||
+		!strings.Contains(rendered, `target: "warptweet"`) ||
 		!strings.Contains(rendered, `depends_on macos: ">= :ventura"`) ||
 		!strings.Contains(rendered, "darwin-arm64.pkg") ||
 		!strings.Contains(rendered, "darwin-amd64.pkg") {
 		return "", fmt.Errorf("rendered cask omitted required pinned fields")
+	}
+	if strings.Contains(rendered, `launchctl: "com.warptweet.client"`) {
+		return "", fmt.Errorf("rendered cask references the obsolete static client service")
 	}
 	return rendered, nil
 }

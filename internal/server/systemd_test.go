@@ -57,7 +57,7 @@ func TestEnrollUnitUsesControllerEnrollmentListener(t *testing.T) {
 		"ExecStartPre=/opt/warptweet/bin/warptweet doctor-server --config /etc/warptweet/server.wt",
 		"ExecStart=/opt/warptweet/bin/warptweet server enroll-listen",
 		"User=root",
-		"ReadWritePaths=/var/lib/warptweet /opt/warptweet/etc/authorized_keys",
+		"ReadWritePaths=/var/lib/warptweet /opt/warptweet/etc/authorized_keys /etc/warptweet/enrollment",
 		"NoNewPrivileges=yes",
 		"ProtectSystem=strict",
 		"ProtectHome=yes",

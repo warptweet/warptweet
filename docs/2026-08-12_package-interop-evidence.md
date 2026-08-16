@@ -99,11 +99,17 @@ package controller, proves deterministic payload, and writes a schema-complete
 evidence document with remaining cases `not_run`. See
 `docs/2026-08-14_dual-host-interop-orchestrator.md`.
 
+The local `.pkg` install is the only administrator-prompt boundary. The
+installed `connect` and lifecycle commands run as the login administrator and
+cross the typed package provisioner socket; the harness must not chown state to
+the operator, add the operator to `_warptweet`, or elevate individual client
+commands.
+
 ## Relationship to other gates
 
 | Gate | Role |
 | --- | --- |
-| `test-enrollment-control-plane.sh` | Local enroll HTTP confidence (not package evidence) |
+| `test-enrollment-control-plane.sh` | Local pinned-TLS enrollment confidence (not package evidence) |
 | `test-server-preflight.sh` | Single-host installed server preflight |
 | `test-live-tunnel.sh` | Same-host Linux live tunnel negatives/positives |
 | `test-package-interop.sh` | Package-to-package host-to-host release evidence |

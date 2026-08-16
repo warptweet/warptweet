@@ -472,12 +472,30 @@ func renderConfigTokens(values []string) string {
 }
 
 func renderArgumentTokens(values []string) string {
-	// execve already preserves each -o argument as one argv element. Adding
-	// ssh_config quotes here would not provide shell grouping: OpenSSH would
-	// parse the quote bytes as part of the value. The validated policy values
-	// exclude line and NUL controls, and multi-token directives intentionally
-	// retain one literal ASCII-space separator inside this argv element.
-	return strings.Join(values, " ")
+	// OpenSSH parses each -o value with the same tokenizer as ssh_config.
+	// Quote only when the token needs it (spaces/specials). Quoting bare
+	// keywords like none/yes/no makes OpenSSH treat them as hostnames
+	// (ProxyJump ""none"").
+	tokens := make([]string, len(values))
+	for index, value := range values {
+		tokens[index] = quoteArgumentToken(value)
+	}
+	return strings.Join(tokens, " ")
+}
+
+func quoteArgumentToken(value string) string {
+	if value == "" {
+		return quoteConfig(value)
+	}
+	for _, r := range value {
+		switch {
+		case r == ' ', r == '\t', r == '"', r == '\\', r == '=', r == '#':
+			return quoteConfig(value)
+		case r < 0x20 || r == 0x7f:
+			return quoteConfig(value)
+		}
+	}
+	return value
 }
 
 func clientPolicyArguments(policy clientPolicy) []string {

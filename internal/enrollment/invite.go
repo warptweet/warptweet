@@ -43,23 +43,24 @@ var ErrInvalidInvite = errors.New("invalid WarpTweet invite")
 // Invite is the canonical signed enrollment authorization carried to a client.
 // It contains no private-key material.
 type Invite struct {
-	Kind              string `json:"kind"`
-	SchemaVersion     int    `json:"schema_version"`
-	InviteID          string `json:"invite_id"`
-	ClientName        string `json:"client_name"`
-	ServerAddress     string `json:"server_address"`
-	ServerPort        uint16 `json:"server_port"`
-	EnrollPort        uint16 `json:"enroll_port"`
-	TargetAddress     string `json:"target_address"`
-	TargetPort        uint16 `json:"target_port"`
-	Principal         string `json:"principal"`
-	ProfileID         string `json:"profile_id"`
-	ArtifactProfileID string `json:"artifact_profile_id"`
-	HostPublicKey     string `json:"host_public_key"`
-	IssuedAt          string `json:"issued_at"`
-	ExpiresAt         string `json:"expires_at"`
-	Nonce             string `json:"nonce"`
-	MAC               string `json:"mac"`
+	Kind                    string `json:"kind"`
+	SchemaVersion           int    `json:"schema_version"`
+	InviteID                string `json:"invite_id"`
+	ClientName              string `json:"client_name"`
+	ServerAddress           string `json:"server_address"`
+	ServerPort              uint16 `json:"server_port"`
+	EnrollPort              uint16 `json:"enroll_port"`
+	TargetAddress           string `json:"target_address"`
+	TargetPort              uint16 `json:"target_port"`
+	Principal               string `json:"principal"`
+	ProfileID               string `json:"profile_id"`
+	ArtifactProfileID       string `json:"artifact_profile_id"`
+	HostPublicKey           string `json:"host_public_key"`
+	EnrollmentTLSSPKISHA256 string `json:"enrollment_tls_spki_sha256"`
+	IssuedAt                string `json:"issued_at"`
+	ExpiresAt               string `json:"expires_at"`
+	Nonce                   string `json:"nonce"`
+	MAC                     string `json:"mac"`
 }
 
 // Record is durable server-side invite state.
@@ -80,19 +81,20 @@ const (
 
 // CreateInput is the operator-facing invite request.
 type CreateInput struct {
-	ClientName        string
-	ServerAddress     netip.Addr
-	ServerPort        uint16
-	EnrollPort        uint16
-	TargetAddress     netip.Addr
-	TargetPort        uint16
-	Principal         string
-	ProfileID         string
-	ArtifactProfileID string
-	HostPublicKey     string
-	TTL               time.Duration
-	Now               time.Time
-	Secret            []byte
+	ClientName              string
+	ServerAddress           netip.Addr
+	ServerPort              uint16
+	EnrollPort              uint16
+	TargetAddress           netip.Addr
+	TargetPort              uint16
+	Principal               string
+	ProfileID               string
+	ArtifactProfileID       string
+	HostPublicKey           string
+	EnrollmentTLSSPKISHA256 string
+	TTL                     time.Duration
+	Now                     time.Time
+	Secret                  []byte
 }
 
 // Create builds one single-use invite and its durable record.
@@ -125,22 +127,23 @@ func Create(input CreateInput) (Invite, Record, error) {
 		enrollPort = DefaultEnrollmentPort
 	}
 	invite := Invite{
-		Kind:              KindInvite,
-		SchemaVersion:     CurrentSchemaVersion,
-		InviteID:          hex.EncodeToString(inviteID),
-		ClientName:        input.ClientName,
-		ServerAddress:     input.ServerAddress.String(),
-		ServerPort:        input.ServerPort,
-		EnrollPort:        enrollPort,
-		TargetAddress:     input.TargetAddress.String(),
-		TargetPort:        input.TargetPort,
-		Principal:         input.Principal,
-		ProfileID:         input.ProfileID,
-		ArtifactProfileID: input.ArtifactProfileID,
-		HostPublicKey:     strings.TrimSpace(input.HostPublicKey),
-		IssuedAt:          now.Format(time.RFC3339Nano),
-		ExpiresAt:         now.Add(ttl).Format(time.RFC3339Nano),
-		Nonce:             hex.EncodeToString(nonce),
+		Kind:                    KindInvite,
+		SchemaVersion:           CurrentSchemaVersion,
+		InviteID:                hex.EncodeToString(inviteID),
+		ClientName:              input.ClientName,
+		ServerAddress:           input.ServerAddress.String(),
+		ServerPort:              input.ServerPort,
+		EnrollPort:              enrollPort,
+		TargetAddress:           input.TargetAddress.String(),
+		TargetPort:              input.TargetPort,
+		Principal:               input.Principal,
+		ProfileID:               input.ProfileID,
+		ArtifactProfileID:       input.ArtifactProfileID,
+		HostPublicKey:           strings.TrimSpace(input.HostPublicKey),
+		EnrollmentTLSSPKISHA256: strings.TrimSpace(input.EnrollmentTLSSPKISHA256),
+		IssuedAt:                now.Format(time.RFC3339Nano),
+		ExpiresAt:               now.Add(ttl).Format(time.RFC3339Nano),
+		Nonce:                   hex.EncodeToString(nonce),
 	}
 	mac, err := macInvite(input.Secret, invite)
 	if err != nil {
@@ -357,6 +360,9 @@ func validateCreateInput(input CreateInput) error {
 	if strings.TrimSpace(input.HostPublicKey) == "" || strings.ContainsAny(input.HostPublicKey, "\r\n\x00") {
 		return fmt.Errorf("%w: host public key is required and must be one line", ErrInvalidInvite)
 	}
+	if !isLowerHexDigest(input.EnrollmentTLSSPKISHA256) {
+		return fmt.Errorf("%w: enrollment_tls_spki_sha256 must be a lowercase SHA-256 digest", ErrInvalidInvite)
+	}
 	if len(input.Secret) != InviteSecretBytes {
 		return fmt.Errorf("%w: invite secret must be %d bytes", ErrInvalidInvite, InviteSecretBytes)
 	}
@@ -385,6 +391,9 @@ func validateInviteShape(invite Invite) error {
 	if invite.EnrollPort == invite.ServerPort {
 		return fmt.Errorf("%w: enroll_port must differ from server_port", ErrInvalidInvite)
 	}
+	if !isLowerHexDigest(invite.EnrollmentTLSSPKISHA256) {
+		return fmt.Errorf("%w: enrollment_tls_spki_sha256 must be a lowercase SHA-256 digest", ErrInvalidInvite)
+	}
 	return nil
 }
 
@@ -406,6 +415,7 @@ func macInvite(secret []byte, invite Invite) (string, error) {
 		invite.ProfileID,
 		invite.ArtifactProfileID,
 		invite.HostPublicKey,
+		invite.EnrollmentTLSSPKISHA256,
 		invite.IssuedAt,
 		invite.ExpiresAt,
 		invite.Nonce,
@@ -413,6 +423,18 @@ func macInvite(secret []byte, invite Invite) (string, error) {
 	mac := hmac.New(sha256.New, secret)
 	_, _ = mac.Write([]byte(payload))
 	return base64.RawStdEncoding.EncodeToString(mac.Sum(nil)), nil
+}
+
+func isLowerHexDigest(value string) bool {
+	if len(value) != sha256.Size*2 {
+		return false
+	}
+	for _, char := range value {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') {
+			return false
+		}
+	}
+	return true
 }
 
 func recordPath(directory, inviteID string) string {

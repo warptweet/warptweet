@@ -6,7 +6,7 @@ Module: `warptweet.com/warptweet`
 
 This note is a single briefing for reviewers who need the current product shape, the designed two-verb CLI, invite files, `.wt` manifests, and how that maps to what is actually implemented today. Prefer this over reading every historical doc first; deep links sit at the end.
 
-**One-line positioning:** WarpTweet is a fail-closed, dual-endpoint-managed TCP local-forward product. A Go controller wraps a pinned OpenSSH 10.4p1 data plane (static OpenSSL 3.5.7) under hybrid ML-KEM/X25519 KEX and composite ML-DSA/Ed25519 authentication, driven by strict `.wt` policy manifests and public single-use invites. The product UX is two verbs (`gateway` / `connect`); operator verbs (`server` / `enroll` / `up` / `run` and lifecycle) remain for bootstrap and advanced use. Both surfaces are implemented in `command.Run`.
+**One-line positioning:** WarpTweet is a fail-closed, dual-endpoint-managed TCP local-forward product. A Go controller wraps a pinned OpenSSH 10.4p1 data plane (static OpenSSL 3.5.7) under hybrid ML-KEM/X25519 KEX and composite ML-DSA/Ed25519 authentication, driven by strict `.wt` policy manifests and invites that contain public data but are confidential, single-use capabilities until consumed or expired. The product UX is two verbs (`host` / `connect`); operator verbs (`server` / `enroll` / `up` / `run` and lifecycle) remain for bootstrap and advanced use. Both surfaces are implemented in `command.Run`.
 
 This is **not** a supported end-to-end public release. Website and packaging gates teach `connect`; dual-host package interop evidence remains incomplete.
 
@@ -167,7 +167,7 @@ Not a tunnel manifest. Not a bearer token reusable after consume. Never private 
 
 ### Invite file mint (implemented)
 
-| | Product path (`gateway`) | Operator path (`server invite`) |
+| | Public path (`host`) | Internal enrollment service |
 | --- | --- | --- |
 | Default name | `<sanitized-label>.wtinvite` (hostname or `--name`) | stdout JSON (optional durable store under invites dir) |
 | Extension | `.wtinvite` (type); basename is human who/what | N/A for stdout |
@@ -183,12 +183,12 @@ Type lives in the extension; do not prefix `wt-invite-` (redundant with `.wtinvi
 ```mermaid
 sequenceDiagram
   participant Op as Operator
-  participant S as Gateway host
+  participant S as Server host
   participant C as Client host
 
-  Op->>S: gateway (or server init)
+  Op->>S: host
   S->>S: host key + server.wt + MAC secret
-  Op->>S: gateway mint (or server invite)
+  Op->>S: host writes one invite
   S-->>Op: invite file / JSON (public + MAC)
   Op->>C: transfer invite file
   C->>C: parse invite, gen client key locally
@@ -200,19 +200,19 @@ sequenceDiagram
   C-->>Op: open 127.0.0.1:port
 ```
 
-**Private keys are always generated on the machine that will hold them.** Gateway never mints a client private key. Connect never mints a host private key.
+**Private keys are always generated on the machine that will hold them.** Host never mints a client private key. Connect never mints a host private key.
 
 Enrollment request / proof (shapes):
 
 ```json
-// EnrollmentRequest (client → gateway)
+// EnrollmentRequest (client → host)
 {
   "invite_id": "...", "nonce": "...", "client_name": "...",
   "public_key": "...", "profile_id": "...",
   "tunnel_id": "...", "listen_address": "127.0.0.1", "listen_port": 15432
 }
 
-// EnrollmentProof (gateway → client)
+// EnrollmentProof (host → client)
 {
   "invite_id": "...", "client_id": "...",
   "host_public_key": "...", "public_key": "...",
@@ -225,14 +225,18 @@ Enrollment request / proof (shapes):
 
 | Piece | Role |
 | --- | --- |
-| `warptweet server enroll-listen` | HTTP `POST /v1/enroll`, `/v1/revoke`, `/v1/rotate` on port **29722** |
-| `warptweet gateway` | Starts enroll-listen by default (`--no-enroll-listen` to skip) |
+| `warptweet server enroll-listen` | Pinned TLS 1.3 `POST /v1/enroll`, `/v1/revoke`, `/v1/rotate` on port **29722** |
+| `warptweet host` | Requires both the SSH and pinned-TLS enrollment listeners before Ready |
 | `warptweet server accept-enrollment --request` | One-shot offline accept for air-gapped ops |
-| `enrollment.Accept` | Validate request, lock, consume invite, store client record, return proof + management token |
-| Client `enroll` / `connect` | Auto-submit to enroll URL unless `--proof` or `--prepare-only`; store receipt with token |
-| Client `rotate` / `revoke` | Present management token over the management interface; gateway acks before local completion |
+| `enrollment.Accept` | Validate request, journal pending state, reconcile authorization, consume invite, return a non-secret proof |
+| Client `enroll` / `connect` | Generate the management capability locally, auto-submit unless offline, and store the local receipt |
+| Client `rotate` / `revoke` | Present management token over the management interface; host acks before local completion |
 
-Invite possession is the single-use enrollment authorization. Management token (hashed server-side) authorizes later rotate/revoke. Rotate/revoke traffic must use only a trusted, firewall-restricted management interface; `management_token` is long-lived and travels in cleartext over plain HTTP today. Keep public release disabled until pinned TLS or mTLS protects the enrollment/management endpoint. Dual-host package interop evidence remains WP8.
+Invite possession is the single-use enrollment authorization. A client-generated
+management capability, stored only as a server-side digest, authorizes later
+rotate/revoke. Every control request uses TLS 1.3 with hybrid
+`X25519MLKEM768` key agreement and the exact Ed25519 SPKI pinned by the invite.
+Dual-host package interop evidence remains WP8.
 
 ---
 
@@ -241,30 +245,30 @@ Invite possession is the single-use enrollment authorization. Management token (
 ### Product verbs (in `command.Run`; website + docs)
 
 ```text
-warptweet gateway --to <port|ip:port> [--name <label>] [--out path] [--stdout] [--listen ip:port] [--no-invite] [--no-enroll-listen] [--json]
+warptweet host --to <port|ip:port> [--name <label>] [--out path] [--stdout] [--listen ip:port] [--no-invite] [--json]
 warptweet connect <invite.wtinvite> [--yes] [--proof <proof.json>] [--once]
 ```
 
 | Verb | Machine | Meaning |
 | --- | --- | --- |
-| `gateway` | Host that can reach the service | Ensure host identity, write server policy, start gateway, mint one invite file |
+| `host` | Host that can reach the service | Ensure host identity, write server policy, start host, mint one invite file |
 | `connect` | Laptop / client | Consume invite, create client identity, pin host, activate route, bring tunnel up |
 
 Composition map:
 
-- `gateway` → ensure host identity + server manifest + service + invite mint  
+- `host` → ensure host identity + server manifest + service + invite mint
 - `connect` → enroll + activate + up  
 
-Source of truth for this UX: `docs/2026-08-12_cli-gateway-connect.md`.  
+Source of truth for this UX: `docs/2026-08-12_cli-host-connect.md`.
 Website (`src/components/CLIShowcase.astro`) and `packaging/evidence/public-release.json` already surface `warptweet connect <invite-file>`.
 
 ### Implemented CLI (actual help / `internal/command`)
 
-Entry: `cmd/warptweet/main.go` → `internal/command.Run` (Go `flag`, no subcommand framework). Separate helper: `cmd/warptweet-provisioner` (macOS layout verify today).
+Entry: `cmd/warptweet/main.go` → `internal/command.Run` (Go `flag`, no subcommand framework). Separate helper: `cmd/warptweet-provisioner`, whose `serve` mode exposes the typed macOS activation and lifecycle boundary.
 
 ```text
 # Product path
-warptweet gateway --to <port|ip:port> [--name <label>] [--out path] [--stdout] [--listen ip:port] [--no-invite] [--no-enroll-listen] [--json]
+warptweet host --to <port|ip:port> [--name <label>] [--out path] [--stdout] [--listen ip:port] [--no-invite] [--json]
 warptweet connect <invite.wtinvite> [--yes] [--proof <proof.json>] [--once]
 
 # Diagnostics / policy
@@ -280,9 +284,7 @@ warptweet doctor-server --config <server.wt>
 # Low-level supervised launch
 warptweet run --config <client.wt> --tunnel <id> [--once]
 
-# Operator bootstrap + lifecycle
-warptweet server init --listen <ip:port> --target <ip:port>
-warptweet server invite --target <ip:port> --name <name>
+# Internal host service + lifecycle
 warptweet server enroll-listen [--listen ip:port]
 warptweet server accept-enrollment --request <request.json>
 warptweet server revoke <client-or-invite-id>
@@ -299,7 +301,7 @@ warptweet version
 
 | Layer | Surface | Role | State |
 | --- | --- | --- | --- |
-| Product path | `gateway`, `connect` | Two-command UX | **Implemented** (2026-08-14) |
+| Product path | `host`, `connect` | Two-command UX | **Implemented** (2026-08-14) |
 | Operator path | `server *`, `enroll`, `up`/`down`/`status` | Bootstrap, mint, lifecycle | Implemented |
 | Enrollment accept | `server enroll-listen`, `warptweet-enroll.service`, `accept-enrollment` | Consume invite, install authorized_keys, return proof + management token | **Implemented**; HTTP on `enroll_port` (default 29722) |
 | Client manage | `rotate`, `revoke` | Server-acked key rotate / auth clear via management token | **Implemented** (2026-08-14) |
@@ -313,9 +315,9 @@ warptweet version
 make build
 ./bin/warptweet profile
 
-# Gateway host (packaged: systemctl start warptweet-enroll after init)
-warptweet gateway --to 5432 --listen 192.0.2.10:2222 --name laptop-1
-# writes laptop-1.wtinvite; starts enroll-listen unless --no-enroll-listen
+# Server host: warptweet host starts and validates both listeners once bootstrap artifacts exist
+warptweet host --to 5432 --listen 192.0.2.10:2222 --name laptop-1
+# writes laptop-1.wtinvite after both listeners are ready
 
 # Client host
 warptweet connect laptop-1.wtinvite --yes
@@ -334,7 +336,7 @@ warptweet revoke laptop-1
 | --- | --- | --- |
 | CLI boundary | `internal/command` | Commands, flags, orchestration |
 | Client manifest | `internal/config` | Strict `.wt` client load/validate |
-| Server manifest + render | `internal/server` | Gateway `.wt`, sshd config, authorized_keys |
+| Server manifest + render | `internal/server` | Host `.wt`, sshd config, authorized_keys |
 | Wire crypto profile | `internal/profile` | Immutable Profile v1 |
 | Platform artifact profile | `internal/artifactprofile`, `internal/platform/*` | Layout/format/signing by GOOS/GOARCH |
 | Engine preflight/launch | `internal/engine` | Binary attest, assets, effective config, readiness |
@@ -352,9 +354,9 @@ warptweet revoke laptop-1
 ```mermaid
 flowchart TB
   subgraph Ops["Operator / product UX"]
-    GW["gateway (implemented)"]
+    GW["host (implemented)"]
     CN["connect (implemented)"]
-    SI["server init/invite (implemented)"]
+    SI["server enrollment service (internal)"]
     EN["enroll + up / lifecycle (implemented)"]
   end
 
@@ -412,7 +414,7 @@ flowchart TB
 
 - Network adversary: passive harvest + active MITM; mitigated by hybrid KEX, pinned composite host key, no fallback
 - Loopback listener is a **host boundary**, not per-process authz for other local users/processes
-- Target service is outside tunnel confidentiality after SSH termination on the gateway host
+- Target service is outside tunnel confidentiality after SSH termination on the server host
 - `.wt` is untrusted until strict validation; never secret-bearing
 - Invite MAC authenticity is **server-side**; client trusts the operator transfer channel plus post-enroll proof binding
 - Supply chain: fixed root-owned paths, SHA-256 pins, static OpenSSL, exact version strings, re-attest every launch
@@ -454,7 +456,7 @@ Darwin client uses Application Support / Caches layout and service user `_warptw
 | `2026-08-09_crypto-profile.md` | Single immutable PQ hybrid profile; no classical fallback; vendor-qualified auth language |
 | `2026-08-09_threat-model.md` | Assets, adversaries, readiness spoofing, secret-smuggling via `.wt` |
 | `2026-08-10_*` layout/readiness/server-gate/static-openssl | Fixed paths, PID-bound readiness, doctor gates |
-| `2026-08-12_cli-gateway-connect.md` | **Primary UX**: `gateway`/`connect`; invite basename human, type in `.wtinvite`; demote `server`/`enroll` |
+| `2026-08-12_cli-host-connect.md` | **Primary UX**: `host`/`connect`; invite basename human, type in `.wtinvite`; demote `server`/`enroll` |
 | `2026-08-12_client-lifecycle.md` | enroll/up/down/status/rotate/revoke; management-token flows |
 | `2026-08-12_linux-server-packages.md` | deb/rpm layout, invite dirs, server admin CLI |
 | `2026-08-12_homebrew-delivery.md` | macOS client delivery and package gates |
@@ -467,15 +469,16 @@ Darwin client uses Application Support / Caches layout and service user `_warptw
 
 Use these as discussion prompts; they are intentional incomplete areas or drift, not silent bugs alone.
 
-1. **Product CLI path implemented** (`gateway`/`connect`, `.wtinvite`, enroll accept, rotate/revoke). Operator verbs remain for advanced use.
-2. **Enrollment/management HTTP is not TLS-pinned yet** — rotate/revoke must stay on a firewall-restricted management interface; keep public release dark until pinned TLS or mTLS. Air-gapped `--proof` remains available. Invites carry MAC-bound `enroll_port` (default 29722).
+1. **Product CLI path implemented** (`host`/`connect`, `.wtinvite`, enroll accept, rotate/revoke). Operator verbs remain for advanced use.
+2. **Enrollment/management is invite-pinned HTTPS** — exact TLS 1.3, hybrid `X25519MLKEM768`, `http/1.1`, and the invite-pinned Ed25519 SPKI. Air-gapped `--proof` remains available. Invites carry the MAC-bound SPKI and `enroll_port` (default 29722).
 3. **Server durable invites/clients** under `/var/lib/warptweet/{invites,clients,server}/` are internal state, distinct from operator-facing `.wtinvite` files and from `installlayout` engine/manifest paths.
-4. **`gen host` / `gen client`** designed as advanced verbs; keygen is embedded in `gateway` / `server init` / `enroll` / `rotate` instead.
+4. **`gen host` / `gen client`** designed as advanced verbs; keygen is embedded in `host` / `enroll` / `rotate` instead.
 5. **No supported e2e release** — two-endpoint interop, negotiated-algorithm observation, rekey, and confinement evidence still pending in the gate checklist (WP8). Local control-plane confidence: `scripts/test-enrollment-control-plane.sh`. Phase A dual-host spine: `scripts/interop/orchestrate.sh` (pinned packages + echo payload; remaining cases `not_run`).
-6. **Packaged enroll unit** — `warptweet-enroll.service` enabled on install; starts after bootstrap artifacts exist.
+6. **Packaged enroll unit** — `warptweet-enroll.service` is enabled on install and started by `host` after bootstrap artifacts exist; certificate renewal preserves the pinned key.
 7. **macOS** packaging and attestation path in progress; production client gate history is Linux/static-OpenSSL heavy.
-8. **Gateway manifest digests** refuse zero placeholders when required SSHD/bundle files are missing (recover only from an existing non-placeholder manifest).
-9. **Public next action** is `warptweet connect <invite-file>`; operator `enroll` remains for advanced/offline flows.
+8. **Host manifest digests** refuse zero placeholders when required SSHD/bundle files are missing (recover only from an existing non-placeholder manifest).
+9. **macOS privilege boundary** — package installation starts a typed root provisioner on a `root:admin` mode-0660 socket. It activates protected state and owns per-tunnel LaunchDaemons running as `_warptweet`; normal client commands require no repeated elevation.
+10. **Public next action** is `warptweet connect <invite-file>`; operator `enroll` remains for advanced/offline flows.
 
 ---
 
@@ -487,7 +490,7 @@ Use these as discussion prompts; they are intentional incomplete areas or drift,
 - `docs/2026-08-09_architecture.md`
 - `docs/2026-08-09_crypto-profile.md`
 - `docs/2026-08-09_threat-model.md`
-- `docs/2026-08-12_cli-gateway-connect.md`
+- `docs/2026-08-12_cli-host-connect.md`
 - `docs/2026-08-12_client-lifecycle.md`
 - `docs/2026-08-12_linux-server-packages.md`
 - `docs/2026-08-12_public-release-path.md`
@@ -521,7 +524,7 @@ Use these as discussion prompts; they are intentional incomplete areas or drift,
 
 1. **Boundary check** — local-forward-only product vs feature pressure (shells, multi-target, classical fallback).
 2. **Document model** — confirm `.wt` vs invite vs private key paths stay cleanly separated.
-3. **CLI dual surface** — product `gateway`/`connect` vs operator verbs; packaging/website already teach `connect`.
+3. **CLI dual surface** — product `host`/`connect` vs operator verbs; packaging/website already teach `connect`.
 4. **Invite trust** — operator transfer channel, MAC server-side only, single-use store, TTL, management-interface restrictions, offline proof.
 5. **Crypto language** — vendor-qualified binding wording; no quantum-proof / FIPS / standardized claims.
 6. **Release bar** — what still blocks “supported e2e” (enrollment endpoint, dual-host invite, algorithm observation, package evidence).
@@ -531,7 +534,7 @@ Use these as discussion prompts; they are intentional incomplete areas or drift,
 ## Related docs (read next if needed)
 
 - Architecture deep dive: `docs/2026-08-09_architecture.md`
-- CLI product design: `docs/2026-08-12_cli-gateway-connect.md`
+- CLI product design: `docs/2026-08-12_cli-host-connect.md`
 - Client lifecycle: `docs/2026-08-12_client-lifecycle.md`
 - Threat model: `docs/2026-08-09_threat-model.md`
 - Crypto profile: `docs/2026-08-09_crypto-profile.md`

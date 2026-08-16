@@ -16,6 +16,7 @@ WT_STATE="$WT_ROOT/state"
 WT_IDENTITY_DIR="$WT_STATE/identity"
 WT_TRUST_DIR="$WT_STATE/trust"
 WT_RUNTIME_ROOT="/Library/Caches/wt"
+WT_LOG_ROOT="/Library/Logs/WarpTweet"
 WT_USER="_warptweet"
 WT_GROUP="_warptweet"
 WT_HOME="/var/empty"
@@ -57,14 +58,78 @@ create_user() {
     dscl . -create "/Users/$WT_USER" UserShell "$WT_SHELL"
     dscl . -create "/Users/$WT_USER" RealName "WarpTweet Client"
     dscl . -create "/Users/$WT_USER" NFSHomeDirectory "$WT_HOME"
+    dscl . -create "/Users/$WT_USER" IsHidden 1
     dscl . -create "/Users/$WT_USER" Password '*'
     dscl . -delete "/Users/$WT_USER" AuthenticationAuthority >/dev/null 2>&1 || true
 }
 
+read_record_value() {
+    WT_RECORD=$1
+    WT_KEY=$2
+    dscl . -read "$WT_RECORD" "$WT_KEY" | awk -v key="$WT_KEY:" '$1 == key { print $2; exit }'
+}
+
+verify_service_identity() {
+    WT_UID=$(read_record_value "/Users/$WT_USER" UniqueID)
+    WT_PRIMARY_GID=$(read_record_value "/Users/$WT_USER" PrimaryGroupID)
+    WT_GROUP_GID=$(read_record_value "/Groups/$WT_GROUP" PrimaryGroupID)
+    WT_ACCOUNT_HOME=$(read_record_value "/Users/$WT_USER" NFSHomeDirectory)
+    WT_ACCOUNT_SHELL=$(read_record_value "/Users/$WT_USER" UserShell)
+	WT_ACCOUNT_HIDDEN=$(read_record_value "/Users/$WT_USER" IsHidden)
+
+    case "$WT_UID:$WT_PRIMARY_GID:$WT_GROUP_GID" in
+        *[!0-9:]*|::*|:*:|0:*|*:0:*|*:0)
+            echo "WarpTweet service identity must use unique non-root numeric IDs" >&2
+            exit 1
+            ;;
+    esac
+    if [ "$WT_PRIMARY_GID" != "$WT_GROUP_GID" ] || \
+       [ "$WT_ACCOUNT_HOME" != "$WT_HOME" ] || \
+       [ "$WT_ACCOUNT_SHELL" != "$WT_SHELL" ] || \
+	   [ "$WT_ACCOUNT_HIDDEN" != '1' ]; then
+        echo "existing WarpTweet service identity does not match the fixed account contract" >&2
+        exit 1
+    fi
+    if dscl . -read "/Users/$WT_USER" AuthenticationAuthority >/dev/null 2>&1; then
+        echo "WarpTweet service identity must not have an authentication authority" >&2
+        exit 1
+    fi
+
+    WT_UID_MATCH=$(dscl . -list /Users UniqueID | awk -v id="$WT_UID" '$2 == id { count++; name = $1 } END { printf "%d:%s", count, name }')
+    WT_GID_MATCH=$(dscl . -list /Groups PrimaryGroupID | awk -v id="$WT_GROUP_GID" '$2 == id { count++; name = $1 } END { printf "%d:%s", count, name }')
+    if [ "$WT_UID_MATCH" != "1:$WT_USER" ] || [ "$WT_GID_MATCH" != "1:$WT_GROUP" ]; then
+        echo "WarpTweet service UID or GID is reused by another account" >&2
+        exit 1
+    fi
+
+    if WT_MEMBERSHIP=$(dscl . -read "/Groups/$WT_GROUP" GroupMembership 2>/dev/null); then
+        WT_MEMBERSHIP=${WT_MEMBERSHIP#GroupMembership:}
+        if [ -n "$(printf '%s' "$WT_MEMBERSHIP" | tr -d '[:space:]')" ]; then
+            echo "WarpTweet service group must not list supplementary members" >&2
+            exit 1
+        fi
+    fi
+}
+
 create_group
 create_user
+# Reassert the non-login contract on upgrades before validating identity
+# uniqueness. Directory Services masks password reads, so command success plus
+# the absence of AuthenticationAuthority is the observable invariant.
+dscl . -create "/Groups/$WT_GROUP" Password '*'
+dscl . -create "/Users/$WT_USER" Password '*'
+dscl . -create "/Users/$WT_USER" IsHidden 1
+dscl . -delete "/Users/$WT_USER" AuthenticationAuthority >/dev/null 2>&1 || true
+verify_service_identity
 
 WT_GROUP_ID=$(dscl . -read "/Groups/$WT_GROUP" PrimaryGroupID | awk '{print $2}')
+WT_ADMIN_GROUP_ID=$(dscl . -read /Groups/admin PrimaryGroupID | awk '{print $2}')
+case "$WT_ADMIN_GROUP_ID" in
+    ''|*[!0-9]*)
+        echo "macOS admin group has an invalid primary GID" >&2
+        exit 1
+        ;;
+esac
 
 install -d -o root -g wheel -m 0755 "$WT_ROOT"
 install -d -o root -g wheel -m 0755 "$WT_ROOT/bin"
@@ -77,6 +142,30 @@ install -d -o root -g wheel -m 0755 "$WT_STATE"
 install -d -o root -g "$WT_GROUP" -m 0750 "$WT_IDENTITY_DIR"
 install -d -o root -g "$WT_GROUP" -m 0750 "$WT_TRUST_DIR"
 install -d -o root -g wheel -m 0755 "$WT_RUNTIME_ROOT"
+install -d -o root -g wheel -m 0755 "$WT_LOG_ROOT"
+
+# Existing installations may carry inherited or manually added ACL entries.
+# The runtime validator rejects them, so normalize every protected ancestor and
+# managed state node before starting the provisioner.
+for WT_ACL_PATH in \
+    "$WT_ROOT" \
+    "$WT_ROOT/bin" \
+    "$WT_ROOT/libexec" \
+    "$WT_ROOT/libexec/openssh" \
+    "$WT_ROOT/libexec/openssh/bin" \
+    "$WT_ROOT/share" \
+    "$WT_ROOT/share/licenses" \
+    "$WT_STATE" \
+    "$WT_IDENTITY_DIR" \
+    "$WT_TRUST_DIR" \
+    "$WT_RUNTIME_ROOT" \
+    "$WT_LOG_ROOT"; do
+    chmod -N "$WT_ACL_PATH"
+done
+# Preserve identity bytes while removing any inherited or manually added ACL
+# entries from an upgraded state tree. The default recursive policy does not
+# follow symbolic links; the engine subsequently rejects every symlink.
+chmod -RN "$WT_STATE"
 
 # Empty ambient trust file is required and must stay empty.
 if [ ! -e "$WT_TRUST_DIR/known_hosts.empty" ]; then
@@ -89,6 +178,7 @@ else
     chown root:"$WT_GROUP" "$WT_TRUST_DIR/known_hosts.empty"
     chmod 0440 "$WT_TRUST_DIR/known_hosts.empty"
 fi
+chmod -N "$WT_TRUST_DIR/known_hosts.empty"
 
 # Harden payload ownership without following symlinks.
 if [ -d "$WT_ROOT/bin" ]; then
@@ -121,10 +211,34 @@ for WT_FORBIDDEN in \
     fi
 done
 
-# LaunchDaemon label for future supervised tunnels; disabled until enrollment.
-if [ -f "/Library/LaunchDaemons/com.warptweet.client.plist" ]; then
-    chown root:wheel "/Library/LaunchDaemons/com.warptweet.client.plist"
-    chmod 0644 "/Library/LaunchDaemons/com.warptweet.client.plist"
+# The installer is the only interactive administrator boundary. It starts one
+# typed root helper; per-tunnel jobs are generated later from validated IDs and
+# run as _warptweet.
+WT_PROVISIONER_PLIST="/Library/LaunchDaemons/com.warptweet.provisioner.plist"
+if [ ! -f "$WT_PROVISIONER_PLIST" ] || [ -L "$WT_PROVISIONER_PLIST" ]; then
+    echo "missing provisioner LaunchDaemon" >&2
+    exit 1
+fi
+chown root:wheel "$WT_PROVISIONER_PLIST"
+chmod 0644 "$WT_PROVISIONER_PLIST"
+launchctl bootout system/com.warptweet.provisioner >/dev/null 2>&1 || true
+launchctl bootstrap system "$WT_PROVISIONER_PLIST"
+launchctl kickstart -k system/com.warptweet.provisioner
+
+WT_SOCKET="/var/run/warptweet/provisioner.sock"
+WT_WAIT=0
+while [ ! -S "$WT_SOCKET" ]; do
+    WT_WAIT=$((WT_WAIT + 1))
+    if [ "$WT_WAIT" -ge 50 ]; then
+        echo "WarpTweet provisioner socket did not become ready" >&2
+        exit 1
+    fi
+    sleep 0.1
+done
+WT_SOCKET_STATE=$(stat -f '%u:%g:%Lp' "$WT_SOCKET")
+if [ "$WT_SOCKET_STATE" != "0:$WT_ADMIN_GROUP_ID:660" ]; then
+    echo "WarpTweet provisioner socket ownership or mode is invalid" >&2
+    exit 1
 fi
 
 exit 0

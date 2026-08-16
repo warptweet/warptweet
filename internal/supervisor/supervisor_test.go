@@ -3,6 +3,7 @@ package supervisor
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -99,6 +100,35 @@ func TestRestartBackoffIsBounded(t *testing.T) {
 		if waits[index] != want[index] {
 			t.Errorf("wait[%d] = %s, want %s", index, waits[index], want[index])
 		}
+	}
+}
+
+func TestRunPreparedStopsAtMaximumConsecutiveAttempts(t *testing.T) {
+	t.Parallel()
+
+	runner := &sequenceRunner{errors: []error{
+		errors.New("first"),
+		errors.New("second"),
+		errors.New("third"),
+	}}
+	waits := 0
+	err := (Supervisor{
+		Runner: runner,
+		wait: func(context.Context, time.Duration) error {
+			waits++
+			return nil
+		},
+	}).Run(context.Background(), Command{Path: "/opt/warptweet/ssh"}, Policy{
+		Restart:         true,
+		InitialBackoff:  time.Millisecond,
+		MaximumBackoff:  time.Millisecond,
+		MaximumAttempts: 3,
+	})
+	if err == nil || !strings.Contains(err.Error(), "3 consecutive failed attempts") {
+		t.Fatalf("Run error = %v, want bounded-attempt failure", err)
+	}
+	if runner.calls != 3 || waits != 2 {
+		t.Fatalf("calls=%d waits=%d, want 3/2", runner.calls, waits)
 	}
 }
 
@@ -530,6 +560,46 @@ func TestRunPreparedReadyStartupTimeoutTerminatesAndReaps(t *testing.T) {
 	}
 	if !process.wasTerminated() || process.waitCalls.Load() != 1 {
 		t.Fatalf("terminated=%t wait calls=%d, want true/1", process.wasTerminated(), process.waitCalls.Load())
+	}
+}
+
+func TestRunPreparedReadyStopsAtMaximumConsecutiveAttempts(t *testing.T) {
+	t.Parallel()
+
+	processes := []*testProcess{newTestProcess(1001), newTestProcess(1002), newTestProcess(1003)}
+	for index, process := range processes {
+		process.exit(fmt.Errorf("attempt %d failed", index+1))
+	}
+	launcher := &testLauncher{processes: processes}
+	waits := 0
+	err := (Supervisor{
+		Launcher: launcher,
+		wait: func(context.Context, time.Duration) error {
+			waits++
+			return nil
+		},
+	}).RunPreparedReady(
+		context.Background(),
+		func(context.Context) (ReadyCommand, error) {
+			return testReadyCommand(&testReadinessGate{await: func(ctx context.Context, _ int) error {
+				<-ctx.Done()
+				return ctx.Err()
+			}}), nil
+		},
+		Policy{
+			Restart:         true,
+			InitialBackoff:  time.Millisecond,
+			MaximumBackoff:  time.Millisecond,
+			MaximumAttempts: 3,
+			StartupTimeout:  time.Second,
+		},
+		nil,
+	)
+	if err == nil || !strings.Contains(err.Error(), "3 consecutive failed attempts") {
+		t.Fatalf("RunPreparedReady error = %v, want bounded-attempt failure", err)
+	}
+	if launcher.calls != 3 || waits != 2 {
+		t.Fatalf("calls=%d waits=%d, want 3/2", launcher.calls, waits)
 	}
 }
 

@@ -91,7 +91,7 @@ Successful `doctor` output reports `"status":"preflight_ready"`. It means the lo
 
 The readiness witness removes only the verified control-socket directory entry. A descriptor-relative external unlink does not send a mux request to OpenSSH and does not signal the process. OpenSSH retains its already-open listener descriptor, transport, and local forward, but the retired pathname is no longer available to a new mux client. Readiness remains an authentication and local-listener claim. Target health is not checked.
 
-With restart enabled, the controller retries without a count limit. Backoff limits retry frequency, not total attempts. The packaged systemd unit uses `run --once`, publishes readiness with `Type=notify`, and lets systemd's start limit own the operational circuit breaker.
+With restart enabled, the controller stops after ten consecutive failed launches; a stable run resets the count. Backoff bounds retry frequency. Packaged service managers use `run --once` and own the operational restart policy; the systemd unit publishes readiness with `Type=notify`.
 
 ## Required release lifecycle
 

@@ -16,7 +16,7 @@ import (
 	"warptweet.com/warptweet/internal/server"
 )
 
-func TestServerUsageMentionsAdminCommands(t *testing.T) {
+func TestUsageKeepsInternalServerCommandsPrivate(t *testing.T) {
 	t.Parallel()
 
 	var stdout bytes.Buffer
@@ -25,7 +25,7 @@ func TestServerUsageMentionsAdminCommands(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
 	}
-	for _, required := range []string{
+	for _, forbidden := range []string{
 		"warptweet server init",
 		"warptweet server invite",
 		"warptweet server enroll-listen",
@@ -33,8 +33,8 @@ func TestServerUsageMentionsAdminCommands(t *testing.T) {
 		"warptweet server revoke",
 		"warptweet server status",
 	} {
-		if !strings.Contains(stdout.String(), required) {
-			t.Fatalf("usage omits %q: %s", required, stdout.String())
+		if strings.Contains(stdout.String(), forbidden) {
+			t.Fatalf("usage exposes internal command %q: %s", forbidden, stdout.String())
 		}
 	}
 }
@@ -88,17 +88,18 @@ func TestInviteCreateAndRevokeWithoutPackage(t *testing.T) {
 	directory := t.TempDir()
 	now := time.Date(2026, 8, 12, 15, 0, 0, 0, time.UTC)
 	invite, record, err := enrollment.Create(enrollment.CreateInput{
-		ClientName:        "node-a",
-		ServerAddress:     netip.MustParseAddr("192.0.2.10"),
-		ServerPort:        2222,
-		TargetAddress:     netip.MustParseAddr("198.51.100.20"),
-		TargetPort:        5432,
-		Principal:         server.DefaultDedicatedUser,
-		ProfileID:         profile.CurrentID,
-		ArtifactProfileID: "linux-amd64",
-		HostPublicKey:     "ssh-mldsa44-ed25519@openssh.com AAAA",
-		Now:               now,
-		Secret:            secret,
+		ClientName:              "node-a",
+		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
+		ServerPort:              2222,
+		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
+		TargetPort:              5432,
+		Principal:               server.DefaultDedicatedUser,
+		ProfileID:               profile.CurrentID,
+		ArtifactProfileID:       "linux-amd64",
+		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA",
+		EnrollmentTLSSPKISHA256: strings.Repeat("a", 64),
+		Now:                     now,
+		Secret:                  secret,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -136,7 +137,7 @@ func TestServerInitRequiresFlags(t *testing.T) {
 	if code == 0 {
 		t.Fatal("init accepted missing flags")
 	}
-	if !strings.Contains(stderr.String(), "--listen") {
+	if !strings.Contains(stderr.String(), "replaced by warptweet host") {
 		t.Fatalf("stderr=%s", stderr.String())
 	}
 }

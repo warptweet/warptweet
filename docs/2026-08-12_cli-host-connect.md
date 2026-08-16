@@ -1,4 +1,4 @@
-# CLI strategy: gateway, connect, and named invites
+# CLI strategy: host, connect, and named invites
 
 Status: product CLI design, 2026-08-12  
 Invite naming revised 2026-08-14: human basename + `.wtinvite` (no `wt-invite-` prefix).
@@ -8,16 +8,16 @@ Invite naming revised 2026-08-14: human basename + `.wtinvite` (no `wt-invite-` 
 Average path is two commands. Everything else is advanced or operational.
 
 ```text
-warptweet gateway --to <port|ip:port> [--name <client-label>]
+warptweet host --to <port|ip:port> [--name <client-label>]
 warptweet connect <invite-file>
 ```
 
 | Verb | Machine | Meaning |
 | --- | --- | --- |
-| `gateway` | Host that can reach the service | Ensure host identity, write server policy, start gateway, mint one invite file |
+| `host` | Host that can reach the service | Ensure host identity, write server policy, start host, mint one invite file |
 | `connect` | Laptop / client | Consume invite, create client identity, pin host, activate route, bring tunnel up |
 
-Private keys are always generated on the machine that will hold them. `gateway` never mints a client private key. `connect` never mints a host private key.
+Private keys are always generated on the machine that will hold them. `host` never mints a client private key. `connect` never mints a host private key.
 
 ## Invite files: human basename, typed extension
 
@@ -45,7 +45,7 @@ postgres-prod.wtinvite
 
 | Part | Rule |
 | --- | --- |
-| basename | sanitized label: default gateway hostname, or `--name` |
+| basename | sanitized label: default server hostname, or `--name` |
 | extension | `.wtinvite` (document kind; not a `.wt` tunnel manifest) |
 
 Invites are deliberately **not** `.wt` manifests. `.wt` is the versioned tunnel
@@ -100,17 +100,17 @@ Do not auto-suffix when `--out` is set.
 
 ```text
 # default: <this-machine-hostname>.wtinvite
-warptweet gateway --to 5432
+warptweet host --to 5432
 
 # label only: studio-mac.wtinvite
-warptweet gateway --to 5432 --name studio-mac
+warptweet host --to 5432 --name studio-mac
 
 # full path / basename override (exact; no auto-suffix)
-warptweet gateway --to 5432 --out ./studio-mac.wtinvite
-warptweet gateway --to 5432 --out /tmp/alice.wtinvite
+warptweet host --to 5432 --out ./studio-mac.wtinvite
+warptweet host --to 5432 --out /tmp/alice.wtinvite
 
 # advanced: invite JSON on stdout, no file
-warptweet gateway --to 5432 --stdout
+warptweet host --to 5432 --stdout
 ```
 
 | Flag | Effect |
@@ -120,12 +120,12 @@ warptweet gateway --to 5432 --stdout
 | `--out <path>` | exact path ending in `.wtinvite` (other extensions rejected); directories must already exist; fail on collision |
 | `--stdout` | no file; print invite JSON only |
 
-## `gateway` behavior
+## `host` behavior
 
 ```text
-warptweet gateway --to 5432
-warptweet gateway --to 127.0.0.1:5432
-warptweet gateway --to 10.0.0.5:5432 --listen 0.0.0.0:2222
+warptweet host --to 5432
+warptweet host --to 127.0.0.1:5432
+warptweet host --to 10.0.0.5:5432 --listen 0.0.0.0:2222
 ```
 
 ### Defaults
@@ -136,22 +136,22 @@ warptweet gateway --to 10.0.0.5:5432 --listen 0.0.0.0:2222
 | `--to IP:PORT` | target exact address |
 | `--listen` | package default listen (documented fixed port, all suitable interfaces or package bind policy) |
 | host key | generate once into fixed install path if missing; refuse clobber without `--rotate-host-key` |
-| invite | always mint one named invite file unless `--no-invite` |
+| invite | mint one named invite file unless `--no-invite` or `--stdout` |
 
 ### Steps (internal)
 
 1. Preflight packaged engine and layout.
 2. Ensure host identity at fixed path.
-3. Write/update server gateway manifest for listen + target.
+3. Write or update the server policy manifest for the listener and target.
 4. Ensure invite MAC secret exists.
-5. Enable/start gateway service unit when packaged that way.
-6. Mint invite bound to listen, target, host public key, profile, artifact profile, principal, expiry, nonce, `enroll_port`, and MAC. Connect uses the MAC-bound `enroll_port` for HTTP enrollment.
+5. Enable/start host service unit when packaged that way.
+6. Mint invite bound to listen, target, host public key, profile, artifact profile, principal, expiry, nonce, `enroll_port`, and MAC. Connect uses the MAC-bound `enroll_port` for HTTPS enrollment (HTTP/1.1 over the pinned TLS channel).
 7. Write named invite file; print path + host fingerprint + local target summary.
 
 ### Human output (concise)
 
 ```text
-gateway ready
+host ready
 target   127.0.0.1:5432
 listen   0.0.0.0:2222
 host     SHA256:ab:cd:...
@@ -172,7 +172,7 @@ warptweet connect ./studio-mac.wtinvite --yes
 1. Read invite file; reject private-key markers and expired/malformed invites before network.
 2. Show confirmation summary unless `--yes`.
 3. Generate client composite identity locally (fixed client path on activate).
-4. Complete enrollment with gateway (proof binding).
+4. Complete enrollment with host (proof binding).
 5. Write client manifest, known_hosts pin, empty ambient trust.
 6. Start tunnel (`up`) until Ready.
 7. Print local open endpoint only.
@@ -199,7 +199,7 @@ tunnel   studio-mac
 These remain for operators and recovery. They are not the homepage story.
 
 ```text
-warptweet server init | invite | revoke | status | doctor-server
+warptweet server revoke | status | doctor-server
 warptweet enroll | up | down | status | rotate | revoke
 warptweet gen host | gen client
 warptweet doctor | profile | validate | render-*
@@ -209,7 +209,7 @@ Mapping:
 
 | Friendly | Composes |
 | --- | --- |
-| `gateway` | server ensure-identity + manifest + service + invite mint |
+| `host` | ensure identity + manifest + both listeners + invite mint |
 | `connect` | enroll + activate + up |
 
 ## Identity generation naming
@@ -228,7 +228,7 @@ warptweet gen client --name studio-mac
 ## Non-negotiables
 
 - No DNS for authorized targets in v1 (exact IP:port under the hood).
-- Port-only `--to 5432` is sugar for `127.0.0.1:5432` on the gateway host.
+- Port-only `--to 5432` is sugar for `127.0.0.1:5432` on the server machine.
 - Invites are single-use, short-lived, public-only.
 - Fail closed on profile, path, ownership, and algorithm mismatch.
 - Target health is never implied by Ready.
@@ -236,16 +236,17 @@ warptweet gen client --name studio-mac
 ## Implementation order
 
 1. Invite filename helper + exclusive write + tests. **Done (2026-08-14).**
-2. `gateway` thin orchestration over existing server bootstrap/invite. **Done (2026-08-14).**
+2. `host` thin orchestration over existing server bootstrap/invite. **Done (2026-08-14).**
 3. `connect` thin orchestration over enroll + up. **Done (2026-08-14)**.
 3b. Packaged enrollment accept endpoint (`server enroll-listen`, `Accept`, client
-    auto-submit). **Done (2026-08-14)**. `gateway` starts enroll-listen by default
-    (port 29722; `--no-enroll-listen` to skip). Offline `--proof` remains for
+    auto-submit). **Done (2026-08-14)**. `host` requires the pinned TLS listener
+    on port 29722 before reporting ready. Offline `--proof` remains for
     air-gapped ops.
 3c. Client `rotate` / `revoke` via management token + `POST /v1/rotate|revoke`.
     **Done (2026-08-14)**.
 4. Website and docs already show the friendly verbs; keep them aligned as flags stabilize.
-5. Deprecate teaching `server init` / `enroll` / `up` as the primary path (commands remain).
+5. Remove the public `server init` / `server invite` split so bootstrap cannot
+   bypass the `host` readiness contract. **Done (2026-08-15).**
 
 ## Acceptance
 

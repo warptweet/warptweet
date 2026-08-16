@@ -132,6 +132,15 @@ interop_install_server_package() {
             _deb_name=$(interop_deb_field "$_pkg" Package)
             _deb_ver=$(interop_deb_field "$_pkg" Version)
             [ -n "$_deb_name" ] && [ -n "$_deb_ver" ] || interop_die "could not read Package/Version from $_pkg"
+            _have=$(interop_ssh "dpkg-query -W -f='\${Status} \${Package} \${Version}' '$_deb_name' 2>/dev/null" || true)
+            case "$_have" in
+                *"install ok installed $_deb_name $_deb_ver")
+                    interop_log "server package already installed $_deb_name=$_deb_ver"
+                    interop_ssh "rm -f '$_remote_tmp'" || true
+                    interop_log "server package installed"
+                    return 0
+                    ;;
+            esac
             interop_ssh "sudo dpkg -i '$_remote_tmp' || sudo apt-get install -f -y"
             _status=$(interop_ssh "dpkg-query -W -f='\${Status} \${Package} \${Version}' '$_deb_name' 2>/dev/null" || true)
             case "$_status" in
@@ -300,6 +309,16 @@ interop_verify_installed_client() {
         if [ "$WARPTWEET_CLIENT_ENGINE_MANIFEST_SHA256" = "pending" ]; then
             WARPTWEET_CLIENT_ENGINE_MANIFEST_SHA256=$(printf '%64s' '' | tr ' ' '0')
             export WARPTWEET_CLIENT_ENGINE_MANIFEST_SHA256
+        fi
+    fi
+
+    if [ "$(uname -s)" = Darwin ]; then
+        _socket=/var/run/warptweet/provisioner.sock
+        [ -S "$_socket" ] || interop_die "installed provisioner socket is unavailable: $_socket"
+        _admin_gid=$(dscl . -read /Groups/admin PrimaryGroupID | awk '{print $2}')
+        _socket_state=$(stat -f '%u:%g:%Lp' "$_socket")
+        if [ "$_socket_state" != "0:$_admin_gid:660" ]; then
+            interop_die "provisioner socket ownership or mode is invalid: $_socket_state"
         fi
     fi
 }

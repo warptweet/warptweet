@@ -2,6 +2,7 @@ package command
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -40,6 +41,9 @@ func runServerEnrollListen(ctx context.Context, arguments []string, stdout, stde
 	if err != nil {
 		return err
 	}
+	if err := reconcileManagedAuthorizations(manifest); err != nil {
+		return fmt.Errorf("reconcile managed authorizations: %w", err)
+	}
 	listenEndpoint, err := resolveEnrollListen(listen.value, manifest)
 	if err != nil {
 		return err
@@ -49,8 +53,23 @@ func runServerEnrollListen(ctx context.Context, arguments []string, stdout, stde
 	if err != nil {
 		return err
 	}
+	if _, _, _, err := enrollment.EnsureTLSIdentity(
+		installlayout.ServerEnrollmentTLSCertPath,
+		installlayout.ServerEnrollmentTLSKeyPath,
+		[]net.IP{net.IP(manifest.Listen.Address.AsSlice())},
+		time.Now().UTC(),
+	); err != nil {
+		return fmt.Errorf("ensure enrollment TLS identity: %w", err)
+	}
 
 	handler := newEnrollmentHandler(manifest, hostPublicKey, listenEndpoint.Port())
+	tlsConfig, err := enrollment.LoadServerTLSConfig(
+		installlayout.ServerEnrollmentTLSCertPath,
+		installlayout.ServerEnrollmentTLSKeyPath,
+	)
+	if err != nil {
+		return err
+	}
 	httpServer := &http.Server{
 		Addr:              listenEndpoint.String(),
 		Handler:           handler,
@@ -61,17 +80,18 @@ func runServerEnrollListen(ctx context.Context, arguments []string, stdout, stde
 		MaxHeaderBytes:    4 << 10,
 	}
 
-	listener, err := net.Listen("tcp", listenEndpoint.String())
+	tcpListener, err := net.Listen("tcp", listenEndpoint.String())
 	if err != nil {
 		return fmt.Errorf("listen for enrollment: %w", err)
 	}
+	listener := tls.NewListener(tcpListener, tlsConfig)
 
 	errCh := make(chan error, 1)
 	go func() {
 		errCh <- httpServer.Serve(listener)
 	}()
 
-	fmt.Fprintf(stdout, "enrollment listening\nlisten   %s\npath     POST /v1/enroll\npath     POST /v1/revoke\npath     POST /v1/rotate\n", listenEndpoint)
+	fmt.Fprintf(stdout, "enrollment TLS listening\nlisten   %s\npath     POST /v1/enroll\npath     POST /v1/revoke\npath     POST /v1/rotate\n", listenEndpoint)
 	if abs, err := enrollment.EnrollmentURL(listenEndpoint.Addr().String(), listenEndpoint.Port()); err == nil {
 		fmt.Fprintf(stdout, "url      %s\n", abs)
 	}
@@ -151,11 +171,15 @@ func newEnrollmentHandler(manifest server.Config, hostPublicKey string, enrollPo
 			if err := json.Unmarshal(body, &manage); err != nil {
 				return nil, err
 			}
-			record, err := enrollment.RevokeClient(installlayout.ClientsDirectory, manage, time.Now().UTC())
+			record, err := enrollment.RevokeClient(
+				installlayout.ClientsDirectory,
+				manage,
+				time.Now().UTC(),
+				func(publicKey string) error {
+					return removeAuthorizedKeyForPublicKey(manifest.AuthorizedKeysPath, publicKey)
+				},
+			)
 			if err != nil {
-				return nil, err
-			}
-			if err := removeAuthorizedKeyForPublicKey(manifest.AuthorizedKeysPath, record.PublicKey); err != nil {
 				return nil, err
 			}
 			return map[string]any{
@@ -179,35 +203,30 @@ func newEnrollmentHandler(manifest server.Config, hostPublicKey string, enrollPo
 			if err != nil {
 				return nil, fmt.Errorf("%w: %v", enrollment.ErrInvalidInvite, err)
 			}
-			prior, err := enrollment.LoadClient(installlayout.ClientsDirectory, manage.ClientID)
-			if err != nil {
-				return nil, fmt.Errorf("%w: unknown client", enrollment.ErrInvalidInvite)
-			}
-			record, token, err := enrollment.RotateClientPublicKey(
+			record, err := enrollment.RotateClientPublicKey(
 				installlayout.ClientsDirectory,
 				manage,
 				manage.NewPublicKey,
 				time.Now().UTC(),
+				func(oldPublicKey, _ string) error {
+					return replaceAuthorizedKeyForPublicKey(manifest.AuthorizedKeysPath, oldPublicKey, line)
+				},
 			)
 			if err != nil {
 				return nil, err
 			}
-			if err := replaceAuthorizedKeyForPublicKey(manifest.AuthorizedKeysPath, prior.PublicKey, line); err != nil {
-				return nil, err
-			}
 			return enrollment.EnrollmentProof{
-				InviteID:        record.InviteID,
-				ClientID:        record.ClientID,
-				HostPublicKey:   hostPublicKey,
-				PublicKey:       record.PublicKey,
-				Target:          fmt.Sprintf("%s:%d", manifest.Target.Address, manifest.Target.Port),
-				Principal:       record.Principal,
-				ProfileID:       record.ProfileID,
-				Nonce:           "",
-				AcceptedAt:      time.Now().UTC().Format(time.RFC3339Nano),
-				ManagementToken: token,
-				ServerAddress:   record.ServerAddress,
-				EnrollPort:      enrollPort,
+				InviteID:      record.InviteID,
+				ClientID:      record.ClientID,
+				HostPublicKey: hostPublicKey,
+				PublicKey:     record.PublicKey,
+				Target:        fmt.Sprintf("%s:%d", manifest.Target.Address, manifest.Target.Port),
+				Principal:     record.Principal,
+				ProfileID:     record.ProfileID,
+				Nonce:         "",
+				AcceptedAt:    time.Now().UTC().Format(time.RFC3339Nano),
+				ServerAddress: record.ServerAddress,
+				EnrollPort:    enrollPort,
 			}, nil
 		})
 	})
@@ -373,10 +392,6 @@ func acceptAndAuthorize(
 	request enrollment.EnrollmentRequest,
 	now time.Time,
 ) (enrollment.EnrollmentProof, error) {
-	line, err := server.RenderAuthorizedKey(manifest, []byte(request.PublicKey))
-	if err != nil {
-		return enrollment.EnrollmentProof{}, fmt.Errorf("%w: %v", enrollment.ErrInvalidInvite, err)
-	}
 	if err := os.MkdirAll(installlayout.ClientsDirectory, 0o700); err != nil {
 		return enrollment.EnrollmentProof{}, err
 	}
@@ -391,14 +406,52 @@ func acceptAndAuthorize(
 		TargetPort:       uint16(manifest.Target.Port),
 		ServerAddress:    manifest.Listen.Address.String(),
 		Now:              now,
+		InstallAuthorization: func(publicKey string) error {
+			line, err := server.RenderAuthorizedKey(manifest, []byte(publicKey))
+			if err != nil {
+				return fmt.Errorf("%w: %v", enrollment.ErrInvalidInvite, err)
+			}
+			return appendAuthorizedKey(manifest.AuthorizedKeysPath, line)
+		},
 	})
 	if err != nil {
 		return enrollment.EnrollmentProof{}, err
 	}
-	if err := appendAuthorizedKey(manifest.AuthorizedKeysPath, line); err != nil {
-		return enrollment.EnrollmentProof{}, fmt.Errorf("install authorized_keys: %w", err)
-	}
 	return result.Proof, nil
+}
+
+func reconcileManagedAuthorizations(manifest server.Config) error {
+	return withAuthorizedKeysLock(manifest.AuthorizedKeysPath, func() error {
+		records, err := enrollment.ListClients(installlayout.ClientsDirectory)
+		if err != nil {
+			return err
+		}
+		lines := make([]string, 0, len(records))
+		seen := make(map[string]struct{}, len(records))
+		for _, record := range records {
+			switch record.Status {
+			case enrollment.ClientStatusActive, enrollment.ClientStatusRotationPending:
+				line, err := server.RenderAuthorizedKey(manifest, []byte(record.PublicKey))
+				if err != nil {
+					return fmt.Errorf("client %s: %w", record.ClientID, err)
+				}
+				entry := strings.TrimRight(string(line), "\n")
+				blob := authorizedKeyBlob(entry)
+				if _, ok := seen[blob]; ok {
+					continue
+				}
+				seen[blob] = struct{}{}
+				lines = append(lines, entry)
+			case enrollment.ClientStatusEnrollmentPending,
+				enrollment.ClientStatusRevocationPending,
+				enrollment.ClientStatusRevoked:
+				// These states are deliberately unauthorized during recovery.
+			default:
+				return fmt.Errorf("client %s has unsupported status %q", record.ClientID, record.Status)
+			}
+		}
+		return writeAuthorizedKeyLines(manifest.AuthorizedKeysPath, lines)
+	})
 }
 
 func authorizedKeyBlob(publicKey string) string {
@@ -443,7 +496,8 @@ func writeAuthorizedKeyLines(path string, lines []string) error {
 			builder.WriteByte('\n')
 		}
 	}
-	return writeFileAtomic(path, []byte(builder.String()), 0o600)
+	// 0644 root-owned: sshd privilege separation must read this path outside home.
+	return writeFileAtomic(path, []byte(builder.String()), 0o644)
 }
 
 func authorizedKeysLockName(path string) string {
@@ -482,18 +536,17 @@ func replaceAuthorizedKeyForPublicKey(path, oldPublicKey string, newLine []byte)
 		}
 		oldBlob := authorizedKeyBlob(oldPublicKey)
 		entry := strings.TrimRight(string(newLine), "\n")
-		replaced := false
-		for i, existing := range lines {
-			if oldBlob != "" && authorizedKeyBlob(existing) == oldBlob {
-				lines[i] = entry
-				replaced = true
-				break
+		newBlob := authorizedKeyBlob(entry)
+		filtered := make([]string, 0, len(lines)+1)
+		for _, existing := range lines {
+			blob := authorizedKeyBlob(existing)
+			if (oldBlob != "" && blob == oldBlob) || (newBlob != "" && blob == newBlob) {
+				continue
 			}
+			filtered = append(filtered, existing)
 		}
-		if !replaced {
-			lines = append(lines, entry)
-		}
-		return writeAuthorizedKeyLines(path, lines)
+		filtered = append(filtered, entry)
+		return writeAuthorizedKeyLines(path, filtered)
 	})
 }
 

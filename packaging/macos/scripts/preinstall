@@ -22,4 +22,15 @@ if [ -e "/Library/Application Support/WarpTweet/libexec/openssh/sbin/sshd" ]; th
     exit 1
 fi
 
+# Stop only WarpTweet-owned launchd labels before pkg payload replacement. The
+# identity and manifest remain untouched; operators explicitly bring tunnels
+# back with `warptweet up` after an upgrade.
+for WT_TUNNEL_PLIST in /Library/LaunchDaemons/com.warptweet.tunnel.*.plist; do
+    [ -e "$WT_TUNNEL_PLIST" ] || continue
+    WT_LABEL=${WT_TUNNEL_PLIST##*/}
+    WT_LABEL=${WT_LABEL%.plist}
+    launchctl bootout "system/$WT_LABEL" >/dev/null 2>&1 || true
+done
+launchctl bootout system/com.warptweet.provisioner >/dev/null 2>&1 || true
+
 exit 0

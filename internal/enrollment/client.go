@@ -13,20 +13,21 @@ import (
 
 // ClientView is the non-secret invite summary shown before enrollment.
 type ClientView struct {
-	InviteID          string `json:"invite_id"`
-	ClientName        string `json:"client_name"`
-	ServerAddress     string `json:"server_address"`
-	ServerPort        uint16 `json:"server_port"`
-	TargetAddress     string `json:"target_address"`
-	TargetPort        uint16 `json:"target_port"`
-	Principal         string `json:"principal"`
-	ProfileID         string `json:"profile_id"`
-	ArtifactProfileID string `json:"artifact_profile_id"`
-	HostPublicKey     string `json:"host_public_key"`
-	ExpiresAt         string `json:"expires_at"`
-	ListenAddress     string `json:"listen_address"`
-	ListenPort        uint16 `json:"listen_port"`
-	TunnelID          string `json:"tunnel_id"`
+	InviteID                string `json:"invite_id"`
+	ClientName              string `json:"client_name"`
+	ServerAddress           string `json:"server_address"`
+	ServerPort              uint16 `json:"server_port"`
+	TargetAddress           string `json:"target_address"`
+	TargetPort              uint16 `json:"target_port"`
+	Principal               string `json:"principal"`
+	ProfileID               string `json:"profile_id"`
+	ArtifactProfileID       string `json:"artifact_profile_id"`
+	HostPublicKey           string `json:"host_public_key"`
+	EnrollmentTLSSPKISHA256 string `json:"enrollment_tls_spki_sha256"`
+	ExpiresAt               string `json:"expires_at"`
+	ListenAddress           string `json:"listen_address"`
+	ListenPort              uint16 `json:"listen_port"`
+	TunnelID                string `json:"tunnel_id"`
 }
 
 // ParseClientInvite validates invite JSON shape before any network activity.
@@ -76,20 +77,21 @@ func ParseClientInvite(raw []byte, now time.Time) (Invite, ClientView, error) {
 		invite.EnrollPort = DefaultEnrollmentPort
 	}
 	view := ClientView{
-		InviteID:          invite.InviteID,
-		ClientName:        invite.ClientName,
-		ServerAddress:     invite.ServerAddress,
-		ServerPort:        invite.ServerPort,
-		TargetAddress:     invite.TargetAddress,
-		TargetPort:        invite.TargetPort,
-		Principal:         invite.Principal,
-		ProfileID:         invite.ProfileID,
-		ArtifactProfileID: invite.ArtifactProfileID,
-		HostPublicKey:     invite.HostPublicKey,
-		ExpiresAt:         invite.ExpiresAt,
-		ListenAddress:     "127.0.0.1",
-		ListenPort:        15432,
-		TunnelID:          tunnelID,
+		InviteID:                invite.InviteID,
+		ClientName:              invite.ClientName,
+		ServerAddress:           invite.ServerAddress,
+		ServerPort:              invite.ServerPort,
+		TargetAddress:           invite.TargetAddress,
+		TargetPort:              invite.TargetPort,
+		Principal:               invite.Principal,
+		ProfileID:               invite.ProfileID,
+		ArtifactProfileID:       invite.ArtifactProfileID,
+		HostPublicKey:           invite.HostPublicKey,
+		EnrollmentTLSSPKISHA256: invite.EnrollmentTLSSPKISHA256,
+		ExpiresAt:               invite.ExpiresAt,
+		ListenAddress:           "127.0.0.1",
+		ListenPort:              15432,
+		TunnelID:                tunnelID,
 	}
 	return invite, view, nil
 }
@@ -150,34 +152,34 @@ func BuildClientManifest(invite Invite, tunnelID string, listenPort uint16, sshD
 	return manifest, nil
 }
 
-// EnrollmentRequest is the public-only payload submitted to the gateway.
+// EnrollmentRequest is the bounded payload submitted to the WarpTweet host.
 type EnrollmentRequest struct {
-	InviteID      string `json:"invite_id"`
-	Nonce         string `json:"nonce"`
-	ClientName    string `json:"client_name"`
-	PublicKey     string `json:"public_key"`
-	ProfileID     string `json:"profile_id"`
-	TunnelID      string `json:"tunnel_id"`
-	ListenAddress string `json:"listen_address"`
-	ListenPort    uint16 `json:"listen_port"`
+	InviteID        string `json:"invite_id"`
+	Nonce           string `json:"nonce"`
+	ClientName      string `json:"client_name"`
+	PublicKey       string `json:"public_key"`
+	ProfileID       string `json:"profile_id"`
+	TunnelID        string `json:"tunnel_id"`
+	ListenAddress   string `json:"listen_address"`
+	ListenPort      uint16 `json:"listen_port"`
+	ManagementToken string `json:"management_token"`
 }
 
-// EnrollmentProof is the server binding returned after accept.
-// ManagementToken is a single-use client capability for revoke/rotate; it is
-// returned only to the enrolling client and must not be logged.
+// EnrollmentProof is the non-secret server binding returned after accept.
+// The management capability is generated and retained by the client; the
+// server never returns or stores its raw value.
 type EnrollmentProof struct {
-	InviteID          string `json:"invite_id"`
-	ClientID          string `json:"client_id"`
-	HostPublicKey     string `json:"host_public_key"`
-	PublicKey         string `json:"public_key"`
-	Target            string `json:"target"`
-	Principal         string `json:"principal"`
-	ProfileID         string `json:"profile_id"`
-	Nonce             string `json:"nonce"`
-	AcceptedAt        string `json:"accepted_at"`
-	ManagementToken   string `json:"management_token,omitempty"`
-	ServerAddress     string `json:"server_address,omitempty"`
-	EnrollPort        uint16 `json:"enroll_port,omitempty"`
+	InviteID      string `json:"invite_id"`
+	ClientID      string `json:"client_id"`
+	HostPublicKey string `json:"host_public_key"`
+	PublicKey     string `json:"public_key"`
+	Target        string `json:"target"`
+	Principal     string `json:"principal"`
+	ProfileID     string `json:"profile_id"`
+	Nonce         string `json:"nonce"`
+	AcceptedAt    string `json:"accepted_at"`
+	ServerAddress string `json:"server_address,omitempty"`
+	EnrollPort    uint16 `json:"enroll_port,omitempty"`
 }
 
 // EncodeEnrollmentRequest returns canonical request JSON.

@@ -169,7 +169,7 @@ Only after doctor succeeds may the local forward start:
   --once
 ```
 
-`--once` disables controller-level restart. The packaged systemd unit requires this mode and owns service restart policy. Direct use without it retries without a count limit while exponential backoff caps retry frequency at the manifest's `max_backoff`. WarpTweet reports Ready only after PID-bound host and client authentication plus exact local-listener creation. Target health remains `not_checked`.
+`--once` disables controller-level restart. Packaged service managers require this mode and own service restart policy. Direct use without it stops after ten consecutive failed launches; a stable run resets the count and exponential backoff caps retry frequency at the manifest's `max_backoff`. WarpTweet reports Ready only after PID-bound host and client authentication plus exact local-listener creation. Target health remains `not_checked`.
 
 The Ready event does not by itself prove target reachability, negotiated algorithm observation, rekey, key rotation, negative interoperability, server confinement, or two-endpoint behavior. Those remain separate release evidence.
 

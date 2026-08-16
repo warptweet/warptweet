@@ -7,6 +7,8 @@ AssertFileIsExecutable=/opt/warptweet/bin/warptweet
 AssertPathExists=/etc/warptweet/server.wt
 AssertPathExists=/opt/warptweet/etc/ssh_host_mldsa44_ed25519_key
 AssertPathExists=/etc/warptweet/invite.mac-key
+AssertPathExists=/etc/warptweet/enrollment/tls.crt
+AssertPathExists=/etc/warptweet/enrollment/tls.key
 StartLimitIntervalSec=60
 StartLimitBurst=5
 
@@ -44,7 +46,7 @@ ProtectKernelTunables=yes
 ProtectProc=invisible
 ProtectSystem=strict
 ReadOnlyPaths=/opt/warptweet /etc/warptweet
-ReadWritePaths=/var/lib/warptweet /opt/warptweet/etc/authorized_keys
+ReadWritePaths=/var/lib/warptweet /opt/warptweet/etc/authorized_keys /etc/warptweet/enrollment
 RemoveIPC=yes
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictNamespaces=yes

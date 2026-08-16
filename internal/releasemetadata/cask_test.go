@@ -29,7 +29,9 @@ func TestRenderCaskPinsExactReleaseMetadata(t *testing.T) {
 		`sha256 "` + strings.Repeat("b", 64) + `"`,
 		`warptweet-#{version}-darwin-arm64.pkg`,
 		`warptweet-#{version}-darwin-amd64.pkg`,
-		`pkgutil:   "com.warptweet.client"`,
+		`pkgutil: "com.warptweet.client"`,
+		`binary "/Library/Application Support/WarpTweet/bin/warptweet"`,
+		`target: "warptweet"`,
 		`depends_on macos: ">= :ventura"`,
 		`/Library/Application Support/WarpTweet/share/uninstall.sh`,
 	} {
@@ -126,6 +128,9 @@ func TestMacOSPackageBuildScriptContract(t *testing.T) {
 		`refusing server helper`,
 		`mv -hn --`,
 		`WARPTWEET_REQUIRE_SIGNED_PKG`,
+		`WARPTWEET_REQUIRE_NOTARIZED_PKG`,
+		`TeamIdentifier=$WT_TEAM_ID`,
+		`WT_TEAM_ID=CP4268Q8UF`,
 	} {
 		if !strings.Contains(build, required) {
 			t.Errorf("build-macos-pkg.sh omits %q", required)
@@ -157,7 +162,9 @@ func TestHomebrewCaskTemplateForbidsFloatingVersions(t *testing.T) {
 	}
 	for _, required := range []string{
 		`cask "warptweet"`,
-		`pkgutil:   "com.warptweet.client"`,
+		`pkgutil: "com.warptweet.client"`,
+		`binary "/Library/Application Support/WarpTweet/bin/warptweet"`,
+		`target: "warptweet"`,
 		`depends_on macos: ">= :ventura"`,
 		`{{VERSION}}`,
 		`{{SHA256_ARM64}}`,
@@ -168,6 +175,9 @@ func TestHomebrewCaskTemplateForbidsFloatingVersions(t *testing.T) {
 		if !strings.Contains(contents, required) {
 			t.Fatalf("cask template omits %q", required)
 		}
+	}
+	if strings.Contains(contents, `launchctl: "com.warptweet.client"`) {
+		t.Fatal("cask template references obsolete static client LaunchDaemon")
 	}
 }
 

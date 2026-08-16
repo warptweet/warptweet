@@ -26,6 +26,7 @@ func TestParseClientInviteRejectsSecretsAndExpiry(t *testing.T) {
   "profile_id":"` + profile.CurrentID + `",
   "artifact_profile_id":"linux-amd64",
   "host_public_key":"ssh-mldsa44-ed25519@openssh.com AAAA",
+  "enrollment_tls_spki_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "issued_at":"2026-08-12T12:00:00Z",
   "expires_at":"2026-08-12T12:10:00Z",
   "nonce":"00",
