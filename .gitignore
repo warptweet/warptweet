@@ -10,3 +10,4 @@
 /local/
 /scripts/interop/config.env
 /scripts/interop/work/
+/.cache/
