@@ -141,6 +141,12 @@ func TestReservePortRejectsCollision(t *testing.T) {
 	if exists, err := store.Exists("other-db"); err != nil || exists {
 		t.Fatalf("colliding route left behind exists=%v err=%v", exists, err)
 	}
+	if exists, err := store.Exists("staging-db"); err != nil || !exists {
+		t.Fatalf("collision removed the owning route exists=%v err=%v", exists, err)
+	}
+	if err := store.ReservePort("staging-db", 15432); err != nil {
+		t.Fatalf("same-route reservation retry: %v", err)
+	}
 }
 
 func TestReservePortIdempotentForSameRouteAndPort(t *testing.T) {

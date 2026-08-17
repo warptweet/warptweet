@@ -300,6 +300,9 @@ func (store Store) List() ([]ListedRoute, error) {
 	}
 	var routes []ListedRoute
 	for _, entry := range entries {
+		if entry.Name() == ".lock" {
+			continue
+		}
 		listed := ListedRoute{RouteID: entry.Name(), Root: filepath.Join(store.Root, entry.Name())}
 		if !entry.IsDir() {
 			listed.Invalid = true
@@ -323,6 +326,10 @@ func (store Store) List() ([]ListedRoute, error) {
 		listed.Intent = intent
 		receipt, receiptErr := store.LoadReceipt(entry.Name())
 		if receiptErr != nil {
+			if os.IsNotExist(receiptErr) {
+				routes = append(routes, listed)
+				continue
+			}
 			listed.Invalid = true
 			listed.Error = receiptErr.Error()
 			routes = append(routes, listed)

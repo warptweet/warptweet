@@ -47,6 +47,38 @@ func TestLoadChecklistV2AndRejectIncomplete(t *testing.T) {
 	}
 }
 
+func TestValidateReportV2Rejections(t *testing.T) {
+	t.Parallel()
+
+	checklist, err := LoadChecklistV2(DefaultChecklistV2Path(repositoryRoot(t)))
+	if err != nil {
+		t.Fatalf("LoadChecklistV2: %v", err)
+	}
+	for name, mutate := range map[string]func(*ReportV2){
+		"not package to package":   func(r *ReportV2) { r.PackageToPackage = false },
+		"source substitution":      func(r *ReportV2) { r.SourceTreeSubstitution = true },
+		"missing host target":      func(r *ReportV2) { r.HostTarget = "" },
+		"short source commit":      func(r *ReportV2) { r.SourceCommit = "abc" },
+		"unknown result id":        func(r *ReportV2) { r.Results[0].ID = "not-a-case" },
+		"class mismatch":           func(r *ReportV2) { r.Results[0].Class = "negative" },
+		"missing result":           func(r *ReportV2) { r.Results = r.Results[1:] },
+		"no commands":              func(r *ReportV2) { r.Commands = nil },
+		"invalid restart policy":   func(r *ReportV2) { r.RestartPolicies = []string{"always"} },
+		"duplicate restart policy": func(r *ReportV2) { r.RestartPolicies = []string{"unless-stopped", "unless-stopped"} },
+		"malformed started_at":     func(r *ReportV2) { r.StartedAt = "not-a-timestamp" },
+		"finished before started":  func(r *ReportV2) { r.FinishedAt = "2026-08-15T00:00:00Z" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			report := sampleReportV2(checklist)
+			mutate(&report)
+			if err := ValidateReportV2(checklist, report); err == nil {
+				t.Fatalf("accepted invalid report: %s", name)
+			}
+		})
+	}
+}
+
 func sampleReportV2(checklist Checklist) ReportV2 {
 	results := make([]Result, 0, len(checklist.Positive)+len(checklist.Negative))
 	for _, item := range checklist.Positive {

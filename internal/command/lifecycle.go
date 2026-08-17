@@ -1458,6 +1458,7 @@ func runReconcile(ctx context.Context, arguments []string, stdout, stderr io.Wri
 	bootID := currentBootID()
 	var started, skipped []string
 	failed := map[string]string{}
+	projectionErrors := map[string]string{}
 	for _, route := range listed {
 		if route.Invalid {
 			skipped = append(skipped, route.RouteID)
@@ -1478,26 +1479,37 @@ func runReconcile(ctx context.Context, arguments []string, stdout, stderr io.Wri
 		}
 		if !routestate.ShouldStartAtBoot(route.Intent, bootID) {
 			if route.Intent.DesiredState == routestate.DesiredStopped {
-				_ = projectLinuxTunnel(ctx, route.RouteID, false)
+				if runtime.GOOS == "linux" {
+					if err := projectLinuxTunnel(ctx, route.RouteID, false); err != nil {
+						projectionErrors[route.RouteID] = err.Error()
+					}
+				}
 				_ = runDown([]string{route.RouteID}, io.Discard, stderr)
 			}
 			skipped = append(skipped, route.RouteID)
 			continue
 		}
-		if err := projectLinuxTunnel(ctx, route.RouteID, true); err != nil {
-			if err := runUp(ctx, []string{route.RouteID}, io.Discard, stderr, dependencies); err != nil {
-				failed[route.RouteID] = err.Error()
-				continue
+		if runtime.GOOS == "linux" {
+			if err := projectLinuxTunnel(ctx, route.RouteID, true); err != nil {
+				projectionErrors[route.RouteID] = err.Error()
+				if err := runUp(ctx, []string{route.RouteID}, io.Discard, stderr, dependencies); err != nil {
+					failed[route.RouteID] = err.Error()
+					continue
+				}
 			}
+		} else if err := runUp(ctx, []string{route.RouteID}, io.Discard, stderr, dependencies); err != nil {
+			failed[route.RouteID] = err.Error()
+			continue
 		}
 		started = append(started, route.RouteID)
 	}
 	return writeJSON(stdout, map[string]any{
-		"version": 1,
-		"status":  "reconciled",
-		"started": started,
-		"skipped": skipped,
-		"failed":  failed,
+		"version":           1,
+		"status":            "reconciled",
+		"started":           started,
+		"skipped":           skipped,
+		"failed":            failed,
+		"projection_errors": projectionErrors,
 	})
 }
 

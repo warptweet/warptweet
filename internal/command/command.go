@@ -30,7 +30,7 @@ import (
 )
 
 const (
-	Version      = "0.1.0-dev"
+	Version      = "0.1.0-rc.1"
 	manifestSize = 1 << 20
 )
 
@@ -790,15 +790,24 @@ func clientSpec(manifest config.Config, tunnelID string) (engine.ClientSpec, err
 	identityFile := layout.ClientIdentityPath
 	knownHostsFile := layout.ClientKnownHostsPath
 	emptyTrust := layout.ClientGlobalKnownHostsPath
-	if store, storeErr := productionRouteStore(); storeErr == nil {
-		if activeManifest, manifestErr := store.ManifestPath(selectedTunnel.ID); manifestErr == nil {
-			if identity, idErr := store.IdentityPath(selectedTunnel.ID); idErr == nil {
-				generationDir := filepath.Dir(activeManifest)
-				identityFile = identity
-				knownHostsFile = filepath.Join(generationDir, "known_hosts")
-				emptyTrust = filepath.Join(generationDir, "known_hosts.empty")
-			}
+	store, storeErr := productionRouteStore()
+	if storeErr != nil {
+		return engine.ClientSpec{}, storeErr
+	}
+	activeManifest, manifestErr := store.ManifestPath(selectedTunnel.ID)
+	if manifestErr != nil {
+		if !os.IsNotExist(manifestErr) {
+			return engine.ClientSpec{}, manifestErr
 		}
+	} else {
+		identity, idErr := store.IdentityPath(selectedTunnel.ID)
+		if idErr != nil {
+			return engine.ClientSpec{}, idErr
+		}
+		generationDir := filepath.Dir(activeManifest)
+		identityFile = identity
+		knownHostsFile = filepath.Join(generationDir, "known_hosts")
+		emptyTrust = filepath.Join(generationDir, "known_hosts.empty")
 	}
 	return engine.ClientSpec{
 		TunnelID:             selectedTunnel.ID,

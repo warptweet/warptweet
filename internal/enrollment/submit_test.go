@@ -108,7 +108,7 @@ func TestSubmitEnrollmentRotateRevokeRoundTrip(t *testing.T) {
 		}
 		record, err := RevokeClient(clientsDir, manage, time.Now().UTC(), func(string) error {
 			return os.WriteFile(authPath, nil, 0o644)
-		}, nil, nil)
+		}, SessionEnforcement{})
 		if err != nil {
 			http.Error(writer, err.Error(), http.StatusForbidden)
 			return

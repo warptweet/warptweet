@@ -155,9 +155,16 @@ func AuthenticateManagement(directory string, request ManagementRequest) (Client
 	return record, nil
 }
 
+// SessionEnforcement carries the optional session-termination hooks used during
+// revocation. Both hooks receive the client identity, generation, and key digest.
+type SessionEnforcement struct {
+	TerminateSession  func(clientID, generation, publicKeySHA256 string) error
+	VerifySessionGone func(clientID, generation, publicKeySHA256 string) error
+}
+
 // RevokeClient persists revocation intent before removing authorization. Exact
 // retries authenticated by the previous token remain idempotent.
-func RevokeClient(directory string, request ManagementRequest, now time.Time, removeAuthorization func(string) error, terminateSession, verifySessionGone func(clientID, generation, publicKeySHA256 string) error) (ClientRecord, error) {
+func RevokeClient(directory string, request ManagementRequest, now time.Time, removeAuthorization func(string) error, enforcement SessionEnforcement) (ClientRecord, error) {
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
@@ -209,13 +216,13 @@ func RevokeClient(directory string, request ManagementRequest, now time.Time, re
 	if err := removeAuthorization(record.PublicKey); err != nil {
 		return ClientRecord{}, err
 	}
-	if terminateSession != nil {
-		if err := terminateSession(record.ClientID, record.Generation, record.PublicKeySHA256); err != nil {
+	if enforcement.TerminateSession != nil {
+		if err := enforcement.TerminateSession(record.ClientID, record.Generation, record.PublicKeySHA256); err != nil {
 			return ClientRecord{}, err
 		}
 	}
-	if verifySessionGone != nil {
-		if err := verifySessionGone(record.ClientID, record.Generation, record.PublicKeySHA256); err != nil {
+	if enforcement.VerifySessionGone != nil {
+		if err := enforcement.VerifySessionGone(record.ClientID, record.Generation, record.PublicKeySHA256); err != nil {
 			return ClientRecord{}, err
 		}
 	}

@@ -199,8 +199,10 @@ func newEnrollmentHandler(manifest server.Config, hostPublicKey string, enrollPo
 				func(publicKey string) error {
 					return removeAuthorizedKeyForPublicKey(manifest.AuthorizedKeysPath, publicKey)
 				},
-				authority.Terminate,
-				authority.VerifyGone,
+				enrollment.SessionEnforcement{
+					TerminateSession:  authority.Terminate,
+					VerifySessionGone: authority.VerifyGone,
+				},
 			)
 			if err != nil {
 				return nil, err

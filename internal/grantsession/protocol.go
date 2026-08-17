@@ -9,7 +9,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"strings"
 )
 
 const (
@@ -25,6 +24,9 @@ const (
 	ActionUnregister = "unregister"
 	MaxRequestBytes  = 4 << 10
 	MaxResponseBytes = 2 << 10
+	// MaxRecordBytes bounds one persisted session document. It is independent of
+	// the socket request limit.
+	MaxRecordBytes = 8 << 10
 )
 
 // ErrRejected identifies a registration that must fail closed.
@@ -123,7 +125,7 @@ func readBounded(reader io.Reader, maximum int) ([]byte, error) {
 }
 
 func isLowerHex(value string) bool {
-	if strings.TrimSpace(value) != value {
+	if value == "" {
 		return false
 	}
 	for _, r := range value {

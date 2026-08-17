@@ -127,6 +127,18 @@ func ValidateReportV2(checklist Checklist, report ReportV2) error {
 	if report.RouteCount < 0 {
 		return fmt.Errorf("route_count must be non-negative")
 	}
+	seenPolicies := map[string]struct{}{}
+	for _, policy := range report.RestartPolicies {
+		switch policy {
+		case "unless-stopped", "manual":
+		default:
+			return fmt.Errorf("invalid restart policy %q", policy)
+		}
+		if _, exists := seenPolicies[policy]; exists {
+			return fmt.Errorf("duplicate restart policy %q", policy)
+		}
+		seenPolicies[policy] = struct{}{}
+	}
 	for _, digest := range []string{
 		report.ClientPackageSHA256,
 		report.ServerPackageSHA256,
@@ -140,15 +152,16 @@ func ValidateReportV2(checklist Checklist, report ReportV2) error {
 	if len(report.Commands) == 0 {
 		return fmt.Errorf("commands must be non-empty")
 	}
-	if _, err := time.Parse(time.RFC3339Nano, report.StartedAt); err != nil {
-		if _, err2 := time.Parse(time.RFC3339, report.StartedAt); err2 != nil {
-			return fmt.Errorf("started_at must be RFC3339: %v", err)
-		}
+	started, err := time.Parse(time.RFC3339Nano, report.StartedAt)
+	if err != nil {
+		return fmt.Errorf("started_at must be RFC3339: %v", err)
 	}
-	if _, err := time.Parse(time.RFC3339Nano, report.FinishedAt); err != nil {
-		if _, err2 := time.Parse(time.RFC3339, report.FinishedAt); err2 != nil {
-			return fmt.Errorf("finished_at must be RFC3339: %v", err)
-		}
+	finished, err := time.Parse(time.RFC3339Nano, report.FinishedAt)
+	if err != nil {
+		return fmt.Errorf("finished_at must be RFC3339: %v", err)
+	}
+	if finished.Before(started) {
+		return fmt.Errorf("finished_at precedes started_at")
 	}
 
 	required := map[string]string{}

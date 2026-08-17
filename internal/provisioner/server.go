@@ -135,10 +135,7 @@ func executeRequest(ctx context.Context, request Request, serviceUID, serviceGID
 		if err != nil || request.PrepareOnly {
 			return output, err
 		}
-		tunnelID := request.TunnelID
-		if tunnelID == "" {
-			tunnelID = enrollOutputTunnelID(output)
-		}
+		tunnelID := enrollOutputTunnelID(output)
 		if tunnelID == "" {
 			return output, errors.New("connect enroll output missing tunnel_id")
 		}

@@ -283,6 +283,17 @@ run_case_not_run bounded-floods negative "requires dual-host flood harness"
 run_case_not_run availability-faults negative "requires dual-host fault harness"
 
 WT_SCHEMA=${WARPTWEET_EVIDENCE_SCHEMA_VERSION:-2}
+case "$WT_SCHEMA" in
+    1|2) ;;
+    *)
+        fail "unsupported WARPTWEET_EVIDENCE_SCHEMA_VERSION=$WT_SCHEMA"
+        ;;
+esac
+WT_CONTRACT_DIGEST=$(sed -n 's/^[[:space:]]*ContractChecklistSHA256 = "\([0-9a-f]\{64\}\)".*/\1/p' \
+    "$WT_REPOSITORY_ROOT/internal/adoptionresult/result.go" | head -n 1)
+if [ -z "$WT_CONTRACT_DIGEST" ]; then
+    fail "cannot derive contract_checklist_sha256 from adoptionresult"
+fi
 if [ "$WT_SCHEMA" = "2" ]; then
     run_case_not_run second-client-grant positive "requires dual-host second client"
     run_case_not_run two-independent-routes positive "requires dual-route package matrix"
@@ -325,7 +336,7 @@ if [ "$WT_SCHEMA" = "2" ]; then
   "kind": "warptweet.release-evidence",
   "schema_version": 2,
   "contract_id": "warptweet.adoption-release.v1",
-  "contract_checklist_sha256": "5fa66b60627b8cf2dc4720d14719c8368f6749cbd0ebc262d1990ebd4b95b2e3",
+  "contract_checklist_sha256": "$WT_CONTRACT_DIGEST",
   "release_version": "$WARPTWEET_RELEASE_VERSION",
   "source_commit": "$WARPTWEET_SOURCE_COMMIT",
   "clean_tree_proof": "${WARPTWEET_CLEAN_TREE_PROOF:-not_recorded}",

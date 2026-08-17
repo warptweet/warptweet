@@ -16,6 +16,7 @@ import (
 
 	"warptweet.com/warptweet/internal/config"
 	"warptweet.com/warptweet/internal/installlayout"
+	"warptweet.com/warptweet/internal/routestate"
 )
 
 const (
@@ -57,10 +58,10 @@ func ValidateRequest(request Request) error {
 	switch request.Action {
 	case ActionEnroll, ActionConnect:
 		if len(request.Invite) == 0 || len(request.Invite) > MaxRequestBytes {
-			return errors.New("enroll requires a bounded invite document")
+			return errors.New("enroll and connect require a bounded invite document")
 		}
 		if request.TunnelID != "" {
-			return errors.New("enroll tunnel_id is derived from the invite")
+			return errors.New("enroll and connect tunnel_id is derived from the invite")
 		}
 		if request.Once && request.Action != ActionConnect {
 			return errors.New("once is valid only for up or connect")
@@ -68,8 +69,10 @@ func ValidateRequest(request Request) error {
 		if len(request.Proof) > MaxRequestBytes {
 			return errors.New("enrollment proof exceeds the request limit")
 		}
-		if request.RestartPolicy != "" && request.RestartPolicy != "unless-stopped" && request.RestartPolicy != "manual" {
-			return errors.New("restart_policy must be unless-stopped or manual")
+		if request.RestartPolicy != "" {
+			if _, err := routestate.ParseRestartPolicy(request.RestartPolicy); err != nil {
+				return errors.New("restart_policy must be unless-stopped or manual")
+			}
 		}
 	case ActionStatus:
 		if len(request.Invite) != 0 || len(request.Proof) != 0 || request.Once || request.ListenPort != 0 || request.PrepareOnly {

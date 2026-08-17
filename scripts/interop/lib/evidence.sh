@@ -12,6 +12,13 @@ interop_emit_evidence() {
     # Fill remaining checklist ids as not_run so the document is schema-complete
     # but not Complete() for CTA until dual-host matrix is finished.
     _schema=${WARPTWEET_EVIDENCE_SCHEMA_VERSION:-2}
+    case "$_schema" in
+        1|2) ;;
+        *)
+            interop_log "unsupported WARPTWEET_EVIDENCE_SCHEMA_VERSION=$_schema"
+            return 2
+            ;;
+    esac
     _checklist_ids="pkg-signature-and-manifest engine-identity-trust-preflight invite-enroll-single-use composite-auth exact-kex-aead rekey-same-profile pid-bound-readiness deterministic-target-payload stop-restart-rotate-revoke-upgrade classical-only-kex-host-client wrong-host-pin malformed-keys-messages invite-fail-closed forwarding-surface-rejected local-state-mutation engine-and-package-tamper bounded-floods availability-faults"
     if [ "$_schema" = "2" ]; then
         _checklist_ids="$_checklist_ids second-client-grant two-independent-routes reboot-unless-stopped-manual-down live-expiry-and-revocation clock-rollback-fail-closed target-change-denial compose-loopback-postgres agent-skill-delivery pid-reuse-and-stop-failure silent-renewal-and-port-reassignment"
@@ -60,12 +67,22 @@ interop_emit_evidence() {
         _restart_policies='["unless-stopped", "manual"]'
     fi
     if [ "$_schema" = "2" ]; then
+        _repo=${WT_REPO_ROOT:-}
+        if [ -z "$_repo" ] && [ -n "${WARPTWEET_INTEROP_ROOT:-}" ]; then
+            _repo=$(CDPATH= cd -- "$WARPTWEET_INTEROP_ROOT/../.." && pwd)
+        fi
+        _contract_digest=$(sed -n 's/^[[:space:]]*ContractChecklistSHA256 = "\([0-9a-f]\{64\}\)".*/\1/p' \
+            "$_repo/internal/adoptionresult/result.go" | head -n 1)
+        if [ -z "$_contract_digest" ]; then
+            interop_log "cannot derive contract_checklist_sha256 from adoptionresult"
+            return 2
+        fi
         cat >"$WARPTWEET_INTEROP_EVIDENCE_OUTPUT" <<EOF
 {
   "kind": "warptweet.release-evidence",
   "schema_version": 2,
   "contract_id": "warptweet.adoption-release.v1",
-  "contract_checklist_sha256": "5fa66b60627b8cf2dc4720d14719c8368f6749cbd0ebc262d1990ebd4b95b2e3",
+  "contract_checklist_sha256": "$_contract_digest",
   "release_version": "$WARPTWEET_RELEASE_VERSION",
   "source_commit": "$WARPTWEET_SOURCE_COMMIT",
   "clean_tree_proof": "${WARPTWEET_CLEAN_TREE_PROOF:-not_recorded}",

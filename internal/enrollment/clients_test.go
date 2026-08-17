@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"net/netip"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,7 +84,7 @@ func TestAcceptStoresClientAndRevokeBurnsToken(t *testing.T) {
 	}
 	if _, err := RevokeClient(clients, revokeRequest, now.Add(2*time.Minute), func(string) error {
 		return errors.New("injected authorization removal failure")
-	}, nil, nil); err == nil {
+	}, SessionEnforcement{}); err == nil {
 		t.Fatal("RevokeClient succeeded despite injected authorization failure")
 	}
 	pendingRevoke, err := LoadClient(clients, result.ClientID)
@@ -93,18 +94,55 @@ func TestAcceptStoresClientAndRevokeBurnsToken(t *testing.T) {
 	if pendingRevoke.Status != ClientStatusRevocationPending {
 		t.Fatalf("status=%s, want revocation_pending", pendingRevoke.Status)
 	}
-	revoked, err := RevokeClient(clients, revokeRequest, now.Add(2*time.Minute), func(string) error { return nil }, nil, nil)
+	if _, err := RevokeClient(clients, revokeRequest, now.Add(2*time.Minute), func(string) error { return nil }, SessionEnforcement{
+		TerminateSession: func(string, string, string) error {
+			return errors.New("injected session terminate failure")
+		},
+		VerifySessionGone: func(string, string, string) error {
+			t.Fatal("VerifySessionGone ran after TerminateSession failed")
+			return nil
+		},
+	}); err == nil {
+		t.Fatal("RevokeClient succeeded despite injected session terminate failure")
+	}
+	pendingSession, err := LoadClient(clients, result.ClientID)
+	if err != nil {
+		t.Fatalf("LoadClient pending session: %v", err)
+	}
+	if pendingSession.Status != ClientStatusRevocationPending {
+		t.Fatalf("status=%s, want revocation_pending after session hook failure", pendingSession.Status)
+	}
+	var hooks []string
+	revoked, err := RevokeClient(clients, revokeRequest, now.Add(2*time.Minute), func(string) error { return nil }, SessionEnforcement{
+		TerminateSession: func(clientID, generation, publicKeySHA256 string) error {
+			if clientID != loaded.ClientID || generation != loaded.Generation || publicKeySHA256 != loaded.PublicKeySHA256 {
+				t.Fatalf("terminate args=%s %s %s", clientID, generation, publicKeySHA256)
+			}
+			hooks = append(hooks, "terminate")
+			return nil
+		},
+		VerifySessionGone: func(clientID, generation, publicKeySHA256 string) error {
+			if clientID != loaded.ClientID || generation != loaded.Generation || publicKeySHA256 != loaded.PublicKeySHA256 {
+				t.Fatalf("verify args=%s %s %s", clientID, generation, publicKeySHA256)
+			}
+			hooks = append(hooks, "verify")
+			return nil
+		},
+	})
 	if err != nil {
 		t.Fatalf("RevokeClient: %v", err)
 	}
 	if revoked.Status != ClientStatusRevoked {
 		t.Fatalf("status=%s", revoked.Status)
 	}
+	if got := strings.Join(hooks, ","); got != "terminate,verify" {
+		t.Fatalf("session hooks=%q, want terminate then verify", got)
+	}
 	again, err := RevokeClient(clients, ManagementRequest{
 		ClientID:        result.ClientID,
 		ManagementToken: testManagementToken,
 		TunnelID:        "laptop-1",
-	}, now.Add(3*time.Minute), func(string) error { return nil }, nil, nil)
+	}, now.Add(3*time.Minute), func(string) error { return nil }, SessionEnforcement{})
 	if err != nil {
 		t.Fatalf("second RevokeClient should be idempotent: %v", err)
 	}

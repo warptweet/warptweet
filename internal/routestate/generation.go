@@ -204,10 +204,13 @@ func (store Store) PortOwner(listenPort uint16) (string, bool, error) {
 	for _, route := range routes {
 		reservation, err := store.loadReservation(route.RouteID)
 		if err != nil {
-			if route.Listen != "" && listenEndpointPort(route.Listen) == want {
-				return route.RouteID, true, nil
+			if os.IsNotExist(err) {
+				if route.Listen != "" && listenEndpointPort(route.Listen) == want {
+					return route.RouteID, true, nil
+				}
+				continue
 			}
-			continue
+			return "", false, err
 		}
 		if reservation.ListenPort == listenPort {
 			return route.RouteID, true, nil

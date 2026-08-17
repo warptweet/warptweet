@@ -115,6 +115,7 @@
     },
     "restart_policies": {
       "type": "array",
+      "uniqueItems": true,
       "items": {
         "type": "string",
         "enum": ["unless-stopped", "manual"]
@@ -137,10 +138,12 @@
     },
     "started_at": {
       "type": "string",
+      "format": "date-time",
       "minLength": 1
     },
     "finished_at": {
       "type": "string",
+      "format": "date-time",
       "minLength": 1
     },
     "redacted_log_path": {

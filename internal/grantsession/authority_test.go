@@ -72,6 +72,58 @@ func TestRegisterRejectsMissingAndExpiredGrants(t *testing.T) {
 	}
 }
 
+func TestRegisterRejectsForeignExecutable(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	clients := filepath.Join(root, "clients")
+	sessions := filepath.Join(root, "sessions")
+	blob := make([]byte, 32)
+	for i := range blob {
+		blob[i] = byte(i + 1)
+	}
+	digest := sha256.Sum256(blob)
+	keyDigest := hex.EncodeToString(digest[:])
+	publicKey := "ssh-mldsa44-ed25519@openssh.com " + base64.StdEncoding.EncodeToString(blob)
+	notAfter, err := grant.FormatUTC(time.Date(2026, 9, 15, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := enrollment.StoreClient(clients, enrollment.ClientRecord{
+		ClientID:                     "aaaaaaaaaaaaaaaa",
+		GrantID:                      "bbbbbbbbbbbbbbbb",
+		TunnelID:                     "staging-db",
+		RouteID:                      "staging-db",
+		InviteID:                     "cccccccccccccccc",
+		PublicKey:                    publicKey,
+		PublicKeySHA256:              enrollment.PublicKeyDigest(publicKey),
+		ManagementTokenSHA256:        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+		Principal:                    "warptweet",
+		ProfileID:                    "warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519",
+		Status:                       enrollment.ClientStatusActive,
+		AcceptedAt:                   "2026-08-16T12:00:00Z",
+		AuthorizationNotAfter:        notAfter,
+		AuthorizationDurationSeconds: 2592000,
+		Generation:                   "20260816T120000Z",
+		TargetAddress:                "127.0.0.1",
+		TargetPort:                   5432,
+	}); err != nil {
+		t.Fatalf("store client: %v", err)
+	}
+	authority := &Authority{
+		Root:        sessions,
+		Clients:     clients,
+		ExpectedExe: "/opt/warptweet/libexec/openssh/libexec/sshd-session",
+		Now:         func() time.Time { return time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC) },
+		Inspect: func(pid int) (ProcessIdentity, error) {
+			return ProcessIdentity{BootID: "boot-1", PID: pid, StartTime: "99", Exe: "/tmp/attack/libexec/sshd-session"}, nil
+		},
+	}
+	if _, err := authority.Register(4242, keyDigest, "conn-1"); err == nil {
+		t.Fatal("accepted foreign executable")
+	}
+}
+
 func TestKeyBlobDigestMatchesWireBlob(t *testing.T) {
 	t.Parallel()
 
@@ -179,9 +231,6 @@ func TestDecodeRequestRejectsUnknownFields(t *testing.T) {
 
 	if _, err := decodeRequest([]byte(`{"version":1,"action":"register","key_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","extra":true}`)); err == nil {
 		t.Fatal("accepted unknown field")
-	}
-	if err := os.MkdirAll(t.TempDir(), 0o700); err != nil {
-		t.Fatal(err)
 	}
 }
 

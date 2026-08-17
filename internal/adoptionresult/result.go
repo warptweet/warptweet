@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"sort"
 	"strings"
 )
 
@@ -163,14 +162,13 @@ var requiredIDs = []string{
 	"VERIFY-009", "VERIFY-010", "VERIFY-011", "VERIFY-012",
 }
 
-// SortedMissing is retained for reviewers comparing partial drafts.
-func SortedMissing(seen map[string]struct{}) []string {
+// Missing returns the ledger ids absent from seen, in ledger order.
+func Missing(seen map[string]struct{}) []string {
 	missing := make([]string, 0)
 	for _, id := range requiredIDs {
 		if _, ok := seen[id]; !ok {
 			missing = append(missing, id)
 		}
 	}
-	sort.Strings(missing)
 	return missing
 }

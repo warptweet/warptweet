@@ -44,6 +44,10 @@ func validateRecord(record Record) error {
 	if record.GrantID == "" || record.ClientID == "" || record.Generation == "" {
 		return fmt.Errorf("grant session missing grant binding")
 	}
+	if len(record.PublicKeySHA256) != 64 || !isLowerHex(record.PublicKeySHA256) ||
+		len(record.KeyBlobSHA256) != 64 || !isLowerHex(record.KeyBlobSHA256) {
+		return fmt.Errorf("grant session missing key binding")
+	}
 	if record.PID <= 0 {
 		return fmt.Errorf("grant session missing process identity")
 	}
@@ -70,6 +74,9 @@ func writeRecord(path string, record Record) error {
 		return err
 	}
 	contents = append(contents, '\n')
+	if len(contents) == 0 || len(contents) > MaxRecordBytes {
+		return fmt.Errorf("grant session document is empty or oversized")
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return err
 	}
@@ -109,11 +116,16 @@ func writeRecord(path string, record Record) error {
 }
 
 func readRecord(path string) (Record, error) {
-	contents, err := os.ReadFile(path)
+	file, err := os.Open(path)
 	if err != nil {
 		return Record{}, err
 	}
-	if len(contents) == 0 || len(contents) > MaxRequestBytes {
+	defer file.Close()
+	contents, err := readBounded(file, MaxRecordBytes)
+	if err != nil {
+		return Record{}, err
+	}
+	if len(contents) == 0 {
 		return Record{}, fmt.Errorf("grant session document is empty or oversized")
 	}
 	if err := strictjson.RejectDuplicateObjectNames(contents); err != nil {
