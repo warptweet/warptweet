@@ -25,7 +25,18 @@ func TestObserveClockRejectsRollbackAndImplausible(t *testing.T) {
 	if _, err := ObserveClock(path, first.Add(time.Minute).Add(-MaterialRollback/2)); err != nil {
 		t.Fatalf("ObserveClock below MaterialRollback: %v", err)
 	}
-	_, err := ObserveClock(path, first.Add(-time.Hour))
+	held, err := LoadClockObservation(path)
+	if err != nil {
+		t.Fatalf("load high-water: %v", err)
+	}
+	wantHighWater, formatErr := FormatUTC(first.Add(time.Minute))
+	if formatErr != nil {
+		t.Fatalf("format high-water: %v", formatErr)
+	}
+	if held.LastObservedUTC != wantHighWater {
+		t.Fatalf("high-water moved backward to %s want %s", held.LastObservedUTC, wantHighWater)
+	}
+	_, err = ObserveClock(path, first.Add(-time.Hour))
 	if err == nil || !strings.Contains(err.Error(), "rolled back") {
 		t.Fatalf("rollback err=%v", err)
 	}
@@ -49,5 +60,21 @@ func TestObserveClockRejectsCorruptObservation(t *testing.T) {
 	}
 	if _, err := ObserveClock(path, time.Date(2026, 8, 16, 12, 1, 0, 0, time.UTC)); err == nil {
 		t.Fatal("accepted wrong kind")
+	}
+}
+
+func TestClockIsBlockedTreatsCorruptDocumentAsBlocked(t *testing.T) {
+	t.Parallel()
+
+	missing := filepath.Join(t.TempDir(), "missing.json")
+	if ClockIsBlocked(missing) {
+		t.Fatal("missing blocked-clock document must not be blocked")
+	}
+	path := filepath.Join(t.TempDir(), "blocked.json")
+	if err := os.WriteFile(path, []byte(`{"kind":"other"}`+"\n"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if !ClockIsBlocked(path) {
+		t.Fatal("malformed blocked-clock document must be treated as blocked")
 	}
 }

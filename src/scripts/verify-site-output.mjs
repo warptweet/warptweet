@@ -12,6 +12,11 @@ if (releaseGate.kind !== "warptweet.public-release-gate" || releaseGate.schema_v
   throw new Error("public release gate document is invalid");
 }
 
+const llms = await readFile(resolve(root, "dist/llms.txt"), "utf8");
+if (!llms.includes("WarpTweet gives a developer or agent one local service socket")) {
+  throw new Error("llms.txt must publish the product thesis");
+}
+
 if (!releaseGate.homebrew_cta_enabled) {
   if (!indexHtml.includes("Homebrew package in release qualification")) {
     throw new Error("website must show Homebrew qualification message while CTA is dark");

@@ -112,9 +112,13 @@ func FormatUTC(value time.Time) (string, error) {
 }
 
 // ParseUTC parses a host-authoritative RFC 3339 UTC timestamp.
+// Non-UTC offsets are rejected rather than silently normalized.
 func ParseUTC(value string) (time.Time, error) {
 	if strings.TrimSpace(value) == "" {
 		return time.Time{}, fmt.Errorf("%w: timestamp is empty", ErrInvalidDuration)
+	}
+	if !strings.HasSuffix(value, "Z") {
+		return time.Time{}, fmt.Errorf("%w: timestamp must be RFC 3339 UTC ending with Z", ErrInvalidDuration)
 	}
 	parsed, err := time.Parse(time.RFC3339Nano, value)
 	if err != nil {
@@ -123,7 +127,10 @@ func ParseUTC(value string) (time.Time, error) {
 			return time.Time{}, fmt.Errorf("%w: timestamp must be RFC 3339 UTC: %v", ErrInvalidDuration, err)
 		}
 	}
-	return parsed.UTC(), nil
+	if parsed.Location() != time.UTC {
+		return time.Time{}, fmt.Errorf("%w: timestamp must be RFC 3339 UTC ending with Z", ErrInvalidDuration)
+	}
+	return parsed, nil
 }
 
 // AuthorizationNotAfter returns accepted_at + duration as an exact UTC timestamp.

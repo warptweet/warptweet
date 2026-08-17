@@ -99,7 +99,13 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 	if err := ensureHostDirectories(); err != nil {
 		return err
 	}
+	if grant.ClockIsBlocked(installlayout.HostClockBlockedPath) {
+		return fmt.Errorf("host clock: blocked until warptweet server clock-recover")
+	}
 	if _, err := grant.ObserveClock(installlayout.HostClockObservationPath, time.Now().UTC()); err != nil {
+		if existing, loadErr := server.Load(installlayout.ServerManifestPath); loadErr == nil {
+			_ = enterBlockedClock(existing, err)
+		}
 		return fmt.Errorf("host clock: %w", err)
 	}
 	hostPublicKey, createdHostKey, err := ensureHostIdentity(ctx)
@@ -118,8 +124,18 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 	if err != nil {
 		return fmt.Errorf("ensure enrollment TLS identity: %w", err)
 	}
-	manifest, err := writeHostManifest(listenEndpoint, targetEndpoint)
-	if err != nil {
+	var manifest server.Config
+	if err := withHostStateLock(func() error {
+		if err := refuseHostTargetChange(targetEndpoint); err != nil {
+			return err
+		}
+		written, writeErr := writeHostManifest(listenEndpoint, targetEndpoint)
+		if writeErr != nil {
+			return writeErr
+		}
+		manifest = written
+		return nil
+	}); err != nil {
 		return err
 	}
 	if err := reconcileExpiredGrants(manifest, time.Now().UTC()); err != nil {
@@ -505,6 +521,45 @@ func defaultHostLabel() string {
 	return host
 }
 
+const hostStateLockName = ".host.lock"
+
+func withHostStateLock(fn func() error) error {
+	return enrollment.WithExclusiveLock(serverStateDirectory, hostStateLockName, fn)
+}
+
+func refuseHostTargetChange(targetEndpoint netip.AddrPort) error {
+	existing, err := server.Load(installlayout.ServerManifestPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	current := netip.AddrPortFrom(existing.Target.Address, uint16(existing.Target.Port))
+	if current == targetEndpoint {
+		return nil
+	}
+	clients, err := enrollment.ListClients(installlayout.ClientsDirectory)
+	if err != nil {
+		return fmt.Errorf("list grants before target change: %w", err)
+	}
+	for _, record := range clients {
+		if record.Status != enrollment.ClientStatusExpired && record.Status != enrollment.ClientStatusRevoked {
+			return fmt.Errorf("host target cannot change from %s to %s while grant %s is %s", current, targetEndpoint, record.ClientID, record.Status)
+		}
+	}
+	invites, err := enrollment.List(inviteDirectory)
+	if err != nil {
+		return fmt.Errorf("list invites before target change: %w", err)
+	}
+	for _, record := range invites {
+		if record.Status == enrollment.StatusIssued {
+			return fmt.Errorf("host target cannot change from %s to %s while invite %s is issued", current, targetEndpoint, record.InviteID)
+		}
+	}
+	return nil
+}
+
 func ensureHostDirectories() error {
 	for _, path := range []string{
 		filepath.Dir(installlayout.ServerHostKeyPath),
@@ -517,6 +572,9 @@ func ensureHostDirectories() error {
 		}
 	}
 	if err := os.MkdirAll(inviteDirectory, 0o700); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(installlayout.GrantSessionsDirectory, 0o700); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(installlayout.ServerEnrollmentDirectory, 0o700); err != nil {

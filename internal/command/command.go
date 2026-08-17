@@ -559,19 +559,32 @@ func runTunnel(
 	flags := newFlagSet("run", stderr)
 	manifestPath := onceStringFlag{name: "--config"}
 	tunnelID := onceStringFlag{name: "--tunnel"}
+	routeID := onceStringFlag{name: "--route"}
 	once := onceBoolFlag{name: "--once"}
 	readyFD := onceStringFlag{name: "--ready-fd"}
 	managedLifecycle := onceBoolFlag{name: "--managed-lifecycle"}
 	flags.Var(&manifestPath, "config", "path to a client-tunnels .wt manifest")
 	flags.Var(&tunnelID, "tunnel", "ID of the tunnel to run")
+	flags.Var(&routeID, "route", "reserved route ID using its active generation")
 	flags.Var(&once, "once", "do not restart the tunnel after exit")
 	flags.Var(&readyFD, "ready-fd", "internal inherited readiness pipe descriptor")
 	flags.Var(&managedLifecycle, "managed-lifecycle", "internal launchd lifecycle ownership")
 	if err := parseFlags(flags, arguments); err != nil {
 		return err
 	}
+	if routeID.value != "" {
+		if manifestPath.value != "" || tunnelID.value != "" {
+			return errors.New("run --route cannot be combined with --config or --tunnel")
+		}
+		resolved, resolveErr := resolveActiveRoute(routeID.value)
+		if resolveErr != nil {
+			return resolveErr
+		}
+		manifestPath.value = resolved.manifest
+		tunnelID.value = routeID.value
+	}
 	if manifestPath.value == "" || tunnelID.value == "" {
-		return errors.New("run requires --config and --tunnel")
+		return errors.New("run requires --route or --config and --tunnel")
 	}
 	var readinessWriter *os.File
 	if readyFD.value != "" {
@@ -774,6 +787,19 @@ func clientSpec(manifest config.Config, tunnelID string) (engine.ClientSpec, err
 	if err != nil {
 		return engine.ClientSpec{}, err
 	}
+	identityFile := layout.ClientIdentityPath
+	knownHostsFile := layout.ClientKnownHostsPath
+	emptyTrust := layout.ClientGlobalKnownHostsPath
+	if store, storeErr := productionRouteStore(); storeErr == nil {
+		if activeManifest, manifestErr := store.ManifestPath(selectedTunnel.ID); manifestErr == nil {
+			if identity, idErr := store.IdentityPath(selectedTunnel.ID); idErr == nil {
+				generationDir := filepath.Dir(activeManifest)
+				identityFile = identity
+				knownHostsFile = filepath.Join(generationDir, "known_hosts")
+				emptyTrust = filepath.Join(generationDir, "known_hosts.empty")
+			}
+		}
+	}
 	return engine.ClientSpec{
 		TunnelID:             selectedTunnel.ID,
 		ServerAddress:        canonicalAddress(manifest.Server.Address),
@@ -783,11 +809,27 @@ func clientSpec(manifest config.Config, tunnelID string) (engine.ClientSpec, err
 		ListenPort:           uint16(selectedTunnel.Listen.Port),
 		TargetAddress:        canonicalAddress(selectedTunnel.Target.Address),
 		TargetPort:           uint16(selectedTunnel.Target.Port),
-		IdentityFile:         layout.ClientIdentityPath,
-		KnownHostsFile:       layout.ClientKnownHostsPath,
-		GlobalKnownHostsFile: layout.ClientGlobalKnownHostsPath,
+		IdentityFile:         identityFile,
+		KnownHostsFile:       knownHostsFile,
+		GlobalKnownHostsFile: emptyTrust,
 		Profile:              selectedProfile,
 	}, nil
+}
+
+type resolvedRoute struct {
+	manifest string
+}
+
+func resolveActiveRoute(routeID string) (resolvedRoute, error) {
+	store, err := productionRouteStore()
+	if err != nil {
+		return resolvedRoute{}, err
+	}
+	manifest, err := store.ManifestPath(routeID)
+	if err != nil {
+		return resolvedRoute{}, err
+	}
+	return resolvedRoute{manifest: manifest}, nil
 }
 
 func productionClientLayout() (artifactprofile.Layout, error) {
@@ -977,7 +1019,7 @@ func writeUsage(writer io.Writer) {
 
 Usage:
   warptweet host --to <port|ip:port> [--name <label>] [--access-for 30d] [--out path] [--stdout] [--listen ip:port] [--no-invite] [--json]
-  warptweet connect <invite.wtinvite> [--yes] [--restart unless-stopped|manual] [--proof <proof.json>]
+  warptweet connect <invite.wtinvite> [--yes] [--listen-port <port>] [--restart unless-stopped|manual] [--proof <proof.json>]
   warptweet profile
   warptweet validate --config <manifest.wt>
   warptweet render-client --config <client.wt> --tunnel <id>
@@ -986,6 +1028,7 @@ Usage:
   warptweet render-known-host --config <client.wt> --tunnel <id> --public-key <host.pub>
   warptweet doctor --config <client.wt> --tunnel <id>
   warptweet doctor-server --config <server.wt>
+  warptweet run --route <id> [--once]
   warptweet run --config <client.wt> --tunnel <id> [--once]
   warptweet enroll <invite.wtinvite> [--yes] [--prepare-only] [--proof <proof.json>]
   warptweet routes [--json]

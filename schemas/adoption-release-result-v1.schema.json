@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://warptweet.com/schemas/adoption-release-result-v1.schema.json",
+  "title": "WarpTweet adoption-release result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "contract_id",
+    "contract_checklist_sha256",
+    "source_commit",
+    "release_version",
+    "results"
+  ],
+  "properties": {
+    "kind": {
+      "const": "warptweet.adoption-release-result"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "contract_id": {
+      "const": "warptweet.adoption-release.v1"
+    },
+    "contract_checklist_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "source_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "release_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "results": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "status"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pass", "fail", "blocked", "not_run"]
+          },
+          "evidence": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "notes": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

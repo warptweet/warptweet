@@ -78,7 +78,51 @@ func RenderAuthorizedKey(config Config, publicKey []byte, notAfter time.Time) ([
 		return nil, invalidAuthorizedKey("validate public-key blob: %v", err)
 	}
 
-	return renderManagedAuthorizedKey(config, selectedProfile.AuthenticationKeyType, fields[1], notAfter)
+	return RenderAuthorizedKeyForTarget(config, publicKey, netip.AddrPortFrom(
+		canonicalAddress(config.Target.Address),
+		uint16(config.Target.Port),
+	), notAfter)
+}
+
+// RenderAuthorizedKeyForTarget binds one key to an explicit grant target.
+func RenderAuthorizedKeyForTarget(config Config, publicKey []byte, target netip.AddrPort, notAfter time.Time) ([]byte, error) {
+	if len(publicKey) == 0 {
+		return nil, invalidAuthorizedKey("input is empty")
+	}
+	if len(publicKey) > MaxAuthorizedKeyInputBytes {
+		return nil, invalidAuthorizedKey(
+			"input is %d bytes, limit is %d",
+			len(publicKey),
+			MaxAuthorizedKeyInputBytes,
+		)
+	}
+	selectedProfile, err := validate(config)
+	if err != nil {
+		return nil, fmt.Errorf("render authorized key: %w", err)
+	}
+	line, err := onePublicKeyLine(publicKey)
+	if err != nil {
+		return nil, err
+	}
+	fields := strings.Fields(string(line))
+	if len(fields) < 2 {
+		return nil, invalidAuthorizedKey("plain public-key line must contain a key type and blob")
+	}
+	if fields[0] != selectedProfile.AuthenticationKeyType {
+		return nil, invalidAuthorizedKey(
+			"key type %q does not match required type %q; options are not accepted",
+			fields[0],
+			selectedProfile.AuthenticationKeyType,
+		)
+	}
+	if err := sshwire.ValidatePublicKeyBlob(
+		fields[1],
+		selectedProfile.AuthenticationKeyType,
+		selectedProfile.RawPublicKeyBytes,
+	); err != nil {
+		return nil, invalidAuthorizedKey("validate public-key blob: %v", err)
+	}
+	return renderManagedAuthorizedKeyForTarget(selectedProfile.AuthenticationKeyType, fields[1], target, notAfter)
 }
 
 // ValidateAuthorizedKeys requires zero or more byte-for-byte canonical,
@@ -146,7 +190,14 @@ func ValidateAuthorizedKeys(config Config, contents []byte) (AuthorizedKeysRepor
 }
 
 func renderManagedAuthorizedKey(config Config, algorithm, blob string, notAfter time.Time) ([]byte, error) {
-	prefix, err := managedAuthorizedKeyPrefix(config, algorithm, notAfter)
+	return renderManagedAuthorizedKeyForTarget(algorithm, blob, netip.AddrPortFrom(
+		canonicalAddress(config.Target.Address),
+		uint16(config.Target.Port),
+	), notAfter)
+}
+
+func renderManagedAuthorizedKeyForTarget(algorithm, blob string, target netip.AddrPort, notAfter time.Time) ([]byte, error) {
+	prefix, err := managedAuthorizedKeyPrefixForTarget(algorithm, target, notAfter)
 	if err != nil {
 		return nil, err
 	}
@@ -154,6 +205,13 @@ func renderManagedAuthorizedKey(config Config, algorithm, blob string, notAfter 
 }
 
 func managedAuthorizedKeyPrefix(config Config, algorithm string, notAfter time.Time) (string, error) {
+	return managedAuthorizedKeyPrefixForTarget(algorithm, netip.AddrPortFrom(
+		canonicalAddress(config.Target.Address),
+		uint16(config.Target.Port),
+	), notAfter)
+}
+
+func managedAuthorizedKeyPrefixForTarget(algorithm string, target netip.AddrPort, notAfter time.Time) (string, error) {
 	if notAfter.IsZero() {
 		return "", invalidAuthorizedKey("authorization expiry is required")
 	}
@@ -161,13 +219,9 @@ func managedAuthorizedKeyPrefix(config Config, algorithm string, notAfter time.T
 	if err != nil {
 		return "", invalidAuthorizedKey("authorization expiry: %v", err)
 	}
-	target := netip.AddrPortFrom(
-		canonicalAddress(config.Target.Address),
-		uint16(config.Target.Port),
-	).String()
 	return fmt.Sprintf(
 		"restrict,port-forwarding,permitopen=\"%s\",expiry-time=\"%s\" %s ",
-		target,
+		target.String(),
 		expiry,
 		algorithm,
 	), nil

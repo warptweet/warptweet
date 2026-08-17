@@ -7,7 +7,7 @@ import {
 } from "../lib/install";
 ---
 
-<section class="install-panel" aria-labelledby="install-title">
+<div class="install-panel">
   <div class="install-panel__copy">
     <p class="section-kicker">Install</p>
     <h2 id="install-title">Get WarpTweet onto the machine.</h2>
@@ -48,10 +48,17 @@ import {
           Planned next action after install:
           <code>{enrollCommand}</code>
         </p>
+        <ul class="install-links">
+          <li><a href="https://github.com/warptweet/warptweet">Source</a></li>
+          <li><a href="https://github.com/warptweet/warptweet/blob/main/docs/2026-08-16_product-quickstart.md">Quickstart</a></li>
+          <li><a href="https://github.com/warptweet/warptweet/blob/main/SECURITY.md">Security</a></li>
+          <li><a href="https://github.com/warptweet/warptweet/blob/main/docs/2026-08-16_adoption-and-release-strategy.md">Release status</a></li>
+          <li><a href="https://github.com/warptweet/warptweet/blob/main/packaging/evidence/public-release.json">Evidence gate</a></li>
+        </ul>
       </div>
     )
   }
-</section>
+</div>
 
 {
   homebrewCtaEnabled && (

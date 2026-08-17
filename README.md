@@ -6,7 +6,7 @@ WarpTweet is not a general-purpose SSH client or VPN. It permits one declared lo
 
 ## Current status
 
-This repository contains a working WarpTweet controller and tested local process boundary, but it is not yet a supported end-to-end release.
+This repository contains a working WarpTweet controller and tested local process boundary, but it is not yet a supported end-to-end release. The current implementation and release contract is [`docs/2026-08-16_adoption-and-release-strategy.md`](docs/2026-08-16_adoption-and-release-strategy.md). The product quickstart is [`docs/2026-08-16_product-quickstart.md`](docs/2026-08-16_product-quickstart.md). The public Homebrew CTA stays dark until v2 package evidence passes.
 
 - The public CLI path is `host` on the service machine and `connect <label>.wtinvite` on the client. `host` installs policy, starts and verifies the restricted SSH and pinned-TLS enrollment listeners, and writes the invite. The old `gateway`, `server init`, and `server invite` surfaces are rejected rather than aliased.
 - Enrollment, rotation, and revocation use TLS 1.3 with hybrid `X25519MLKEM768` key agreement and an Ed25519 SPKI pinned by the invite. The client generates its management capability locally; the server stores only its digest and journals authorization changes for exact retry and restart recovery.

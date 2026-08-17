@@ -62,7 +62,7 @@ Do not assume authority to SSH to the host, install packages, change firewalls, 
 Client:
 
 ```text
-warptweet connect <invite.wtinvite> [--restart unless-stopped|manual]
+warptweet connect <invite.wtinvite> [--listen-port 15432] [--restart unless-stopped|manual]
 warptweet routes [--json]
 warptweet status [<route-id>] [--json]
 warptweet up <route-id>
@@ -71,7 +71,16 @@ warptweet rotate <route-id>
 warptweet revoke <route-id>
 ```
 
-`connect` defaults to desired state `running` and restart policy `unless-stopped`. `down` persists stopped. Expired grants do not self-renew.
+`connect` defaults to desired state `running` and restart policy `unless-stopped`. Refuse mesh, subnet, shell, wildcard, SOCKS, public ingress, and automatic-renewal requests.
+
+## Cleanup and revocation
+
+```text
+warptweet down <route-id>
+warptweet revoke <route-id>
+```
+
+Expired access requires a new host-approved invite. Do not claim reboot restoration, live expiry, or package install until the matching package evidence exists.
 
 Invite lifetime (15 minutes, single-use) is not authorization expiry (30 days by default). A stopped client is not revoked. An expired grant is not merely offline.
 
@@ -92,5 +101,5 @@ Inspect `compose.yaml` or `docker compose config` read-only to identify a servic
 
 - Confirm the local listener is `127.0.0.1` and the persisted port.
 - Treat tunnel readiness as tunnel readiness, never as database health.
-- After reboot, `unless-stopped` routes should restore; `down` and `manual` must not start merely because the machine rebooted.
-- At authorization expiry the route becomes blocked and requires a fresh host-approved invite.
+- Treat `expiry_expected` as local clock inference. Only host acknowledgment or observed enforcement is expired or revoked.
+- After a source-tested reboot path, `unless-stopped` should restore and `manual`/`down` should not start merely because the machine rebooted. Package reboot evidence is still required before stating that as a released fact.

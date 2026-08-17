@@ -9,9 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 
 	"warptweet.com/warptweet/internal/config"
 	"warptweet.com/warptweet/internal/installlayout"
+	"warptweet.com/warptweet/internal/routestate"
 )
 
 const maxClientIdentityBytes = 1 << 20
@@ -130,6 +132,12 @@ func linuxProductionClientStateLayout() clientStateLayout {
 				mode:        0o750,
 				group:       clientNodeServiceGroup,
 			},
+			installlayout.ClientRoutesDirectory: {
+				description: "client routes directory",
+				directory:   true,
+				mode:        0o755,
+				group:       clientNodeRootGroup,
+			},
 		},
 	}
 }
@@ -189,6 +197,12 @@ func darwinProductionClientStateLayout() clientStateLayout {
 				mode:        0o750,
 				group:       clientNodeServiceGroup,
 			},
+			installlayout.DarwinClientRoutesDirectory: {
+				description: "client routes directory",
+				directory:   true,
+				mode:        0o755,
+				group:       clientNodeRootGroup,
+			},
 		},
 	}
 }
@@ -238,9 +252,9 @@ func globalKnownHostsClientNodePolicy() clientNodePolicy {
 // rendering continue to use config.Load.
 func LoadProductionClientManifest(path string) (config.Config, error) {
 	layout := productionClientStateLayout()
-	if path != layout.manifestPath {
+	if path != layout.manifestPath && !isRouteGenerationAsset(path, "client.wt") {
 		return config.Config{}, fmt.Errorf(
-			"production client manifest path must be exactly %q",
+			"production client manifest path must be exactly %q or a reserved route generation",
 			layout.manifestPath,
 		)
 	}
@@ -255,7 +269,7 @@ func loadProductionClientManifestWithDependencies(
 	path string,
 	dependencies clientAssetDependencies,
 ) (config.Config, error) {
-	if path != dependencies.layout.manifestPath {
+	if path != dependencies.layout.manifestPath && !isRouteGenerationAsset(path, "client.wt") {
 		return config.Config{}, fmt.Errorf(
 			"production client manifest path must be exactly %q",
 			dependencies.layout.manifestPath,
@@ -488,6 +502,9 @@ func openClientStateFile(
 	for _, component := range components[:len(components)-1] {
 		nextPath := filepath.Join(currentPath, component)
 		directoryPolicy, ok := dependencies.layout.directoryPolicies[nextPath]
+		if !ok {
+			directoryPolicy, ok = routeGenerationDirectoryPolicy(nextPath)
+		}
 		if !ok {
 			_ = current.Close()
 			return nil, fmt.Errorf("client-state directory %q is outside the fixed layout", nextPath)
@@ -799,4 +816,57 @@ func readBoundedClientStateFile(file *os.File, maximum int64, description string
 		return nil, fmt.Errorf("%s exceeds %d bytes", description, maximum)
 	}
 	return contents, nil
+}
+
+func isRouteGenerationAsset(path, name string) bool {
+	routeID, generation, file, ok := parseRouteGenerationPath(path)
+	return ok && file == name && routestate.ValidateRouteID(routeID) == nil && routestate.ValidateGenerationID(generation) == nil
+}
+
+func routeGenerationDirectoryPolicy(path string) (clientNodePolicy, bool) {
+	linux := installlayout.ClientRoutesDirectory
+	darwin := installlayout.DarwinClientRoutesDirectory
+	for _, root := range []string{linux, darwin} {
+		if path == root {
+			return clientNodePolicy{description: "client routes directory", directory: true, mode: 0o755, group: clientNodeRootGroup}, true
+		}
+		if !strings.HasPrefix(path, root+string(os.PathSeparator)) {
+			continue
+		}
+		relative := strings.TrimPrefix(path, root+string(os.PathSeparator))
+		parts := strings.Split(relative, string(os.PathSeparator))
+		switch len(parts) {
+		case 1:
+			if routestate.ValidateRouteID(parts[0]) != nil {
+				return clientNodePolicy{}, false
+			}
+			return clientNodePolicy{description: "route directory", directory: true, mode: 0o750, group: clientNodeServiceGroup}, true
+		case 2:
+			if routestate.ValidateRouteID(parts[0]) != nil || parts[1] != "generations" {
+				return clientNodePolicy{}, false
+			}
+			return clientNodePolicy{description: "route generations directory", directory: true, mode: 0o750, group: clientNodeServiceGroup}, true
+		case 3:
+			if routestate.ValidateRouteID(parts[0]) != nil || parts[1] != "generations" || routestate.ValidateGenerationID(parts[2]) != nil {
+				return clientNodePolicy{}, false
+			}
+			return clientNodePolicy{description: "route generation directory", directory: true, mode: 0o750, group: clientNodeServiceGroup}, true
+		}
+	}
+	return clientNodePolicy{}, false
+}
+
+func parseRouteGenerationPath(path string) (routeID, generation, name string, ok bool) {
+	for _, root := range []string{installlayout.ClientRoutesDirectory, installlayout.DarwinClientRoutesDirectory} {
+		if !strings.HasPrefix(path, root+string(os.PathSeparator)) {
+			continue
+		}
+		relative := strings.TrimPrefix(path, root+string(os.PathSeparator))
+		parts := strings.Split(relative, string(os.PathSeparator))
+		if len(parts) != 4 || parts[1] != "generations" {
+			return "", "", "", false
+		}
+		return parts[0], parts[2], parts[3], true
+	}
+	return "", "", "", false
 }

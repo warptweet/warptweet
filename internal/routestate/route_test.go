@@ -59,6 +59,15 @@ func TestStoreReserveAndListInvalid(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("WriteIntent: %v", err)
 	}
+	if err := store.WriteReceipt(Receipt{
+		RouteID:                      "staging-db",
+		ClientID:                     "aaaaaaaaaaaaaaaa",
+		AuthorizationNotAfter:        "2026-09-15T12:00:00Z",
+		AuthorizationDurationSeconds: 2592000,
+		Generation:                   "20260816T120000Z",
+	}); err != nil {
+		t.Fatalf("WriteReceipt: %v", err)
+	}
 	if err := os.Mkdir(filepath.Join(store.Root, "broken"), 0o700); err != nil {
 		t.Fatalf("mkdir broken: %v", err)
 	}
@@ -119,6 +128,33 @@ func TestLoadIntentRejectsStrictJSONFailures(t *testing.T) {
 	}
 }
 
+func TestReservePortRejectsCollision(t *testing.T) {
+	t.Parallel()
+
+	store := Store{Root: t.TempDir()}
+	if err := store.ReservePort("staging-db", 15432); err != nil {
+		t.Fatalf("ReservePort: %v", err)
+	}
+	if err := store.ReservePort("other-db", 15432); err == nil {
+		t.Fatal("ReservePort accepted a listen-port collision")
+	}
+	if exists, err := store.Exists("other-db"); err != nil || exists {
+		t.Fatalf("colliding route left behind exists=%v err=%v", exists, err)
+	}
+}
+
+func TestReservePortIdempotentForSameRouteAndPort(t *testing.T) {
+	t.Parallel()
+
+	store := Store{Root: t.TempDir()}
+	if err := store.ReservePort("staging-db", 15432); err != nil {
+		t.Fatalf("ReservePort: %v", err)
+	}
+	if err := store.ReservePort("staging-db", 15432); err != nil {
+		t.Fatalf("ReservePort retry: %v", err)
+	}
+}
+
 func TestWriteReceiptRequiresHostExpiry(t *testing.T) {
 	t.Parallel()
 
@@ -135,6 +171,7 @@ func TestWriteReceiptRequiresHostExpiry(t *testing.T) {
 		AcceptedAt:                   time.Now().UTC().Format(time.RFC3339Nano),
 		AuthorizationNotAfter:        time.Now().UTC().Add(30 * 24 * time.Hour).Format(time.RFC3339Nano),
 		AuthorizationDurationSeconds: 2592000,
+		Generation:                   "20260816T120000Z",
 	}); err != nil {
 		t.Fatalf("WriteReceipt: %v", err)
 	}

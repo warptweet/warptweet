@@ -4,11 +4,12 @@
       <div aria-hidden="true"><i></i><i></i><i></i></div>
       <span id="server-cli-title">Machine with the service</span>
     </header>
-    <pre tabindex="0" aria-label="WarpTweet host command example"><code>{`$ warptweet host --to 5432
+    <pre tabindex="0" aria-label="WarpTweet host command example"><code>{`$ warptweet host --to 127.0.0.1:5432 --name staging-db --access-for 30d
 
 host ready
 target  127.0.0.1:5432
-invite  db-1.wtinvite`}</code></pre>
+invite  staging-db.wtinvite
+access  30d`}</code></pre>
   </article>
 
   <article class="terminal-card terminal-card--client" aria-labelledby="client-cli-title">
@@ -16,12 +17,12 @@ invite  db-1.wtinvite`}</code></pre>
       <div aria-hidden="true"><i></i><i></i><i></i></div>
       <span id="client-cli-title">Your laptop</span>
     </header>
-    <pre tabindex="0" aria-label="WarpTweet connect command example"><code>{`$ warptweet connect db-1.wtinvite
+    <pre tabindex="0" aria-label="WarpTweet connect command example"><code>{`$ warptweet connect staging-db.wtinvite --listen-port 15432 --restart unless-stopped
 
 connected
 open     127.0.0.1:15432
 service  127.0.0.1:5432
 
-# point your app at localhost:15432`}</code></pre>
+# point your app at 127.0.0.1:15432`}</code></pre>
   </article>
 </div>

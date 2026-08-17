@@ -1,0 +1,60 @@
+--- a/Makefile.in
++++ b/Makefile.in
+@@ -147,7 +147,8 @@ SSHD_SESSION_OBJS=sshd-session.o auth-rhosts.o auth-passwd.o \
+ 	loginrec.o auth-pam.o auth-shadow.o auth-sia.o \
+ 	sftp-server.o sftp-common.o \
+-	uidswap.o platform-listen.o $(SKOBJS)
++	uidswap.o platform-listen.o warptweet-grant.o $(SKOBJS)
+ 
+ SSHD_AUTH_OBJS=sshd-auth.o \
+ 	auth2-methods.o \
+--- a/monitor.c
++++ b/monitor.c
+@@ -98,6 +98,7 @@
+ #include "sk-api.h"
+ #include "srclimit.h"
++#include "warptweet-grant.h"
+ 
+ #ifdef GSSAPI
+ static Gssctxt *gsscontext = NULL;
+@@ -1230,8 +1231,13 @@ mm_answer_keyverify(struct ssh *ssh, int sock, struct sshbuf *m)
+ 	}
+ 	auth2_record_key(authctxt, ret == 0, key);
+ 
+-	if (key_blobtype == MM_USERKEY && ret == 0)
++	if (key_blobtype == MM_USERKEY && ret == 0) {
++		if (warptweet_grant_register(blob, bloblen) != 0) {
++			error("WarpTweet grant registration rejected public key");
++			ret = -1;
++		} else
+ 			auth_activate_options(ssh, key_opts);
++	}
+ 	monitor_reset_key_state();
+ 
+ 	sshbuf_reset(m);
+@@ -1698,6 +1704,7 @@ mm_answer_term(struct ssh *ssh, int sock, struct sshbuf *req)
+ 	res = WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+ 
+ 	/* Terminate process */
++	warptweet_grant_unregister();
+ 	exit(res);
+ }
+ 
+--- a/sshd-session.c
++++ b/sshd-session.c
+@@ -108,6 +108,7 @@
+ #include "sk-api.h"
+ #include "srclimit.h"
+ #include "dh.h"
++#include "warptweet-grant.h"
+ 
+ /* Re-exec fds */
+ #define REEXEC_DEVCRYPTO_RESERVED_FD	(STDERR_FILENO + 1)
+@@ -1540,6 +1541,7 @@ cleanup_exit(int i)
+ 	if (the_active_state != NULL && mm_is_monitor())
+ 		audit_event(the_active_state, SSH_CONNECTION_ABANDON);
+ #endif
++	warptweet_grant_unregister();
+ 	/* Override default fatal exit value when auth was attempted */
+ 	if (i == 255 && auth_attempted)
+ 		_exit(EXIT_AUTH_ATTEMPTED);

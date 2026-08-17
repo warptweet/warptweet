@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -22,6 +23,7 @@ import (
 
 	"warptweet.com/warptweet/internal/enrollment"
 	"warptweet.com/warptweet/internal/grant"
+	"warptweet.com/warptweet/internal/grantsession"
 	"warptweet.com/warptweet/internal/installlayout"
 	"warptweet.com/warptweet/internal/profile"
 	"warptweet.com/warptweet/internal/server"
@@ -46,7 +48,11 @@ func runServerEnrollListen(ctx context.Context, arguments []string, stdout, stde
 		return err
 	}
 	now := time.Now().UTC()
+	if grant.ClockIsBlocked(installlayout.HostClockBlockedPath) {
+		return fmt.Errorf("host clock: blocked until warptweet server clock-recover")
+	}
 	if _, err := grant.ObserveClock(installlayout.HostClockObservationPath, now); err != nil {
+		_ = enterBlockedClock(manifest, err)
 		return fmt.Errorf("host clock: %w", err)
 	}
 	if err := reconcileExpiredGrants(manifest, now); err != nil {
@@ -108,6 +114,7 @@ func runServerEnrollListen(ctx context.Context, arguments []string, stdout, stde
 	}
 
 	go reconcileGrantsUntil(ctx, manifest)
+	go serveGrantSessions(ctx)
 
 	select {
 	case <-ctx.Done():
@@ -184,6 +191,7 @@ func newEnrollmentHandler(manifest server.Config, hostPublicKey string, enrollPo
 			if err := json.Unmarshal(body, &manage); err != nil {
 				return nil, err
 			}
+			authority := productionGrantAuthority()
 			record, err := enrollment.RevokeClient(
 				installlayout.ClientsDirectory,
 				manage,
@@ -191,6 +199,8 @@ func newEnrollmentHandler(manifest server.Config, hostPublicKey string, enrollPo
 				func(publicKey string) error {
 					return removeAuthorizedKeyForPublicKey(manifest.AuthorizedKeysPath, publicKey)
 				},
+				authority.Terminate,
+				authority.VerifyGone,
 			)
 			if err != nil {
 				return nil, err
@@ -415,6 +425,27 @@ func acceptAndAuthorize(
 	request enrollment.EnrollmentRequest,
 	now time.Time,
 ) (enrollment.EnrollmentProof, error) {
+	var proof enrollment.EnrollmentProof
+	err := withHostStateLock(func() error {
+		accepted, acceptErr := acceptAndAuthorizeLocked(manifest, hostPublicKey, request, now)
+		if acceptErr != nil {
+			return acceptErr
+		}
+		proof = accepted
+		return nil
+	})
+	return proof, err
+}
+
+func acceptAndAuthorizeLocked(
+	manifest server.Config,
+	hostPublicKey string,
+	request enrollment.EnrollmentRequest,
+	now time.Time,
+) (enrollment.EnrollmentProof, error) {
+	if grant.ClockIsBlocked(installlayout.HostClockBlockedPath) {
+		return enrollment.EnrollmentProof{}, errors.New("host clock is blocked")
+	}
 	if err := os.MkdirAll(installlayout.ClientsDirectory, 0o700); err != nil {
 		return enrollment.EnrollmentProof{}, err
 	}
@@ -458,10 +489,10 @@ func grantExpireOps(manifest server.Config, record enrollment.ClientRecord) gran
 			return verifyAuthorizedKeyAbsent(manifest.AuthorizedKeysPath, publicKey)
 		},
 		TerminateSession: func(clientID, generation, publicKeySHA256 string) error {
-			return terminateGrantSession(clientID, generation, publicKeySHA256)
+			return productionGrantAuthority().Terminate(clientID, generation, publicKeySHA256)
 		},
 		VerifySessionGone: func(clientID, generation, publicKeySHA256 string) error {
-			return verifyGrantSessionGone(clientID, generation, publicKeySHA256)
+			return productionGrantAuthority().VerifyGone(clientID, generation, publicKeySHA256)
 		},
 		BurnManagementToken: func() (string, error) {
 			token, err := enrollment.GenerateManagementToken()
@@ -502,7 +533,9 @@ func reconcileGrantsUntil(ctx context.Context, manifest server.Config) {
 			now := time.Now().UTC()
 			records, listErr := enrollment.ListClients(installlayout.ClientsDirectory)
 			if _, err := grant.ObserveClock(installlayout.HostClockObservationPath, now); err != nil {
-				slog.Error("host clock invalid during grant reconcile", "err", err)
+				if closeErr := enterBlockedClock(manifest, err); closeErr != nil {
+					slog.Error("host clock fail-close incomplete", "err", closeErr)
+				}
 			} else if err := reconcileExpiredGrants(manifest, now); err != nil {
 				slog.Error("grant expiry reconcile failed", "err", err)
 			} else if err := reconcileManagedAuthorizations(manifest); err != nil {
@@ -544,50 +577,52 @@ func nextGrantReconcileDelay(now time.Time, records []enrollment.ClientRecord) t
 	return delay
 }
 
-func terminateGrantSession(clientID, generation, publicKeySHA256 string) error {
-	store := grantSessionStore{root: installlayout.GrantSessionsDirectory}
-	refs, err := store.lookup(clientID, generation, publicKeySHA256)
-	if err != nil {
-		return err
+func productionGrantAuthority() *grantsession.Authority {
+	return &grantsession.Authority{
+		Root:        installlayout.GrantSessionsDirectory,
+		Clients:     installlayout.ClientsDirectory,
+		LockPath:    installlayout.GrantAuthorityLockPath,
+		ExpectedExe: installlayout.SSHDSessionPath,
 	}
-	for _, ref := range refs {
-		if ref.PID <= 0 {
-			continue
-		}
-		err := signalPID(ref.PID, syscall.SIGTERM)
-		if err != nil && !processAlivePID(ref.PID) {
-			continue
-		}
-		deadline := time.Now().Add(2 * time.Second)
-		for time.Now().Before(deadline) && processAlivePID(ref.PID) {
-			time.Sleep(20 * time.Millisecond)
-		}
-		if processAlivePID(ref.PID) {
-			_ = signalPID(ref.PID, syscall.SIGKILL)
-		}
-	}
-	return nil
 }
 
-func verifyGrantSessionGone(clientID, generation, publicKeySHA256 string) error {
-	store := grantSessionStore{root: installlayout.GrantSessionsDirectory}
-	refs, err := store.lookup(clientID, generation, publicKeySHA256)
-	if err != nil {
+func serveGrantSessions(ctx context.Context) {
+	server := grantsession.Server{
+		Socket:    installlayout.GrantSessionSocket,
+		Authority: productionGrantAuthority(),
+	}
+	if err := server.Serve(ctx); err != nil {
+		slog.Error("grant session authority stopped", "err", err)
+	}
+}
+
+func enterBlockedClock(manifest server.Config, reason error) error {
+	if err := grant.WriteBlockedClock(installlayout.HostClockBlockedPath, reason.Error(), time.Now().UTC()); err != nil {
 		return err
 	}
-	for _, ref := range refs {
-		if processAlivePID(ref.PID) {
-			return fmt.Errorf("session pid %d for client %s generation %s is still running", ref.PID, clientID, generation)
-		}
+	if err := os.WriteFile(manifest.AuthorizedKeysPath, nil, 0o644); err != nil {
+		return err
 	}
-	live, err := liveDataPlaneSessionCount()
+	if err := productionGrantAuthority().TerminateAll(); err != nil {
+		return err
+	}
+	if _, err := exec.LookPath("systemctl"); err == nil {
+		cmd := exec.Command("systemctl", "stop", "warptweet-sshd.service")
+		cmd.Env = []string{"LANG=C", "LC_ALL=C"}
+		_ = cmd.Run()
+	}
+	return fmt.Errorf("host clock blocked: %w", reason)
+}
+
+func grantTarget(record enrollment.ClientRecord) (netip.AddrPort, error) {
+	addr, err := netip.ParseAddr(record.TargetAddress)
 	if err != nil {
-		return fmt.Errorf("cannot prove session termination: %w", err)
+		return netip.AddrPort{}, fmt.Errorf("grant target address: %w", err)
 	}
-	if len(refs) == 0 && live > 0 {
-		return fmt.Errorf("matching session ownership is unknown while %d data-plane session(s) remain", live)
+	if record.TargetPort == 0 {
+		return netip.AddrPort{}, fmt.Errorf("grant target port is missing")
 	}
-	return store.clear(clientID, generation, publicKeySHA256)
+	return netip.AddrPortFrom(addr, record.TargetPort), nil
 }
 
 func signalPID(pid int, signal syscall.Signal) error {
@@ -685,7 +720,15 @@ func reconcileManagedAuthorizations(manifest server.Config) error {
 				if grant.ReadyToExpire(notAfter, time.Now().UTC()) {
 					continue
 				}
-				line, err := server.RenderAuthorizedKey(manifest, []byte(record.PublicKey), notAfter)
+				grantTarget, err := grantTarget(record)
+				if err != nil {
+					return fmt.Errorf("client %s: %w", record.ClientID, err)
+				}
+				manifestTarget := netip.AddrPortFrom(manifest.Target.Address, uint16(manifest.Target.Port))
+				if grantTarget != manifestTarget {
+					return fmt.Errorf("client %s grant target %s does not match host target %s", record.ClientID, grantTarget, manifestTarget)
+				}
+				line, err := server.RenderAuthorizedKeyForTarget(manifest, []byte(record.PublicKey), grantTarget, notAfter)
 				if err != nil {
 					return fmt.Errorf("client %s: %w", record.ClientID, err)
 				}

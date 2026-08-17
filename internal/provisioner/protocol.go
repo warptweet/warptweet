@@ -23,23 +23,25 @@ const (
 	MaxRequestBytes  = 1 << 20
 	MaxResponseBytes = 1 << 20
 
-	ActionEnroll = "enroll"
-	ActionUp     = "up"
-	ActionStatus = "status"
-	ActionDown   = "down"
-	ActionRotate = "rotate"
-	ActionRevoke = "revoke"
+	ActionEnroll  = "enroll"
+	ActionConnect = "connect"
+	ActionUp      = "up"
+	ActionStatus  = "status"
+	ActionDown    = "down"
+	ActionRotate  = "rotate"
+	ActionRevoke  = "revoke"
 )
 
 type Request struct {
-	Version     int             `json:"version"`
-	Action      string          `json:"action"`
-	Invite      json.RawMessage `json:"invite,omitempty"`
-	Proof       json.RawMessage `json:"proof,omitempty"`
-	TunnelID    string          `json:"tunnel_id,omitempty"`
-	ListenPort  uint16          `json:"listen_port,omitempty"`
-	PrepareOnly bool            `json:"prepare_only,omitempty"`
-	Once        bool            `json:"once,omitempty"`
+	Version       int             `json:"version"`
+	Action        string          `json:"action"`
+	Invite        json.RawMessage `json:"invite,omitempty"`
+	Proof         json.RawMessage `json:"proof,omitempty"`
+	TunnelID      string          `json:"tunnel_id,omitempty"`
+	ListenPort    uint16          `json:"listen_port,omitempty"`
+	RestartPolicy string          `json:"restart_policy,omitempty"`
+	PrepareOnly   bool            `json:"prepare_only,omitempty"`
+	Once          bool            `json:"once,omitempty"`
 }
 
 type Response struct {
@@ -53,18 +55,21 @@ func ValidateRequest(request Request) error {
 		return fmt.Errorf("unsupported provisioner protocol version %d", request.Version)
 	}
 	switch request.Action {
-	case ActionEnroll:
+	case ActionEnroll, ActionConnect:
 		if len(request.Invite) == 0 || len(request.Invite) > MaxRequestBytes {
 			return errors.New("enroll requires a bounded invite document")
 		}
 		if request.TunnelID != "" {
 			return errors.New("enroll tunnel_id is derived from the invite")
 		}
-		if request.Once {
-			return errors.New("once is valid only for up")
+		if request.Once && request.Action != ActionConnect {
+			return errors.New("once is valid only for up or connect")
 		}
 		if len(request.Proof) > MaxRequestBytes {
 			return errors.New("enrollment proof exceeds the request limit")
+		}
+		if request.RestartPolicy != "" && request.RestartPolicy != "unless-stopped" && request.RestartPolicy != "manual" {
+			return errors.New("restart_policy must be unless-stopped or manual")
 		}
 	case ActionStatus:
 		if len(request.Invite) != 0 || len(request.Proof) != 0 || request.Once || request.ListenPort != 0 || request.PrepareOnly {

@@ -13,12 +13,12 @@ import UseCases from "../components/UseCases.astro";
 
 const title = "WarpTweet | Hybrid post-quantum tunnelling";
 const description =
-  "Named hybrid post-quantum service tunnels: one local port to one authorized TCP destination, with endpoint identities, versioned .wt routes, and fail-closed profile enforcement.";
+  "Reach Postgres, a private API, or another TCP service on a remote machine through localhost. No exposed target-service port, VPN mesh, or general-purpose SSH access for the ongoing client.";
 
 const productFacts = [
-  "Named service routes",
-  "Endpoint identities",
-  "Fail-closed hybrid profile",
+  "Open source",
+  "No account",
+  "No subscription",
   "No shell, one destination"
 ];
 ---
@@ -30,23 +30,53 @@ const productFacts = [
   <main id="main-content">
     <section class="product-hero frame" aria-labelledby="hero-title">
       <div class="product-hero__copy">
-        <p class="section-kicker">Managed service tunnels</p>
+        <p class="section-kicker">One service. One local port.</p>
         <h1 id="hero-title">Hybrid post-quantum <em>tunnelling.</em></h1>
         <p class="product-hero__deck">
-          Open a named path from a local port to one authorized remote service. WarpTweet binds
-          endpoint identities, a versioned route manifest, and an exact hybrid cryptographic
-          profile, then fail-closes anything weaker. Not a VPN. Not a shell.
+          Reach Postgres, a private API, or another TCP service on a remote machine through
+          localhost. No exposed target-service port, VPN mesh, or general-purpose SSH access for
+          the ongoing client.
+        </p>
+        <p class="product-hero__concrete">
+          Query Postgres in remote Docker Compose at <code>localhost:15432</code>.
         </p>
         <div class="hero__actions">
-          <a class="button button--primary" href="#install">Install <span aria-hidden="true">↓</span></a>
-          <a class="button button--text" href="#cli">Use WarpTweet</a>
-          <a class="button button--text" href="#protocol">Explore the protocol</a>
+          <a class="button button--primary" href="#how-it-works">See how it works</a>
+          <a class="button button--text" href="https://github.com/warptweet/warptweet">View source</a>
         </div>
       </div>
       <ProductRoute />
       <ul class="product-facts" aria-label="WarpTweet highlights">
         {productFacts.map((fact) => <li>{fact}</li>)}
       </ul>
+    </section>
+
+    <section class="section frame" id="use-cases" aria-labelledby="use-cases-title">
+      <div class="section-heading section-heading--split">
+        <div>
+          <p class="section-kicker">Use cases</p>
+          <h2 id="use-cases-title">The first jobs WarpTweet is for.</h2>
+        </div>
+        <p>
+          WarpTweet narrows host and network authority. The database credential still controls
+          what a client can do, and any retained root or SSH access remains outside this boundary.
+        </p>
+      </div>
+      <UseCases />
+    </section>
+
+    <section class="section frame" id="how-it-works" aria-labelledby="how-it-works-title">
+      <div class="section-heading section-heading--split">
+        <div>
+          <p class="section-kicker">Workflow</p>
+          <h2 id="how-it-works-title">Host, invite, connect, localhost.</h2>
+        </div>
+        <p>
+          The host grants one exact numeric target. The client enrolls once and keeps a durable
+          route until that grant expires.
+        </p>
+      </div>
+      <CLIShowcase />
     </section>
 
     <section class="section frame install-section" id="install" aria-labelledby="install-title">
@@ -143,19 +173,7 @@ const productFacts = [
       </div>
     </section>
 
-    <section class="section frame" id="use-cases" aria-labelledby="use-cases-title">
-      <div class="section-heading section-heading--split">
-        <div>
-          <p class="section-kicker">Built for TCP</p>
-          <h2 id="use-cases-title">Bring remote services close.</h2>
-        </div>
-        <p>
-          If a service speaks TCP, WarpTweet can give it a named local endpoint on another managed
-          machine.
-        </p>
-      </div>
-      <UseCases />
-    </section>
+
 
     <section class="open-source-section" id="open-source" aria-labelledby="open-source-title">
       <div class="frame open-source-section__inner">

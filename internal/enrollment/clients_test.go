@@ -83,7 +83,7 @@ func TestAcceptStoresClientAndRevokeBurnsToken(t *testing.T) {
 	}
 	if _, err := RevokeClient(clients, revokeRequest, now.Add(2*time.Minute), func(string) error {
 		return errors.New("injected authorization removal failure")
-	}); err == nil {
+	}, nil, nil); err == nil {
 		t.Fatal("RevokeClient succeeded despite injected authorization failure")
 	}
 	pendingRevoke, err := LoadClient(clients, result.ClientID)
@@ -93,7 +93,7 @@ func TestAcceptStoresClientAndRevokeBurnsToken(t *testing.T) {
 	if pendingRevoke.Status != ClientStatusRevocationPending {
 		t.Fatalf("status=%s, want revocation_pending", pendingRevoke.Status)
 	}
-	revoked, err := RevokeClient(clients, revokeRequest, now.Add(2*time.Minute), func(string) error { return nil })
+	revoked, err := RevokeClient(clients, revokeRequest, now.Add(2*time.Minute), func(string) error { return nil }, nil, nil)
 	if err != nil {
 		t.Fatalf("RevokeClient: %v", err)
 	}
@@ -104,7 +104,7 @@ func TestAcceptStoresClientAndRevokeBurnsToken(t *testing.T) {
 		ClientID:        result.ClientID,
 		ManagementToken: testManagementToken,
 		TunnelID:        "laptop-1",
-	}, now.Add(3*time.Minute), func(string) error { return nil })
+	}, now.Add(3*time.Minute), func(string) error { return nil }, nil, nil)
 	if err != nil {
 		t.Fatalf("second RevokeClient should be idempotent: %v", err)
 	}

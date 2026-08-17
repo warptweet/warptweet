@@ -47,6 +47,7 @@ install -d -o root -g root -m 0700 /var/lib/warptweet
 install -d -o root -g root -m 0700 /var/lib/warptweet/invites
 install -d -o root -g root -m 0700 /var/lib/warptweet/clients
 install -d -o root -g root -m 0700 /var/lib/warptweet/server
+install -d -o root -g root -m 0700 /var/lib/warptweet/sessions
 install -d -o root -g root -m 0755 /run/warptweet
 install -d -o root -g root -m 0750 /run/warptweet/server
 touch /opt/warptweet/etc/authorized_keys/warptweet
@@ -65,6 +66,7 @@ if command -v systemctl >/dev/null 2>&1; then
     # Enable enrollment control plane when package-installed; start only after
     # warptweet host has written server.wt, host key, and enrollment state.
     systemctl enable warptweet-enroll.service >/dev/null 2>&1 || true
+    systemctl enable warptweet-reconcile.service >/dev/null 2>&1 || true
 fi
 
 exit 0

@@ -4,7 +4,8 @@ LC_ALL=C
 export LC_ALL
 
 # Idempotent uninstall for the WarpTweet macOS client package.
-# Identity material is preserved unless the operator passes --destroy-identity.
+# Identity material is preserved unless the operator passes --destroy-identity
+# or uses brew uninstall --zap, which is the documented destructive authority.
 
 WT_DESTROY_IDENTITY=0
 for WT_ARG in "$@"; do

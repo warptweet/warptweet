@@ -207,43 +207,48 @@ func TestBuildConnectArgs(t *testing.T) {
 		name       string
 		yes        bool
 		once       bool
+		listenPort uint16
 		wantEnroll []string
 		wantUp     []string
 	}{
 		{
 			name:       "no flags",
-			wantEnroll: []string{"invite.wtinvite"},
+			wantEnroll: []string{"--restart", "unless-stopped", "invite.wtinvite"},
 			wantUp:     []string{"tunnel-1"},
 		},
 		{
 			name:       "yes true",
 			yes:        true,
-			wantEnroll: []string{"--yes", "invite.wtinvite"},
+			listenPort: 15432,
+			wantEnroll: []string{"--listen-port", "15432", "--restart", "unless-stopped", "--yes", "invite.wtinvite"},
 			wantUp:     []string{"tunnel-1"},
 		},
 		{
 			name:       "yes false",
 			yes:        false,
-			wantEnroll: []string{"invite.wtinvite"},
+			listenPort: 15432,
+			wantEnroll: []string{"--listen-port", "15432", "--restart", "unless-stopped", "invite.wtinvite"},
 			wantUp:     []string{"tunnel-1"},
 		},
 		{
 			name:       "once true",
 			once:       true,
-			wantEnroll: []string{"invite.wtinvite"},
+			listenPort: 15432,
+			wantEnroll: []string{"--listen-port", "15432", "--restart", "unless-stopped", "invite.wtinvite"},
 			wantUp:     []string{"--once", "tunnel-1"},
 		},
 		{
 			name:       "once false",
 			once:       false,
-			wantEnroll: []string{"invite.wtinvite"},
+			listenPort: 15432,
+			wantEnroll: []string{"--listen-port", "15432", "--restart", "unless-stopped", "invite.wtinvite"},
 			wantUp:     []string{"tunnel-1"},
 		},
 	}
 	for _, test := range cases {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			gotEnroll := buildConnectEnrollArgs("invite.wtinvite", test.yes, "")
+			gotEnroll := buildConnectEnrollArgs("invite.wtinvite", test.yes, "", test.listenPort, "unless-stopped")
 			if !reflect.DeepEqual(gotEnroll, test.wantEnroll) {
 				t.Fatalf("enroll args=%v want=%v", gotEnroll, test.wantEnroll)
 			}

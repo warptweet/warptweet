@@ -78,6 +78,12 @@ func (server *Server) Serve(ctx context.Context) error {
 	}
 
 	go func() {
+		if err := reconcileDarwinBoot(ctx, serviceUID, serviceGID); err != nil {
+			slog.Error("darwin boot reconcile failed", "err", err)
+		}
+	}()
+
+	go func() {
 		<-ctx.Done()
 		_ = listener.Close()
 	}()
@@ -124,6 +130,23 @@ func executeRequest(ctx context.Context, request Request, serviceUID, serviceGID
 	switch request.Action {
 	case ActionEnroll:
 		return executeEnroll(ctx, request)
+	case ActionConnect:
+		output, err := executeEnroll(ctx, request)
+		if err != nil || request.PrepareOnly {
+			return output, err
+		}
+		tunnelID := request.TunnelID
+		if tunnelID == "" {
+			tunnelID = enrollOutputTunnelID(output)
+		}
+		if tunnelID == "" {
+			return output, errors.New("connect enroll output missing tunnel_id")
+		}
+		started, startErr := startTunnel(ctx, tunnelID, request.Once, serviceUID, serviceGID)
+		if startErr != nil {
+			return output, startErr
+		}
+		return started, nil
 	case ActionUp:
 		return startTunnel(ctx, request.TunnelID, request.Once, serviceUID, serviceGID)
 	case ActionStatus:
@@ -181,6 +204,9 @@ func executeEnroll(ctx context.Context, request Request) (string, error) {
 	if request.ListenPort != 0 {
 		arguments = append(arguments, "--listen-port", strconv.Itoa(int(request.ListenPort)))
 	}
+	if request.RestartPolicy != "" {
+		arguments = append(arguments, "--restart", request.RestartPolicy)
+	}
 	if len(request.Proof) != 0 {
 		proofFile, proofErr := os.CreateTemp(requestRoot, ".proof-*")
 		if proofErr != nil {
@@ -207,6 +233,8 @@ func startTunnel(ctx context.Context, tunnelID string, once bool, serviceUID, se
 	if err := config.ValidateTunnelID(tunnelID); err != nil {
 		return "", err
 	}
+	unlock := lockTunnelStart(tunnelID)
+	defer unlock()
 	store := lifecycle.Store{Root: installlayout.DarwinClientRuntimeRoot}
 	label := installlayout.DarwinTunnelLabelPrefix + tunnelID
 	job, err := inspectTunnelJob(ctx, label)
@@ -224,7 +252,7 @@ func startTunnel(ctx context.Context, tunnelID string, once bool, serviceUID, se
 	if err := ensureTunnelRuntime(tunnelID, serviceUID, serviceGID); err != nil {
 		return "", err
 	}
-	plistPath, label, err := writeTunnelPlist(tunnelID, once, desiredRunAtLoad(tunnelID))
+	plistPath, label, err := writeTunnelPlist(tunnelID, once, false)
 	if err != nil {
 		return "", err
 	}
@@ -423,14 +451,13 @@ func renderTunnelPlist(tunnelID string, once, runAtLoad bool) ([]byte, string, e
 <plist version="1.0"><dict>
 <key>Label</key><string>%s</string>
 <key>ProgramArguments</key><array>
-<string>%s</string><string>run</string><string>--config</string><string>%s</string>
-<string>--tunnel</string><string>%s</string>%s<string>--managed-lifecycle</string>
+<string>%s</string><string>run</string><string>--route</string><string>%s</string>%s<string>--managed-lifecycle</string>
 </array>
 <key>UserName</key><string>%s</string><key>GroupName</key><string>%s</string>
 <key>RunAtLoad</key>%s<key>KeepAlive</key><false/>
 <key>ThrottleInterval</key><integer>5</integer><key>ProcessType</key><string>Background</string>
 </dict></plist>
-`, label, installlayout.DarwinControllerPath, installlayout.DarwinClientManifestPath,
+`, label, installlayout.DarwinControllerPath,
 		tunnelID, onceArgument, installlayout.DarwinClientServiceUser, installlayout.DarwinClientServiceGroup,
 		runAtLoadValue)
 	return []byte(contents), label, nil
@@ -651,4 +678,49 @@ func encodeOutput(value any) (string, error) {
 		return "", err
 	}
 	return builder.String(), nil
+}
+
+func enrollOutputTunnelID(output string) string {
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimSpace(output)), &payload); err != nil {
+		return ""
+	}
+	tunnelID, _ := payload["tunnel_id"].(string)
+	return tunnelID
+}
+
+var tunnelStartLocks sync.Map
+
+func lockTunnelStart(tunnelID string) func() {
+	value, _ := tunnelStartLocks.LoadOrStore(tunnelID, &sync.Mutex{})
+	mu := value.(*sync.Mutex)
+	mu.Lock()
+	return mu.Unlock
+}
+
+func reconcileDarwinBoot(ctx context.Context, serviceUID, serviceGID uint32) error {
+	store := routestate.Store{Root: installlayout.DarwinClientRoutesDirectory}
+	routes, err := store.List()
+	if err != nil {
+		return err
+	}
+	bootID := darwinBootID()
+	var errs []error
+	for _, route := range routes {
+		if route.Invalid {
+			continue
+		}
+		if _, _, err := writeTunnelPlist(route.RouteID, true, false); err != nil {
+			slog.Error("darwin boot plist failed", "route_id", route.RouteID, "err", err)
+			errs = append(errs, fmt.Errorf("route %s plist: %w", route.RouteID, err))
+			continue
+		}
+		if !routestate.ShouldStartAtBoot(route.Intent, bootID) {
+			continue
+		}
+		if _, err := startTunnel(ctx, route.RouteID, true, serviceUID, serviceGID); err != nil {
+			slog.Error("darwin boot start failed", "route_id", route.RouteID, "err", err)
+		}
+	}
+	return errors.Join(errs...)
 }

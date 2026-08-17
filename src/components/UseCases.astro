@@ -1,9 +1,9 @@
 ---
 const cases = [
-  ["DB", "Databases", "PostgreSQL, MySQL, Redis, and other data services through a named local port."],
-  ["API", "Private APIs", "Connect applications and tools to APIs running on another machine."],
-  ["DEV", "Development services", "Use remote dashboards, test environments, build systems, and package services locally."],
-  ["M2M", "Machine services", "Create an authenticated path from one machine to one declared service on another."]
+  ["PG", "Remote Compose Postgres", "Publish Postgres only on host loopback, then query it at a stable localhost port."],
+  ["AI", "Agent-scoped access", "Give an agent a database socket, not SSH access to the host. Database credentials remain separate."],
+  ["ST", "Durable staging route", "Unless-stopped restores after reboot until the host grant expires; manual does not restore after reboot."],
+  ["API", "Private TCP service", "Reach an internal API or admin port without publishing it or building a mesh."]
 ];
 ---
 

@@ -40,7 +40,7 @@ func ObserveClock(path string, now time.Time) (ClockObservation, error) {
 	if now.Year() < 2020 || now.Year() > 2200 {
 		return ClockObservation{}, fmt.Errorf("%w: current time %s is implausible", ErrInvalidClock, now.Format(RFC3339UTC))
 	}
-	existing, err := loadClockObservation(path)
+	existing, err := LoadClockObservation(path)
 	if err != nil && !os.IsNotExist(err) {
 		return ClockObservation{}, err
 	}
@@ -51,6 +51,9 @@ func ObserveClock(path string, now time.Time) (ClockObservation, error) {
 		}
 		if now.Add(MaterialRollback).Before(previous) {
 			return ClockObservation{}, fmt.Errorf("%w: wall clock rolled back from %s to %s", ErrInvalidClock, existing.LastObservedUTC, now.Format(RFC3339UTC))
+		}
+		if now.Before(previous) {
+			return existing, nil
 		}
 	}
 	encoded, err := FormatUTC(now)
@@ -68,7 +71,8 @@ func ObserveClock(path string, now time.Time) (ClockObservation, error) {
 	return observation, nil
 }
 
-func loadClockObservation(path string) (ClockObservation, error) {
+// LoadClockObservation reads the durable high-water clock mark.
+func LoadClockObservation(path string) (ClockObservation, error) {
 	contents, err := os.ReadFile(path)
 	if err != nil {
 		return ClockObservation{}, err

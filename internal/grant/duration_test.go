@@ -87,6 +87,25 @@ func TestAuthorizationNotAfterExact(t *testing.T) {
 	}
 }
 
+func TestParseUTCRejectsNonUTCOffsets(t *testing.T) {
+	t.Parallel()
+
+	if _, err := ParseUTC("2026-08-16T12:00:00-07:00"); err == nil {
+		t.Fatal("accepted non-UTC offset")
+	}
+	if _, err := ParseUTC("2026-08-16T12:00:00+00:00"); err == nil {
+		t.Fatal("accepted offset-form UTC")
+	}
+	got, err := ParseUTC("2026-08-16T12:00:00Z")
+	if err != nil {
+		t.Fatalf("ParseUTC Z: %v", err)
+	}
+	want := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	if !got.Equal(want) {
+		t.Fatalf("ParseUTC Z=%s want %s", got, want)
+	}
+}
+
 func TestOpenSSHExpiryTimeUTC(t *testing.T) {
 	t.Parallel()
 

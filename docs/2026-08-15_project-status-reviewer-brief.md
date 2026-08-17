@@ -5,6 +5,11 @@ Audience: top-down technical / product review
 Version in tree: `0.1.0-dev` (not a public release tag)  
 Website Homebrew CTA: **dark** (`packaging/evidence/public-release.json`)
 
+This document is a **historical 2026-08-15 snapshot**. The current
+implementation and release contract are defined in
+`docs/2026-08-16_adoption-and-release-strategy.md`. Do not treat this brief as
+current release truth.
+
 This document is a snapshot for orientation. Prefer linked design docs for
 normative contracts. It is not release evidence.
 

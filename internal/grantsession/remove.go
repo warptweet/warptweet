@@ -1,0 +1,10 @@
+package grantsession
+
+import "os"
+
+func removeIfPresent(path string) error {
+	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return nil
+}

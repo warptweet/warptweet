@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 
 	"warptweet.com/warptweet/internal/routestate"
@@ -17,10 +18,12 @@ func runConnect(ctx context.Context, arguments []string, stdout, stderr io.Write
 	proofPath := onceStringFlag{name: "--proof"}
 	once := onceBoolFlag{name: "--once"}
 	restart := onceStringFlag{name: "--restart"}
+	listenPort := onceStringFlag{name: "--listen-port"}
 	flags.Var(&yes, "yes", "skip interactive confirmation")
 	flags.Var(&proofPath, "proof", "path to server enrollment proof JSON")
 	flags.Var(&once, "once", "do not restart after exit when bringing the tunnel up")
 	flags.Var(&restart, "restart", "durable restart policy: unless-stopped or manual")
+	flags.Var(&listenPort, "listen-port", "loopback listen port (default 15432)")
 	positionals, err := parseFlagsAllowArgs(flags, arguments)
 	if err != nil {
 		return err
@@ -37,8 +40,16 @@ func runConnect(ctx context.Context, arguments []string, stdout, stderr io.Write
 	if err != nil {
 		return err
 	}
+	var port uint16
+	if listenPort.value != "" {
+		parsed, err := strconv.ParseUint(listenPort.value, 10, 16)
+		if err != nil || parsed == 0 {
+			return errors.New("listen-port must be a nonzero TCP port")
+		}
+		port = uint16(parsed)
+	}
 
-	enrollArgs := buildConnectEnrollArgs(invitePath, yes.value, proofPath.value)
+	enrollArgs := buildConnectEnrollArgs(invitePath, yes.value, proofPath.value, port, restartPolicy)
 
 	// Capture enroll JSON on a buffer; interactive prompts use user-facing stdout.
 	var enrollOut strings.Builder
@@ -50,10 +61,6 @@ func runConnect(ctx context.Context, arguments []string, stdout, stderr io.Write
 	if err != nil {
 		return err
 	}
-	if err := persistConnectDesiredState(tunnelID, restartPolicy); err != nil {
-		return fmt.Errorf("persist restart policy: %w", err)
-	}
-
 	upArgs := buildConnectUpArgs(tunnelID, once.value)
 	var upOut strings.Builder
 	if err := runUp(ctx, upArgs, &upOut, stderr, dependencies); err != nil {
@@ -69,9 +76,12 @@ func runConnect(ctx context.Context, arguments []string, stdout, stderr io.Write
 	return err
 }
 
-func buildConnectEnrollArgs(invitePath string, yes bool, proofPath string) []string {
-	// Flags before the invite path: flag.Parse stops at the first positional.
+func buildConnectEnrollArgs(invitePath string, yes bool, proofPath string, listenPort uint16, restartPolicy string) []string {
 	var args []string
+	if listenPort != 0 {
+		args = append(args, "--listen-port", strconv.Itoa(int(listenPort)))
+	}
+	args = append(args, "--restart", restartPolicy)
 	if yes {
 		args = append(args, "--yes")
 	}

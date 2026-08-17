@@ -85,6 +85,8 @@ install -m 0644 "$WT_REPOSITORY_ROOT/packaging/systemd/warptweet-enroll.service"
     "$WT_ROOT/lib/systemd/system/warptweet-enroll.service"
 install -m 0644 "$WT_REPOSITORY_ROOT/packaging/systemd/warptweet-tunnel@.service" \
     "$WT_ROOT/lib/systemd/system/warptweet-tunnel@.service"
+install -m 0644 "$WT_REPOSITORY_ROOT/packaging/systemd/warptweet-reconcile.service" \
+    "$WT_ROOT/lib/systemd/system/warptweet-reconcile.service"
 install -m 0755 "$WT_REPOSITORY_ROOT/packaging/linux/postinst.sh" \
     "$WT_OUTPUT_INPUT/postinst.sh"
 install -m 0755 "$WT_REPOSITORY_ROOT/packaging/linux/prerm.sh" \
@@ -140,6 +142,7 @@ cp -a $WT_ROOT/. %{buildroot}/
 /lib/systemd/system/warptweet-sshd.service
 /lib/systemd/system/warptweet-enroll.service
 /lib/systemd/system/warptweet-tunnel@.service
+/lib/systemd/system/warptweet-reconcile.service
 /var/empty/warptweet-sshd
 /var/lib/warptweet
 /run/warptweet
@@ -165,6 +168,13 @@ if command -v dpkg-deb >/dev/null 2>&1; then
     install -m 0755 "$WT_OUTPUT_INPUT/prerm.sh" "$WT_DEB_ROOT/DEBIAN/prerm"
     dpkg-deb --root-owner-group --build "$WT_DEB_ROOT" \
         "$WT_OUTPUT_INPUT/warptweet_${WT_VERSION}_${WT_DEB_ARCH}.deb"
+    if [ -n "${WARPTWEET_LINUX_GPG_KEY:-}" ]; then
+        "$WT_REPOSITORY_ROOT/scripts/sign-linux-deb.sh" \
+            "$WT_OUTPUT_INPUT/warptweet_${WT_VERSION}_${WT_DEB_ARCH}.deb"
+    elif [ "${WARPTWEET_REQUIRE_SIGNED_LINUX:-}" = "1" ]; then
+        echo "WARPTWEET_LINUX_GPG_KEY is required when WARPTWEET_REQUIRE_SIGNED_LINUX=1" >&2
+        exit 65
+    fi
 fi
 
 if command -v rpmbuild >/dev/null 2>&1; then

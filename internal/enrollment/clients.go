@@ -157,7 +157,7 @@ func AuthenticateManagement(directory string, request ManagementRequest) (Client
 
 // RevokeClient persists revocation intent before removing authorization. Exact
 // retries authenticated by the previous token remain idempotent.
-func RevokeClient(directory string, request ManagementRequest, now time.Time, removeAuthorization func(string) error) (ClientRecord, error) {
+func RevokeClient(directory string, request ManagementRequest, now time.Time, removeAuthorization func(string) error, terminateSession, verifySessionGone func(clientID, generation, publicKeySHA256 string) error) (ClientRecord, error) {
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
@@ -208,6 +208,16 @@ func RevokeClient(directory string, request ManagementRequest, now time.Time, re
 	}
 	if err := removeAuthorization(record.PublicKey); err != nil {
 		return ClientRecord{}, err
+	}
+	if terminateSession != nil {
+		if err := terminateSession(record.ClientID, record.Generation, record.PublicKeySHA256); err != nil {
+			return ClientRecord{}, err
+		}
+	}
+	if verifySessionGone != nil {
+		if err := verifySessionGone(record.ClientID, record.Generation, record.PublicKeySHA256); err != nil {
+			return ClientRecord{}, err
+		}
 	}
 	burned := make([]byte, ManagementTokenBytes)
 	if _, err := rand.Read(burned); err != nil {

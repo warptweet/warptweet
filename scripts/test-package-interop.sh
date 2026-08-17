@@ -282,6 +282,20 @@ run_case_not_run engine-and-package-tamper negative "requires dual-host tamper h
 run_case_not_run bounded-floods negative "requires dual-host flood harness"
 run_case_not_run availability-faults negative "requires dual-host fault harness"
 
+WT_SCHEMA=${WARPTWEET_EVIDENCE_SCHEMA_VERSION:-2}
+if [ "$WT_SCHEMA" = "2" ]; then
+    run_case_not_run second-client-grant positive "requires dual-host second client"
+    run_case_not_run two-independent-routes positive "requires dual-route package matrix"
+    run_case_not_run reboot-unless-stopped-manual-down positive "requires real reboot runners"
+    run_case_not_run live-expiry-and-revocation positive "requires live session expiry runners"
+    run_case_not_run clock-rollback-fail-closed positive "requires packaged clock manipulation"
+    run_case_not_run target-change-denial positive "requires packaged host target-change runner"
+    run_case_not_run compose-loopback-postgres positive "requires Compose loopback package runner"
+    run_case_not_run agent-skill-delivery positive "requires published skill HTTP bytes"
+    run_case_not_run pid-reuse-and-stop-failure negative "requires PID-reuse package harness"
+    run_case_not_run silent-renewal-and-port-reassignment negative "requires renewal and port-collision package harness"
+fi
+
 WT_FINISHED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 WT_RESULTS_JSON=$(awk 'BEGIN{printf "["} {if(n++)printf ","; printf "%s",$0} END{printf "]"}' "$WT_RESULTS_FILE")
 
@@ -296,7 +310,51 @@ if [ -e "$WARPTWEET_EVIDENCE_OUTPUT" ] || [ -L "$WARPTWEET_EVIDENCE_OUTPUT" ]; t
     fail "evidence output path must not already exist"
 fi
 
-cat >"$WARPTWEET_EVIDENCE_OUTPUT" <<EOF
+WT_PKG_TO_PKG=${WARPTWEET_INTEROP_PACKAGE_TO_PACKAGE:-true}
+WT_SRC_SUB=${WARPTWEET_INTEROP_SOURCE_TREE_SUBSTITUTION:-false}
+case "$WT_PKG_TO_PKG" in true|false) ;; *) WT_PKG_TO_PKG=false ;; esac
+case "$WT_SRC_SUB" in true|false) ;; *) WT_SRC_SUB=false ;; esac
+if [ "${WARPTWEET_ALLOW_SOURCE_TREE:-}" = "1" ]; then
+    WT_SRC_SUB=true
+    WT_PKG_TO_PKG=false
+fi
+
+if [ "$WT_SCHEMA" = "2" ]; then
+    cat >"$WARPTWEET_EVIDENCE_OUTPUT" <<EOF
+{
+  "kind": "warptweet.release-evidence",
+  "schema_version": 2,
+  "contract_id": "warptweet.adoption-release.v1",
+  "contract_checklist_sha256": "5fa66b60627b8cf2dc4720d14719c8368f6749cbd0ebc262d1990ebd4b95b2e3",
+  "release_version": "$WARPTWEET_RELEASE_VERSION",
+  "source_commit": "$WARPTWEET_SOURCE_COMMIT",
+  "clean_tree_proof": "${WARPTWEET_CLEAN_TREE_PROOF:-not_recorded}",
+  "client_package_sha256": "$WARPTWEET_CLIENT_PACKAGE_SHA256",
+  "server_package_sha256": "$WARPTWEET_SERVER_PACKAGE_SHA256",
+  "client_artifact_profile_id": "$WARPTWEET_CLIENT_ARTIFACT_PROFILE_ID",
+  "server_artifact_profile_id": "$WARPTWEET_SERVER_ARTIFACT_PROFILE_ID",
+  "client_engine_manifest_sha256": "$WARPTWEET_CLIENT_ENGINE_MANIFEST_SHA256",
+  "server_engine_manifest_sha256": "$WARPTWEET_SERVER_ENGINE_MANIFEST_SHA256",
+  "client_platform": "$WT_CLIENT_PLATFORM",
+  "server_platform": "$WT_SERVER_PLATFORM",
+  "client_architecture": "$WT_CLIENT_ARCH",
+  "server_architecture": "$WT_SERVER_ARCH",
+  "host_target": "${WARPTWEET_HOST_TARGET:-127.0.0.1:5432}",
+  "authorization_policy": "${WARPTWEET_AUTHORIZATION_POLICY:-30d-default-365d-max}",
+  "route_count": ${WARPTWEET_ROUTE_COUNT:-0},
+  "restart_policies": ["unless-stopped", "manual"],
+  "test_identity": "$WT_TEST_IDENTITY",
+  "commands": ["./scripts/test-package-interop.sh"],
+  "started_at": "$WT_STARTED_AT",
+  "finished_at": "$WT_FINISHED_AT",
+  "redacted_log_path": "$WT_REDACTED_LOG",
+  "package_to_package": $WT_PKG_TO_PKG,
+  "source_tree_substitution": $WT_SRC_SUB,
+  "results": $WT_RESULTS_JSON
+}
+EOF
+else
+    cat >"$WARPTWEET_EVIDENCE_OUTPUT" <<EOF
 {
   "kind": "warptweet.release-evidence",
   "schema_version": 1,
@@ -317,11 +375,12 @@ cat >"$WARPTWEET_EVIDENCE_OUTPUT" <<EOF
   "started_at": "$WT_STARTED_AT",
   "finished_at": "$WT_FINISHED_AT",
   "redacted_log_path": "$WT_REDACTED_LOG",
-  "package_to_package": true,
-  "source_tree_substitution": false,
+  "package_to_package": $WT_PKG_TO_PKG,
+  "source_tree_substitution": $WT_SRC_SUB,
   "results": $WT_RESULTS_JSON
 }
 EOF
+fi
 
 pass "wrote evidence document $WARPTWEET_EVIDENCE_OUTPUT"
 

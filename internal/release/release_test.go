@@ -110,6 +110,9 @@ func TestReleaseScriptsParseAsPOSIXShell(t *testing.T) {
 		"test-server-preflight.sh",
 		"test-live-tunnel.sh",
 		"test-package-interop.sh",
+		"release-candidate.sh",
+		"sign-linux-deb.sh",
+		"apply-openssh-grant-hook.sh",
 	} {
 		path := filepath.Join(root, "scripts", name)
 		command := exec.Command("sh", "-n", path)
@@ -1793,6 +1796,15 @@ case "${2##*/}" in
 			printf '%s\n' "$WT_FILE-fixture" >"$WT_SOURCE_DIRECTORY/$WT_FILE"
 			chmod 0700 "$WT_SOURCE_DIRECTORY/$WT_FILE"
 		done
+		printf '%s\n' 'uidswap.o platform-listen.o $(SKOBJS)' >"$WT_SOURCE_DIRECTORY/Makefile.in"
+		printf '%s\n' '#include "srclimit.h"' >"$WT_SOURCE_DIRECTORY/monitor.c"
+		printf '%s\n' 'int mm_answer_keyverify(void) {' >>"$WT_SOURCE_DIRECTORY/monitor.c"
+		printf '%s\n' '	if (key_blobtype == MM_USERKEY && ret == 0)' >>"$WT_SOURCE_DIRECTORY/monitor.c"
+		printf '%s\n' '		auth_activate_options(ssh, key_opts);' >>"$WT_SOURCE_DIRECTORY/monitor.c"
+		printf '%s\n' '/* Terminate process */' >>"$WT_SOURCE_DIRECTORY/monitor.c"
+		printf '%s\n' '	exit(res);' >>"$WT_SOURCE_DIRECTORY/monitor.c"
+		printf '%s\n' '#include "dh.h"' >"$WT_SOURCE_DIRECTORY/sshd-session.c"
+		printf '%s\n' '	if (i == 255 && auth_attempted)' >>"$WT_SOURCE_DIRECTORY/sshd-session.c"
 		printf '%s\n' licence-fixture >"$WT_SOURCE_DIRECTORY/LICENCE"
 		;;
 	openssl-source-archive.tar.gz)

@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"warptweet.com/warptweet/internal/enrollment"
+	"warptweet.com/warptweet/internal/grant"
 	"warptweet.com/warptweet/internal/installlayout"
 	"warptweet.com/warptweet/internal/server"
 )
@@ -29,7 +30,7 @@ const (
 
 func runServer(ctx context.Context, arguments []string, stdout, stderr io.Writer) error {
 	if len(arguments) == 0 {
-		return errors.New("server requires an internal subcommand: enroll-listen, accept-enrollment, revoke, status")
+		return errors.New("server requires an internal subcommand: enroll-listen, accept-enrollment, revoke, status, clock-recover")
 	}
 	switch arguments[0] {
 	case "enroll-listen":
@@ -40,6 +41,8 @@ func runServer(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		return runServerRevoke(arguments[1:], stdout, stderr)
 	case "status":
 		return runServerStatus(ctx, arguments[1:], stdout, stderr)
+	case "clock-recover":
+		return runServerClockRecover(ctx, arguments[1:], stdout, stderr)
 	case "init", "invite":
 		return fmt.Errorf("server %s was replaced by warptweet host", arguments[0])
 	default:
@@ -138,7 +141,32 @@ func runServerStatus(ctx context.Context, arguments []string, stdout, stderr io.
 		status["clients"] = clientCounts
 		status["client_total"] = len(clients)
 	}
+	status["clock_blocked"] = grant.ClockIsBlocked(installlayout.HostClockBlockedPath)
 	return writeJSON(stdout, status)
+}
+
+func runServerClockRecover(ctx context.Context, arguments []string, stdout, stderr io.Writer) error {
+	if len(arguments) != 0 {
+		return errors.New("server clock-recover accepts no arguments")
+	}
+	_ = stderr
+	if _, err := grant.ObserveClock(installlayout.HostClockObservationPath, time.Now().UTC()); err != nil {
+		return fmt.Errorf("clock is still untrusted: %w", err)
+	}
+	manifest, err := server.Load(installlayout.ServerManifestPath)
+	if err != nil {
+		return err
+	}
+	if err := reconcileManagedAuthorizations(manifest); err != nil {
+		return fmt.Errorf("reconcile managed authorizations: %w", err)
+	}
+	if err := grant.ClearBlockedClock(installlayout.HostClockBlockedPath); err != nil {
+		return err
+	}
+	if _, err := ensureSSHDStarted(ctx, manifest); err != nil {
+		return fmt.Errorf("restart data plane: %w", err)
+	}
+	return writeJSON(stdout, map[string]any{"status": "clock_recovered"})
 }
 
 func parseEndpoint(value string) (netip.AddrPort, error) {

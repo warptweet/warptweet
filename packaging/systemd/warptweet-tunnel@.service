@@ -3,7 +3,7 @@ Description=WarpTweet managed tunnel %i
 After=network-online.target
 Wants=network-online.target
 AssertFileIsExecutable=/opt/warptweet/bin/warptweet
-AssertPathExists=/etc/warptweet/client.wt
+AssertPathExists=/etc/warptweet/routes/%i/active.json
 StartLimitIntervalSec=60
 StartLimitBurst=5
 
@@ -12,7 +12,7 @@ Type=notify
 NotifyAccess=main
 User=warptweet-client
 Group=warptweet-client
-ExecStart=/opt/warptweet/bin/warptweet run --config /etc/warptweet/client.wt --tunnel %i --once
+ExecStart=/opt/warptweet/bin/warptweet run --route %i --once
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=15s

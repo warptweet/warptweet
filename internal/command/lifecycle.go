@@ -35,10 +35,12 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	prepareOnly := onceBoolFlag{name: "--prepare-only"}
 	listenPort := onceStringFlag{name: "--listen-port"}
 	proofPath := onceStringFlag{name: "--proof"}
+	restart := onceStringFlag{name: "--restart"}
 	flags.Var(&yes, "yes", "skip interactive confirmation")
 	flags.Var(&prepareOnly, "prepare-only", "stage local generation without activating production state")
 	flags.Var(&listenPort, "listen-port", "loopback listen port (default 15432)")
 	flags.Var(&proofPath, "proof", "path to server enrollment proof JSON")
+	flags.Var(&restart, "restart", "durable restart policy: unless-stopped or manual")
 	positionals, err := parseFlagsAllowArgs(flags, arguments)
 	if err != nil {
 		return err
@@ -61,6 +63,10 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 			return errors.New("listen-port must be a nonzero TCP port")
 		}
 		view.ListenPort = uint16(port)
+	}
+	restartPolicy, err := routestate.ParseRestartPolicy(restart.value)
+	if err != nil {
+		return err
 	}
 
 	if !yes.value {
@@ -89,13 +95,18 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		offlineProof = proofRaw
 	}
 	if handled, err := callInstalledProvisioner(ctx, provisioner.Request{
-		Version:     provisioner.ProtocolVersion,
-		Action:      provisioner.ActionEnroll,
-		Invite:      append(json.RawMessage(nil), raw...),
-		Proof:       offlineProof,
-		ListenPort:  view.ListenPort,
-		PrepareOnly: prepareOnly.value,
+		Version:       provisioner.ProtocolVersion,
+		Action:        provisioner.ActionEnroll,
+		Invite:        append(json.RawMessage(nil), raw...),
+		Proof:         offlineProof,
+		ListenPort:    view.ListenPort,
+		RestartPolicy: restartPolicy,
+		PrepareOnly:   prepareOnly.value,
 	}, stdout); handled {
+		return err
+	}
+	routeStore, err := productionRouteStore()
+	if err != nil {
 		return err
 	}
 
@@ -210,16 +221,29 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		})
 	}
 
+	if err := routeStore.ReservePort(view.TunnelID, view.ListenPort); err != nil {
+		return err
+	}
+	generationDir, err := routeStore.GenerationDir(view.TunnelID, generationID)
+	if err != nil {
+		return err
+	}
+	if err := ensureRouteGenerationDirectories(generationDir); err != nil {
+		return err
+	}
 	if err := activateGeneration(
-		layout.ClientManifestPath,
-		layout.ClientIdentityPath,
-		layout.ClientKnownHostsPath,
-		layout.ClientGlobalKnownHostsPath,
+		filepath.Join(generationDir, "client.wt"),
+		filepath.Join(generationDir, "identity"),
+		filepath.Join(generationDir, "known_hosts"),
+		filepath.Join(generationDir, "known_hosts.empty"),
 		identityPath,
 		manifestStage,
 		knownHostsStage,
 		emptyTrust,
 	); err != nil {
+		return err
+	}
+	if err := routeStore.Activate(view.TunnelID, generationID); err != nil {
 		return err
 	}
 
@@ -248,7 +272,7 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	if err := writeEnrollmentReceipt(layout.ClientManifestPath, receipt); err != nil {
 		return err
 	}
-	if err := persistRouteEnrollment(view.TunnelID, listenEndpoint, receipt, routestate.RestartUnlessStopped); err != nil {
+	if err := persistRouteEnrollment(view.TunnelID, listenEndpoint, receipt, restartPolicy); err != nil {
 		return err
 	}
 	if err := os.RemoveAll(stageRoot); err != nil {
@@ -275,7 +299,7 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		"authorization_not_after":        proof.AuthorizationNotAfter,
 		"authorization_duration_seconds": proof.AuthorizationDurationSeconds,
 		"desired_state":                  routestate.DesiredRunning,
-		"restart_policy":                 routestate.RestartUnlessStopped,
+		"restart_policy":                 restartPolicy,
 		"target_health":                  lifecycle.TargetHealthNotChecked,
 		"next":                           "warptweet up " + view.TunnelID,
 	})
@@ -338,7 +362,14 @@ func runUp(ctx context.Context, arguments []string, stdout, stderr io.Writer, de
 		TargetHealth: lifecycle.TargetHealthNotChecked,
 	})
 
-	manifest, err := dependencies.loadProductionClientManifest(layout.ClientManifestPath)
+	routeStore, routeErr := productionRouteStore()
+	manifestPath := layout.ClientManifestPath
+	if routeErr == nil {
+		if resolved, resolveErr := routeStore.ManifestPath(tunnelID); resolveErr == nil {
+			manifestPath = resolved
+		}
+	}
+	manifest, err := dependencies.loadProductionClientManifest(manifestPath)
 	if err != nil {
 		_ = store.Write(lifecycle.State{TunnelID: tunnelID, Phase: lifecycle.PhaseFailed, Error: err.Error(), TargetHealth: lifecycle.TargetHealthNotChecked})
 		return err
@@ -354,7 +385,10 @@ func runUp(ctx context.Context, arguments []string, stdout, stderr io.Writer, de
 	if err != nil {
 		return err
 	}
-	args := []string{"run", "--config", layout.ClientManifestPath, "--tunnel", tunnelID}
+	args := []string{"run", "--route", tunnelID}
+	if manifestPath == layout.ClientManifestPath {
+		args = []string{"run", "--config", layout.ClientManifestPath, "--tunnel", tunnelID}
+	}
 	if once.value || !once.set {
 		// Default to --once for up so package/service managers own restart policy.
 		args = append(args, "--once")
@@ -611,6 +645,22 @@ func runDown(arguments []string, stdout, stderr io.Writer) error {
 		}
 		if processAlive(state.PID) {
 			_ = store.Signal(tunnelID, syscall.SIGKILL)
+			killDeadline := time.Now().Add(2 * time.Second)
+			for time.Now().Before(killDeadline) && processAlive(state.PID) {
+				time.Sleep(50 * time.Millisecond)
+			}
+		}
+		if processAlive(state.PID) {
+			_ = store.Write(lifecycle.State{
+				TunnelID:       tunnelID,
+				Phase:          lifecycle.PhaseFailed,
+				PID:            state.PID,
+				ListenEndpoint: state.ListenEndpoint,
+				TargetHealth:   lifecycle.TargetHealthNotChecked,
+				Generation:     state.Generation,
+				Error:          "process remained after SIGKILL",
+			})
+			return fmt.Errorf("down: process %d remained after SIGKILL", state.PID)
 		}
 	}
 	_ = store.Write(lifecycle.State{
@@ -1124,9 +1174,7 @@ func persistRouteEnrollment(routeID, listenEndpoint string, receipt enrollmentRe
 		return err
 	}
 	if !exists {
-		if err := store.Reserve(routeID); err != nil {
-			return err
-		}
+		return fmt.Errorf("%w: route %q was not reserved before enrollment", routestate.ErrInvalidRoute, routeID)
 	}
 	if err := store.WriteReceipt(routestate.Receipt{
 		InviteID:                     receipt.InviteID,
@@ -1332,7 +1380,10 @@ func authorizationState(receipt routestate.Receipt, state lifecycle.State) strin
 		return "invalid"
 	}
 	if grant.ReadyToExpire(notAfter, time.Now().UTC()) {
-		return "expired"
+		if state.Phase == lifecycle.PhaseFailed || state.Error == "blocked-expired" {
+			return "expired"
+		}
+		return "expiry_expected"
 	}
 	if state.Phase == lifecycle.PhaseReady {
 		return "active"
@@ -1427,14 +1478,17 @@ func runReconcile(ctx context.Context, arguments []string, stdout, stderr io.Wri
 		}
 		if !routestate.ShouldStartAtBoot(route.Intent, bootID) {
 			if route.Intent.DesiredState == routestate.DesiredStopped {
+				_ = projectLinuxTunnel(ctx, route.RouteID, false)
 				_ = runDown([]string{route.RouteID}, io.Discard, stderr)
 			}
 			skipped = append(skipped, route.RouteID)
 			continue
 		}
-		if err := runUp(ctx, []string{route.RouteID}, io.Discard, stderr, dependencies); err != nil {
-			failed[route.RouteID] = err.Error()
-			continue
+		if err := projectLinuxTunnel(ctx, route.RouteID, true); err != nil {
+			if err := runUp(ctx, []string{route.RouteID}, io.Discard, stderr, dependencies); err != nil {
+				failed[route.RouteID] = err.Error()
+				continue
+			}
 		}
 		started = append(started, route.RouteID)
 	}
@@ -1445,6 +1499,27 @@ func runReconcile(ctx context.Context, arguments []string, stdout, stderr io.Wri
 		"skipped": skipped,
 		"failed":  failed,
 	})
+}
+
+func projectLinuxTunnel(ctx context.Context, routeID string, start bool) error {
+	if err := routestate.ValidateRouteID(routeID); err != nil {
+		return err
+	}
+	if _, err := exec.LookPath("systemctl"); err != nil {
+		return err
+	}
+	unit := "warptweet-tunnel@" + routeID + ".service"
+	action := "stop"
+	if start {
+		action = "start"
+	}
+	cmd := exec.CommandContext(ctx, "systemctl", action, unit)
+	cmd.Env = []string{"LANG=C", "LC_ALL=C"}
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s %s: %w (%s)", action, unit, err, strings.TrimSpace(string(output)))
+	}
+	return nil
 }
 
 func firstNonEmptyString(values ...string) string {
@@ -1489,6 +1564,20 @@ func runUninstall(arguments []string, stdout, stderr io.Writer) error {
 		"identity": "preserved",
 		"note":     "package removal remains a platform package manager concern",
 	})
+}
+
+func ensureRouteGenerationDirectories(generationDir string) error {
+	generationsDir := filepath.Dir(generationDir)
+	routeDir := filepath.Dir(generationsDir)
+	for _, dir := range []string{routeDir, generationsDir, generationDir} {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			return err
+		}
+		if err := os.Chmod(dir, 0o750); err != nil {
+			return err
+		}
+	}
+	return ownClientStateFiles("", routeDir, generationsDir, generationDir)
 }
 
 func activateGeneration(

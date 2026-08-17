@@ -49,8 +49,9 @@ cask "warptweet" do
     Start from the invite created by the service host:
       warptweet connect <name>.wtinvite
 
-    Identity material is preserved across uninstall unless you run:
-      sudo "/Library/Application Support/WarpTweet/share/uninstall.sh" --destroy-identity
+    Ordinary uninstall and upgrade preserve identity and route state.
+    brew uninstall --zap is the explicit destructive authorization and
+    removes /Library/Application Support/WarpTweet/state.
 
     Enrollment and tunnel lifecycle commands are required before traffic flows.
   EOS

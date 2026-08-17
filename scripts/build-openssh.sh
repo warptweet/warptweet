@@ -592,6 +592,8 @@ if [ ! -x "$WT_OPENSSL_SOURCE_DIRECTORY/Configure" ] ||
     exit 65
 fi
 
+"$WT_REPOSITORY_ROOT/scripts/apply-openssh-grant-hook.sh" "$WT_OPENSSH_SOURCE_DIRECTORY"
+
 if command -v nproc >/dev/null 2>&1; then
     WT_BUILD_JOBS=$(nproc)
 else

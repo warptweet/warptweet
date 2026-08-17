@@ -1,0 +1,154 @@
+{
+  "kind": "warptweet.release-evidence-checklist",
+  "schema_version": 2,
+  "profile_id": "warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519",
+  "requires_package_to_package": true,
+  "forbids_source_tree_substitution": true,
+  "positive": [
+    {
+      "id": "pkg-signature-and-manifest",
+      "title": "Package signature, bundle manifest, and source receipts"
+    },
+    {
+      "id": "engine-identity-trust-preflight",
+      "title": "Engine, identity, trust, and manifest preflight"
+    },
+    {
+      "id": "invite-enroll-single-use",
+      "title": "Invite enrollment and single-use consumption"
+    },
+    {
+      "id": "composite-auth",
+      "title": "Exact composite host and client authentication"
+    },
+    {
+      "id": "exact-kex-aead",
+      "title": "Exact mlkem768x25519-sha256 KEX and approved AEAD cipher"
+    },
+    {
+      "id": "rekey-same-profile",
+      "title": "At least one rekey under the same exact profile"
+    },
+    {
+      "id": "pid-bound-readiness",
+      "title": "PID-bound authenticated readiness before application transit"
+    },
+    {
+      "id": "deterministic-target-payload",
+      "title": "Deterministic target payload through the loopback listener"
+    },
+    {
+      "id": "stop-restart-rotate-revoke-upgrade",
+      "title": "Clean stop, restart, host-key rotation, client-key rotation, revocation, and package upgrade"
+    },
+    {
+      "id": "second-client-grant",
+      "title": "Second independent client grant to the same host target"
+    },
+    {
+      "id": "two-independent-routes",
+      "title": "Two independent client routes without shared identity or port collision"
+    },
+    {
+      "id": "reboot-unless-stopped-manual-down",
+      "title": "Real reboot of unless-stopped, manual, and explicit down"
+    },
+    {
+      "id": "live-expiry-and-revocation",
+      "title": "Live active-session expiry and revocation at the authority boundary"
+    },
+    {
+      "id": "clock-rollback-fail-closed",
+      "title": "Material clock rollback removes authorization and closes sessions"
+    },
+    {
+      "id": "target-change-denial",
+      "title": "Host target change denied while any invite or grant exists"
+    },
+    {
+      "id": "compose-loopback-postgres",
+      "title": "Remote Docker Compose Postgres bound only to host loopback"
+    },
+    {
+      "id": "agent-skill-delivery",
+      "title": "Canonical Agent Skill published byte-for-byte with version and digest"
+    }
+  ],
+  "negative": [
+    {
+      "id": "classical-only-kex-host-client",
+      "title": "Classical-only KEX, host key, and client key"
+    },
+    {
+      "id": "wrong-host-pin",
+      "title": "Wrong or replaced host pin"
+    },
+    {
+      "id": "malformed-keys-messages",
+      "title": "Malformed, truncated, overlong, trailing-data, and wrong-algorithm keys and messages"
+    },
+    {
+      "id": "invite-fail-closed",
+      "title": "Expired, reused, altered, cross-server, and cross-target invites"
+    },
+    {
+      "id": "forwarding-surface-rejected",
+      "title": "Shell, exec, subsystem, SFTP, SCP, remote, dynamic, agent, X11, stream-local, and TUN forwarding"
+    },
+    {
+      "id": "local-state-mutation",
+      "title": "Listener collision, process substitution, runtime-directory replacement, and state-file mutation"
+    },
+    {
+      "id": "engine-and-package-tamper",
+      "title": "Failed rekey, engine replacement, receipt drift, code-signature failure, and package tampering"
+    },
+    {
+      "id": "bounded-floods",
+      "title": "Bounded connection, authentication, channel, and oversized-packet floods"
+    },
+    {
+      "id": "availability-faults",
+      "title": "Loss of network, server restart, target refusal, and interrupted enrollment"
+    },
+    {
+      "id": "pid-reuse-and-stop-failure",
+      "title": "PID reuse and stop-failure remain non-terminal"
+    },
+    {
+      "id": "silent-renewal-and-port-reassignment",
+      "title": "Silent grant renewal and silent local-port reassignment"
+    }
+  ],
+  "artifact_binding_fields": [
+    "contract_id",
+    "contract_checklist_sha256",
+    "release_version",
+    "source_commit",
+    "clean_tree_proof",
+    "client_package_sha256",
+    "server_package_sha256",
+    "client_artifact_profile_id",
+    "server_artifact_profile_id",
+    "client_engine_manifest_sha256",
+    "server_engine_manifest_sha256",
+    "client_platform",
+    "server_platform",
+    "client_architecture",
+    "server_architecture",
+    "host_target",
+    "authorization_policy",
+    "route_count",
+    "restart_policies",
+    "test_identity",
+    "commands",
+    "started_at",
+    "finished_at",
+    "redacted_log_path"
+  ],
+  "matrix": {
+    "client_artifact_profiles": ["darwin-arm64", "darwin-amd64"],
+    "server_artifact_profiles": ["linux-amd64", "linux-arm64"],
+    "note": "Run every available client architecture against every available server architecture. Missing runner pairs are recorded as not_run, never as pass."
+  }
+}

@@ -201,7 +201,7 @@ func (store Store) Reserve(routeID string) error {
 	if err := os.MkdirAll(store.Root, 0o755); err != nil {
 		return err
 	}
-	if err := os.Mkdir(directory, 0o700); err != nil {
+	if err := os.Mkdir(directory, 0o750); err != nil {
 		if os.IsExist(err) {
 			return fmt.Errorf("%w: route %q already exists", ErrInvalidRoute, routeID)
 		}
@@ -247,13 +247,21 @@ func (store Store) LoadIntent(routeID string) (Intent, error) {
 	return intent, nil
 }
 
-// WriteReceipt persists the host-acknowledged enrollment copy.
-func (store Store) WriteReceipt(receipt Receipt) error {
+// ValidateReceipt checks required host-acknowledged receipt fields.
+func ValidateReceipt(receipt Receipt) error {
 	if err := ValidateRouteID(receipt.RouteID); err != nil {
 		return err
 	}
-	if receipt.AuthorizationNotAfter == "" || receipt.AuthorizationDurationSeconds <= 0 {
-		return fmt.Errorf("%w: receipt must copy host authorization expiry", ErrInvalidRoute)
+	if receipt.ClientID == "" || receipt.AuthorizationNotAfter == "" || receipt.AuthorizationDurationSeconds <= 0 || receipt.Generation == "" {
+		return fmt.Errorf("%w: receipt is missing required authorization fields", ErrInvalidRoute)
+	}
+	return nil
+}
+
+// WriteReceipt persists the host-acknowledged enrollment copy.
+func (store Store) WriteReceipt(receipt Receipt) error {
+	if err := ValidateReceipt(receipt); err != nil {
+		return err
 	}
 	path, err := store.receiptPath(receipt.RouteID)
 	if err != nil {
@@ -313,10 +321,21 @@ func (store Store) List() ([]ListedRoute, error) {
 			continue
 		}
 		listed.Intent = intent
-		if receipt, receiptErr := store.LoadReceipt(entry.Name()); receiptErr == nil {
-			listed.Receipt = receipt
-			listed.Listen = receipt.ListenEndpoint
+		receipt, receiptErr := store.LoadReceipt(entry.Name())
+		if receiptErr != nil {
+			listed.Invalid = true
+			listed.Error = receiptErr.Error()
+			routes = append(routes, listed)
+			continue
 		}
+		if err := ValidateReceipt(receipt); err != nil {
+			listed.Invalid = true
+			listed.Error = err.Error()
+			routes = append(routes, listed)
+			continue
+		}
+		listed.Receipt = receipt
+		listed.Listen = receipt.ListenEndpoint
 		routes = append(routes, listed)
 	}
 	return routes, nil

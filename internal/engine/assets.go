@@ -36,21 +36,21 @@ func validateAssetsWithDependencies(
 	spec ClientSpec,
 	dependencies clientAssetDependencies,
 ) (AssetReport, error) {
-	if spec.IdentityFile != dependencies.layout.identityPath {
+	if spec.IdentityFile != dependencies.layout.identityPath && !isRouteGenerationAsset(spec.IdentityFile, "identity") {
 		return AssetReport{}, fmt.Errorf(
-			"production client identity path must be exactly %q",
+			"production client identity path must be exactly %q or a reserved route generation",
 			dependencies.layout.identityPath,
 		)
 	}
-	if spec.KnownHostsFile != dependencies.layout.knownHostsPath {
+	if spec.KnownHostsFile != dependencies.layout.knownHostsPath && !isRouteGenerationAsset(spec.KnownHostsFile, "known_hosts") {
 		return AssetReport{}, fmt.Errorf(
-			"production client known-hosts path must be exactly %q",
+			"production client known-hosts path must be exactly %q or a reserved route generation",
 			dependencies.layout.knownHostsPath,
 		)
 	}
-	if spec.GlobalKnownHostsFile != dependencies.layout.globalKnownHostsPath {
+	if spec.GlobalKnownHostsFile != dependencies.layout.globalKnownHostsPath && !isRouteGenerationAsset(spec.GlobalKnownHostsFile, "known_hosts.empty") {
 		return AssetReport{}, fmt.Errorf(
-			"production client global known-hosts path must be exactly %q",
+			"production client global known-hosts path must be exactly %q or a reserved route generation",
 			dependencies.layout.globalKnownHostsPath,
 		)
 	}
