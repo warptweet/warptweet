@@ -104,7 +104,9 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 	}
 	if _, err := grant.ObserveClock(installlayout.HostClockObservationPath, time.Now().UTC()); err != nil {
 		if existing, loadErr := server.Load(installlayout.ServerManifestPath); loadErr == nil {
-			_ = enterBlockedClock(existing, err)
+			if closeErr := enterBlockedClock(existing, err); closeErr != nil {
+				return closeErr
+			}
 		}
 		return fmt.Errorf("host clock: %w", err)
 	}
@@ -530,7 +532,7 @@ func withHostStateLock(fn func() error) error {
 func refuseHostTargetChange(targetEndpoint netip.AddrPort) error {
 	existing, err := server.Load(installlayout.ServerManifestPath)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return nil
 		}
 		return err
@@ -561,26 +563,37 @@ func refuseHostTargetChange(targetEndpoint netip.AddrPort) error {
 }
 
 func ensureHostDirectories() error {
+	if err := ensureDirectoryMode(filepath.Dir(installlayout.ServerHostKeyPath), 0o700); err != nil {
+		return err
+	}
+	if err := ensureDirectoryMode(installlayout.AuthorizedKeysDirectory, 0o755); err != nil {
+		return err
+	}
 	for _, path := range []string{
-		filepath.Dir(installlayout.ServerHostKeyPath),
-		installlayout.AuthorizedKeysDirectory,
 		filepath.Dir(installlayout.ServerManifestPath),
 		filepath.Dir(inviteSecretPath),
 	} {
-		if err := os.MkdirAll(path, 0o755); err != nil {
+		if err := ensureDirectoryMode(path, 0o755); err != nil {
 			return err
 		}
 	}
-	if err := os.MkdirAll(inviteDirectory, 0o700); err != nil {
+	if err := ensureDirectoryMode(inviteDirectory, 0o700); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(installlayout.GrantSessionsDirectory, 0o700); err != nil {
+	if err := ensureDirectoryMode(installlayout.GrantSessionsDirectory, 0o700); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(installlayout.ServerEnrollmentDirectory, 0o700); err != nil {
+	if err := ensureDirectoryMode(installlayout.ServerEnrollmentDirectory, 0o700); err != nil {
 		return err
 	}
-	return os.MkdirAll(serverStateDirectory, 0o700)
+	return ensureDirectoryMode(serverStateDirectory, 0o700)
+}
+
+func ensureDirectoryMode(path string, mode os.FileMode) error {
+	if err := os.MkdirAll(path, mode); err != nil {
+		return err
+	}
+	return os.Chmod(path, mode)
 }
 
 func ensureHostIdentity(ctx context.Context) (publicKey string, created bool, err error) {

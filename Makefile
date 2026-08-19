@@ -9,7 +9,7 @@ SITE_DEV_PORT ?= 4321
 
 build:
 	mkdir -p bin
-	GOCACHE=$(GOCACHE) go build -trimpath -o bin/warptweet ./cmd/warptweet
+	CGO_ENABLED=1 GOCACHE=$(GOCACHE) go build -trimpath -buildvcs=false -ldflags="-buildid=" -o bin/warptweet ./cmd/warptweet
 
 fmt-check:
 	@test -z "$$(gofmt -l $$(find cmd internal tests -name '*.go' -type f -print))"

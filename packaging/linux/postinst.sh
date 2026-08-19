@@ -40,19 +40,20 @@ ensure_user warptweet-sshd /var/empty/warptweet-sshd /usr/sbin/nologin
 install -d -o root -g root -m 0755 /opt/warptweet
 install -d -o root -g root -m 0755 /etc/warptweet
 install -d -o root -g root -m 0700 /etc/warptweet/enrollment
-install -d -o root -g root -m 0755 /opt/warptweet/etc
-install -d -o root -g root -m 0755 /opt/warptweet/etc/authorized_keys
+install -d -o root -g root -m 0700 /var/lib/warptweet/ssh
+install -d -o root -g root -m 0755 /var/lib/warptweet/authorized_keys
 install -d -o root -g root -m 0755 /var/empty/warptweet-sshd
-install -d -o root -g root -m 0700 /var/lib/warptweet
+install -d -o root -g root -m 0755 /var/lib/warptweet
 install -d -o root -g root -m 0700 /var/lib/warptweet/invites
 install -d -o root -g root -m 0700 /var/lib/warptweet/clients
 install -d -o root -g root -m 0700 /var/lib/warptweet/server
 install -d -o root -g root -m 0700 /var/lib/warptweet/sessions
 install -d -o root -g root -m 0755 /run/warptweet
 install -d -o root -g root -m 0750 /run/warptweet/server
-touch /opt/warptweet/etc/authorized_keys/warptweet
-chown root:root /opt/warptweet/etc/authorized_keys/warptweet
-chmod 0644 /opt/warptweet/etc/authorized_keys/warptweet
+install -d -o root -g root -m 0750 /run/warptweet/sshd
+touch /var/lib/warptweet/authorized_keys/warptweet
+chown root:root /var/lib/warptweet/authorized_keys/warptweet
+chmod 0644 /var/lib/warptweet/authorized_keys/warptweet
 
 # Public-key-only lock for the tunnel account where supported.
 if command -v usermod >/dev/null 2>&1; then

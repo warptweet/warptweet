@@ -150,3 +150,17 @@ func TestValidateManifestObjectNamesAcceptsCanonicalNestedNames(t *testing.T) {
 		t.Fatalf("ValidateManifestObjectNames: %v", err)
 	}
 }
+
+func TestRejectDuplicateObjectNamesEnforcesDepthLimit(t *testing.T) {
+	t.Parallel()
+
+	nested := func(levels int) []byte {
+		return []byte(strings.Repeat("[", levels) + strings.Repeat("]", levels))
+	}
+	if err := RejectDuplicateObjectNames(nested(32)); err != nil {
+		t.Fatalf("32 levels: %v", err)
+	}
+	if err := RejectDuplicateObjectNames(nested(33)); err == nil {
+		t.Fatal("accepted 33 nested levels")
+	}
+}

@@ -65,7 +65,6 @@ WT_ROOT="$WT_OUTPUT_INPUT/root"
 mkdir -p \
     "$WT_ROOT/opt/warptweet/bin" \
     "$WT_ROOT/opt/warptweet/libexec" \
-    "$WT_ROOT/opt/warptweet/etc/authorized_keys" \
     "$WT_ROOT/opt/warptweet/share" \
     "$WT_ROOT/etc/warptweet" \
     "$WT_ROOT/etc/warptweet/enrollment" \
@@ -74,11 +73,16 @@ mkdir -p \
     "$WT_ROOT/var/lib/warptweet/invites" \
     "$WT_ROOT/var/lib/warptweet/clients" \
     "$WT_ROOT/var/lib/warptweet/server" \
-    "$WT_ROOT/run/warptweet/server"
+    "$WT_ROOT/var/lib/warptweet/ssh" \
+    "$WT_ROOT/var/lib/warptweet/authorized_keys" \
+    "$WT_ROOT/run/warptweet/server" \
+    "$WT_ROOT/run/warptweet/sshd"
 
 # Copy staged OpenSSH server inventory.
 cp -a "$WT_STAGE_INPUT/opt/warptweet/." "$WT_ROOT/opt/warptweet/"
 install -m 0755 "$WT_CONTROLLER_INPUT" "$WT_ROOT/opt/warptweet/bin/warptweet"
+mkdir -p "$WT_ROOT/usr/bin"
+ln -s /opt/warptweet/bin/warptweet "$WT_ROOT/usr/bin/warptweet"
 install -m 0644 "$WT_REPOSITORY_ROOT/packaging/systemd/warptweet-sshd.service" \
     "$WT_ROOT/lib/systemd/system/warptweet-sshd.service"
 install -m 0644 "$WT_REPOSITORY_ROOT/packaging/systemd/warptweet-enroll.service" \
@@ -138,6 +142,7 @@ cp -a $WT_ROOT/. %{buildroot}/
 
 %files
 /opt/warptweet
+/usr/bin/warptweet
 /etc/warptweet
 /lib/systemd/system/warptweet-sshd.service
 /lib/systemd/system/warptweet-enroll.service

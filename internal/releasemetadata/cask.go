@@ -71,14 +71,35 @@ func validateCaskInput(input CaskInput) error {
 	if input.Version == "" || strings.Contains(strings.ToLower(input.Version), "latest") {
 		return fmt.Errorf("cask version must be an exact non-latest release version")
 	}
+	if strings.ContainsAny(input.Version, "\"'\n\r\\") {
+		return fmt.Errorf("cask version contains forbidden characters")
+	}
 	if !isLowerHexSHA256(input.SHA256ARM64) || !isLowerHexSHA256(input.SHA256AMD64) {
 		return fmt.Errorf("cask digests must be 64 lowercase hex characters")
 	}
-	if input.GitHubOwnerRepo == "" || strings.Contains(input.GitHubOwnerRepo, " ") {
-		return fmt.Errorf("GitHub owner/repo must be non-empty and free of spaces")
+	if err := validateGitHubOwnerRepo(input.GitHubOwnerRepo); err != nil {
+		return err
 	}
 	if input.TemplatePath == "" || !filepath.IsAbs(input.TemplatePath) {
 		return fmt.Errorf("cask template path must be absolute")
+	}
+	return nil
+}
+
+func validateGitHubOwnerRepo(value string) error {
+	if value == "" || strings.ContainsAny(value, " \t\"'\n\r\\") {
+		return fmt.Errorf("GitHub owner/repo must be owner/name without quotes or whitespace")
+	}
+	parts := strings.Split(value, "/")
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return fmt.Errorf("GitHub owner/repo must be exactly owner/name")
+	}
+	for _, part := range parts {
+		for _, r := range part {
+			if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '.' && r != '_' && r != '-' {
+				return fmt.Errorf("GitHub owner/repo contains forbidden characters")
+			}
+		}
 	}
 	return nil
 }

@@ -30,7 +30,7 @@ import (
 )
 
 const (
-	Version      = "0.1.0-rc.1"
+	Version      = "0.1.0-rc.2"
 	manifestSize = 1 << 20
 )
 
@@ -495,9 +495,6 @@ func runDoctorServer(ctx context.Context, arguments []string, stdout, stderr io.
 	manifest, err := server.Load(manifestPath.value)
 	if err != nil {
 		return err
-	}
-	if err := reconcileManagedAuthorizations(manifest); err != nil {
-		return fmt.Errorf("reconcile managed authorizations: %w", err)
 	}
 	report, err := engine.PreflightServer(ctx, manifest)
 	if err != nil {

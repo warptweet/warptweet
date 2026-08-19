@@ -1,23 +1,24 @@
 --- a/Makefile.in
 +++ b/Makefile.in
-@@ -147,7 +147,8 @@ SSHD_SESSION_OBJS=sshd-session.o auth-rhosts.o auth-passwd.o \
+@@ -134,7 +134,7 @@ SSHD_SESSION_OBJS=sshd-session.o auth-rhosts.o auth-passwd.o \
  	loginrec.o auth-pam.o auth-shadow.o auth-sia.o \
  	sftp-server.o sftp-common.o \
--	uidswap.o platform-listen.o $(SKOBJS)
-+	uidswap.o platform-listen.o warptweet-grant.o $(SKOBJS)
+-	uidswap.o platform-listen.o $(P11OBJS) $(SKOBJS)
++	uidswap.o platform-listen.o warptweet-grant.o $(P11OBJS) $(SKOBJS)
  
  SSHD_AUTH_OBJS=sshd-auth.o \
  	auth2-methods.o \
 --- a/monitor.c
 +++ b/monitor.c
-@@ -98,6 +98,7 @@
+@@ -96,6 +96,7 @@
+ #include "ssherr.h"
  #include "sk-api.h"
  #include "srclimit.h"
 +#include "warptweet-grant.h"
  
  #ifdef GSSAPI
  static Gssctxt *gsscontext = NULL;
-@@ -1230,8 +1231,13 @@ mm_answer_keyverify(struct ssh *ssh, int sock, struct sshbuf *m)
+@@ -1601,8 +1602,13 @@ mm_answer_keyverify(struct ssh *ssh, int sock, struct sshbuf *m)
  	}
  	auth2_record_key(authctxt, ret == 0, key);
  
@@ -32,7 +33,7 @@
  	monitor_reset_key_state();
  
  	sshbuf_reset(m);
-@@ -1698,6 +1704,7 @@ mm_answer_term(struct ssh *ssh, int sock, struct sshbuf *req)
+@@ -1773,6 +1779,7 @@ mm_answer_term(struct ssh *ssh, int sock, struct sshbuf *req)
  	res = WIFEXITED(status) ? WEXITSTATUS(status) : 1;
  
  	/* Terminate process */
@@ -42,7 +43,7 @@
  
 --- a/sshd-session.c
 +++ b/sshd-session.c
-@@ -108,6 +108,7 @@
+@@ -95,6 +95,7 @@
  #include "sk-api.h"
  #include "srclimit.h"
  #include "dh.h"
@@ -50,11 +51,11 @@
  
  /* Re-exec fds */
  #define REEXEC_DEVCRYPTO_RESERVED_FD	(STDERR_FILENO + 1)
-@@ -1540,6 +1541,7 @@ cleanup_exit(int i)
+@@ -1362,6 +1363,7 @@ cleanup_exit(int i)
  	if (the_active_state != NULL && mm_is_monitor())
  		audit_event(the_active_state, SSH_CONNECTION_ABANDON);
  #endif
 +	warptweet_grant_unregister();
  	/* Override default fatal exit value when auth was attempted */
- 	if (i == 255 && auth_attempted)
+ 	if (i == 255 && monitor_auth_attempted())
  		_exit(EXIT_AUTH_ATTEMPTED);

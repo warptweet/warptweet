@@ -68,6 +68,11 @@ func TestRenderCaskRejectsLatestAndBadDigests(t *testing.T) {
 	if _, err := RenderCask(badDigest); err == nil {
 		t.Fatal("RenderCask accepted invalid digest")
 	}
+	badRepo := base
+	badRepo.GitHubOwnerRepo = "warptweet/warptweet/extra"
+	if _, err := RenderCask(badRepo); err == nil {
+		t.Fatal("RenderCask accepted extra repository segment")
+	}
 }
 
 func TestMacOSPackageScriptsForbidNetworkDownloads(t *testing.T) {

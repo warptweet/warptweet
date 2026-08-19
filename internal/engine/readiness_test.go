@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -432,6 +433,42 @@ func TestPrepareControlSocketRejectsNonPrivateDirectoryAndPreexistingPath(t *tes
 	}
 	if _, err := prepareTestControlSocket(directory); err == nil || !strings.Contains(err.Error(), "already exists") {
 		t.Fatalf("prepareControlSocket error = %v, want preexisting-path rejection", err)
+	}
+}
+
+func TestPrepareControlSocketRemovesDeadSocket(t *testing.T) {
+	t.Parallel()
+
+	directory := newShortPrivateRuntimeDirectory(t)
+	path := filepath.Join(directory, controlSocketName)
+	fd, err := syscall.Socket(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
+	if err != nil {
+		t.Fatalf("Socket: %v", err)
+	}
+	if err := syscall.Bind(fd, &syscall.SockaddrUnix{Name: path}); err != nil {
+		_ = syscall.Close(fd)
+		t.Fatalf("Bind: %v", err)
+	}
+	if err := syscall.Close(fd); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if _, err := os.Lstat(path); err != nil {
+		t.Fatalf("dead socket missing: %v", err)
+	}
+	if _, err := prepareTestControlSocket(directory); err != nil {
+		t.Fatalf("prepareControlSocket with dead socket: %v", err)
+	}
+}
+
+func TestPrepareControlSocketRejectsLiveSocket(t *testing.T) {
+	t.Parallel()
+
+	directory := newShortPrivateRuntimeDirectory(t)
+	path := filepath.Join(directory, controlSocketName)
+	listener := listenOnTestControlSocket(t, path)
+	defer listener.Close()
+	if _, err := prepareTestControlSocket(directory); err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("prepareControlSocket error = %v, want live socket rejection", err)
 	}
 }
 

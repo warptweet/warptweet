@@ -122,6 +122,12 @@ func TestRegisterRejectsForeignExecutable(t *testing.T) {
 	if _, err := authority.Register(4242, keyDigest, "conn-1"); err == nil {
 		t.Fatal("accepted foreign executable")
 	}
+	authority.Inspect = func(pid int) (ProcessIdentity, error) {
+		return ProcessIdentity{BootID: "boot-1", PID: pid, StartTime: "99", Exe: "sshd-session"}, nil
+	}
+	if _, err := authority.Register(4243, keyDigest, "conn-2"); err == nil {
+		t.Fatal("accepted comm-only executable")
+	}
 }
 
 func TestKeyBlobDigestMatchesWireBlob(t *testing.T) {
@@ -136,6 +142,21 @@ func TestKeyBlobDigestMatchesWireBlob(t *testing.T) {
 	sum := sha256.Sum256(blob)
 	if got != hex.EncodeToString(sum[:]) {
 		t.Fatalf("digest=%s", got)
+	}
+	spaced := `restrict,from="10.0.0.1 10.0.0.2",permitopen="127.0.0.1:5432" ssh-ed25519 ` + base64.StdEncoding.EncodeToString(blob)
+	got, err = KeyBlobDigest(spaced)
+	if err != nil {
+		t.Fatalf("spaced option: %v", err)
+	}
+	if got != hex.EncodeToString(sum[:]) {
+		t.Fatalf("spaced digest=%s", got)
+	}
+	escaped := `restrict,from="10.0.0.1\"lab" ssh-ed25519 ` + base64.StdEncoding.EncodeToString(blob)
+	if _, err := KeyBlobDigest(escaped); err != nil {
+		t.Fatalf("escaped quote: %v", err)
+	}
+	if _, err := KeyBlobDigest(`restrict,from="unterminated ssh-ed25519 AAAA`); err == nil {
+		t.Fatal("accepted unterminated quote")
 	}
 	managed := `restrict,port-forwarding,permitopen="127.0.0.1:5432" ssh-ed25519 ` + base64.StdEncoding.EncodeToString(blob) + " comment"
 	got, err = KeyBlobDigest(managed)
@@ -223,6 +244,22 @@ func TestAuthorityClearDeletesUnparseableRecords(t *testing.T) {
 	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatal("unparseable record remained")
+	}
+}
+
+func TestMatchGrantSessionsIgnoresEmptyGeneration(t *testing.T) {
+	t.Parallel()
+
+	match := matchGrantSessions("aaaaaaaaaaaaaaaa", "", "")
+	if !match(Record{ClientID: "aaaaaaaaaaaaaaaa", Generation: "old", PublicKeySHA256: strings.Repeat("a", 64)}) {
+		t.Fatal("empty generation should match every generation for the client")
+	}
+	if match(Record{ClientID: "bbbbbbbbbbbbbbbb", Generation: "old", PublicKeySHA256: strings.Repeat("a", 64)}) {
+		t.Fatal("matched a different client")
+	}
+	oldOnly := matchGrantSessions("aaaaaaaaaaaaaaaa", "old", "")
+	if oldOnly(Record{ClientID: "aaaaaaaaaaaaaaaa", Generation: "new", PublicKeySHA256: strings.Repeat("a", 64)}) {
+		t.Fatal("explicit generation should not match another generation")
 	}
 }
 

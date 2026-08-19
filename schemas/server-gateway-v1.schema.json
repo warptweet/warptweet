@@ -44,7 +44,7 @@
       "$ref": "#/$defs/dedicated_user"
     },
     "host_key_path": {
-      "const": "/opt/warptweet/etc/ssh_host_mldsa44_ed25519_key",
+      "const": "/var/lib/warptweet/ssh/ssh_host_mldsa44_ed25519_key",
       "description": "Filesystem reference only. Private-key material must never be embedded in a manifest."
     },
     "authorized_keys_path": {
@@ -85,7 +85,7 @@
     },
     "authorized_keys_path": {
       "type": "string",
-      "pattern": "^/opt/warptweet/etc/authorized_keys/[a-z_][a-z0-9_-]{0,31}$",
+      "pattern": "^/var/lib/warptweet/authorized_keys/[a-z_][a-z0-9_-]{0,31}$",
       "$comment": "Runtime validation requires the final path component to equal dedicated_user exactly."
     },
     "endpoint": {

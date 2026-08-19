@@ -115,14 +115,14 @@ func TestAcceptStoresClientAndRevokeBurnsToken(t *testing.T) {
 	var hooks []string
 	revoked, err := RevokeClient(clients, revokeRequest, now.Add(2*time.Minute), func(string) error { return nil }, SessionEnforcement{
 		TerminateSession: func(clientID, generation, publicKeySHA256 string) error {
-			if clientID != loaded.ClientID || generation != loaded.Generation || publicKeySHA256 != loaded.PublicKeySHA256 {
+			if clientID != loaded.ClientID || generation != "" || publicKeySHA256 != "" {
 				t.Fatalf("terminate args=%s %s %s", clientID, generation, publicKeySHA256)
 			}
 			hooks = append(hooks, "terminate")
 			return nil
 		},
 		VerifySessionGone: func(clientID, generation, publicKeySHA256 string) error {
-			if clientID != loaded.ClientID || generation != loaded.Generation || publicKeySHA256 != loaded.PublicKeySHA256 {
+			if clientID != loaded.ClientID || generation != "" || publicKeySHA256 != "" {
 				t.Fatalf("verify args=%s %s %s", clientID, generation, publicKeySHA256)
 			}
 			hooks = append(hooks, "verify")

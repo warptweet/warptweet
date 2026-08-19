@@ -592,8 +592,6 @@ if [ ! -x "$WT_OPENSSL_SOURCE_DIRECTORY/Configure" ] ||
     exit 65
 fi
 
-"$WT_REPOSITORY_ROOT/scripts/apply-openssh-grant-hook.sh" "$WT_OPENSSH_SOURCE_DIRECTORY"
-
 if command -v nproc >/dev/null 2>&1; then
     WT_BUILD_JOBS=$(nproc)
 else
@@ -710,6 +708,15 @@ fi
 if [ "$WT_OPENSSH_TEST_STATUS" -ne 0 ]; then
     exit "$WT_OPENSSH_TEST_STATUS"
 fi
+
+# Apply the grant hook only after upstream tests. The hook fail-closes when
+# the WarpTweet grant socket is absent, which is correct in production and
+# would reject OpenSSH's own pubkey-connect tests.
+"$WT_REPOSITORY_ROOT/scripts/apply-openssh-grant-hook.sh" "$WT_OPENSSH_SOURCE_DIRECTORY"
+if [ -x "$WT_OPENSSH_SOURCE_DIRECTORY/config.status" ]; then
+    (CDPATH= cd -- "$WT_OPENSSH_SOURCE_DIRECTORY" && LC_ALL=C ./config.status)
+fi
+LC_ALL=C make -j "$WT_BUILD_JOBS" sshd sshd-session
 
 WT_INSTALL_PREFIX="$WT_STAGE_DIRECTORY/opt/warptweet/libexec/openssh"
 mkdir -p \

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -107,6 +108,9 @@ func StoreClient(directory string, record ClientRecord) error {
 }
 
 func LoadClient(directory, clientID string) (ClientRecord, error) {
+	if !isHexID(clientID) {
+		return ClientRecord{}, fmt.Errorf("%w: client_id is invalid", ErrInvalidInvite)
+	}
 	if !isHexID(clientID) {
 		return ClientRecord{}, fmt.Errorf("%w: client_id is invalid", ErrInvalidInvite)
 	}
@@ -217,12 +221,12 @@ func RevokeClient(directory string, request ManagementRequest, now time.Time, re
 		return ClientRecord{}, err
 	}
 	if enforcement.TerminateSession != nil {
-		if err := enforcement.TerminateSession(record.ClientID, record.Generation, record.PublicKeySHA256); err != nil {
+		if err := enforcement.TerminateSession(record.ClientID, "", ""); err != nil {
 			return ClientRecord{}, err
 		}
 	}
 	if enforcement.VerifySessionGone != nil {
-		if err := enforcement.VerifySessionGone(record.ClientID, record.Generation, record.PublicKeySHA256); err != nil {
+		if err := enforcement.VerifySessionGone(record.ClientID, "", ""); err != nil {
 			return ClientRecord{}, err
 		}
 	}
@@ -366,7 +370,7 @@ func ExpireClient(directory string, clientID string, now time.Time, ops grant.Ex
 	if err := grant.ValidateExpirePlan(plan); err != nil {
 		return ClientRecord{}, err
 	}
-	if record.Status == ClientStatusActive {
+	if record.Status == ClientStatusActive || record.Status == ClientStatusRotationPending {
 		if err := grant.AuthorizeTransition(record.Status, ClientStatusExpirationPending); err != nil {
 			return ClientRecord{}, err
 		}
@@ -406,8 +410,9 @@ func ReconcileExpiredClients(directory string, now time.Time, opsFor func(Client
 	if err != nil {
 		return err
 	}
+	var errs []error
 	for _, record := range records {
-		if record.Status != ClientStatusActive && record.Status != ClientStatusExpirationPending {
+		if record.Status != ClientStatusActive && record.Status != ClientStatusExpirationPending && record.Status != ClientStatusRotationPending {
 			continue
 		}
 		if record.AuthorizationNotAfter == "" {
@@ -421,10 +426,10 @@ func ReconcileExpiredClients(directory string, now time.Time, opsFor func(Client
 			continue
 		}
 		if _, err := ExpireClient(directory, record.ClientID, now, opsFor(record)); err != nil {
-			return err
+			errs = append(errs, fmt.Errorf("client %s: %w", record.ClientID, err))
 		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 func authorizationStillValid(record ClientRecord, now time.Time) error {
@@ -492,7 +497,11 @@ func ListClients(directory string) ([]ClientRecord, error) {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		record, err := LoadClient(directory, strings.TrimSuffix(entry.Name(), ".json"))
+		clientID := strings.TrimSuffix(entry.Name(), ".json")
+		if !isHexID(clientID) {
+			continue
+		}
+		record, err := LoadClient(directory, clientID)
 		if err != nil {
 			return nil, err
 		}

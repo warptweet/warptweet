@@ -607,7 +607,9 @@ type testProcess struct {
 	pidValue      int
 	exitResult    chan error
 	terminated    chan struct{}
+	killed        chan struct{}
 	terminateOnce sync.Once
+	killOnce      sync.Once
 	waitCalls     atomic.Int32
 }
 
@@ -616,6 +618,7 @@ func newTestProcess(pid int) *testProcess {
 		pidValue:   pid,
 		exitResult: make(chan error, 1),
 		terminated: make(chan struct{}),
+		killed:     make(chan struct{}),
 	}
 }
 
@@ -637,6 +640,51 @@ func (process *testProcess) Terminate() error {
 	return nil
 }
 
+func (process *testProcess) Kill() error {
+	process.killOnce.Do(func() {
+		close(process.killed)
+	})
+	return nil
+}
+
+func TestTerminateAndReapInvokesKillAfterGrace(t *testing.T) {
+	t.Parallel()
+
+	process := newTestProcess(8)
+	waitResult := make(chan error)
+	err := terminateAndReap(process, waitResult)
+	if err == nil || !strings.Contains(err.Error(), "did not exit after kill") {
+		t.Fatalf("terminateAndReap=%v, want kill timeout", err)
+	}
+	if !process.wasKilled() {
+		t.Fatal("Kill was not invoked after terminate grace")
+	}
+}
+
+func TestTerminateAndReapReturnsWhenKillFails(t *testing.T) {
+	t.Parallel()
+
+	process := newTestProcess(9)
+	waitResult := make(chan error)
+	err := terminateAndReap(&stuckKillProcess{testProcess: process}, waitResult)
+	if !errors.Is(err, errStuckKill) {
+		t.Fatalf("terminateAndReap=%v, want preserved kill sentinel", err)
+	}
+	if !strings.Contains(err.Error(), "did not exit after kill") {
+		t.Fatalf("terminateAndReap=%v, want kill timeout", err)
+	}
+}
+
+var errStuckKill = errors.New("kill failed")
+
+type stuckKillProcess struct {
+	*testProcess
+}
+
+func (process *stuckKillProcess) Kill() error {
+	return errStuckKill
+}
+
 func (process *testProcess) exit(err error) {
 	process.exitResult <- err
 }
@@ -644,6 +692,15 @@ func (process *testProcess) exit(err error) {
 func (process *testProcess) wasTerminated() bool {
 	select {
 	case <-process.terminated:
+		return true
+	default:
+		return false
+	}
+}
+
+func (process *testProcess) wasKilled() bool {
+	select {
+	case <-process.killed:
 		return true
 	default:
 		return false

@@ -66,7 +66,9 @@ create_user() {
 read_record_value() {
     WT_RECORD=$1
     WT_KEY=$2
-    dscl . -read "$WT_RECORD" "$WT_KEY" | awk -v key="$WT_KEY:" '$1 == key { print $2; exit }'
+    dscl . -read "$WT_RECORD" "$WT_KEY" | awk -v key="$WT_KEY:" '
+        $1 == key || $1 == ("dsAttrTypeNative:" key) { print $2; exit }
+    '
 }
 
 verify_service_identity() {
@@ -90,10 +92,14 @@ verify_service_identity() {
         echo "existing WarpTweet service identity does not match the fixed account contract" >&2
         exit 1
     fi
-    if dscl . -read "/Users/$WT_USER" AuthenticationAuthority >/dev/null 2>&1; then
-        echo "WarpTweet service identity must not have an authentication authority" >&2
-        exit 1
-    fi
+    WT_AUTH_AUTHORITY=$(dscl . -read "/Users/$WT_USER" AuthenticationAuthority 2>/dev/null || true)
+    case "$WT_AUTH_AUTHORITY" in
+        *ShadowHash* | *Kerberos* | *LocalCachedUser* | *AppleID* | *SecureToken*)
+            echo "WarpTweet service identity must not have a login authentication authority" >&2
+            echo "$WT_AUTH_AUTHORITY" >&2
+            exit 1
+            ;;
+    esac
 
     WT_UID_MATCH=$(dscl . -list /Users UniqueID | awk -v id="$WT_UID" '$2 == id { count++; name = $1 } END { printf "%d:%s", count, name }')
     WT_GID_MATCH=$(dscl . -list /Groups PrimaryGroupID | awk -v id="$WT_GROUP_GID" '$2 == id { count++; name = $1 } END { printf "%d:%s", count, name }')
@@ -214,6 +220,26 @@ done
 # The installer is the only interactive administrator boundary. It starts one
 # typed root helper; per-tunnel jobs are generated later from validated IDs and
 # run as _warptweet.
+WT_CLI_LINK="/usr/local/bin/warptweet"
+WT_CLI_TARGET="/Library/Application Support/WarpTweet/bin/warptweet"
+install -d -o root -g wheel -m 0755 /usr/local/bin
+if [ ! -e "$WT_CLI_LINK" ]; then
+    ln -s "$WT_CLI_TARGET" "$WT_CLI_LINK"
+    chown -h root:wheel "$WT_CLI_LINK"
+elif [ -L "$WT_CLI_LINK" ]; then
+    case $(readlink "$WT_CLI_LINK") in
+        "$WT_CLI_TARGET")
+            ;;
+        *)
+            echo "refusing to replace existing $WT_CLI_LINK" >&2
+            exit 1
+            ;;
+    esac
+else
+    echo "refusing to replace existing $WT_CLI_LINK" >&2
+    exit 1
+fi
+
 WT_PROVISIONER_PLIST="/Library/LaunchDaemons/com.warptweet.provisioner.plist"
 if [ ! -f "$WT_PROVISIONER_PLIST" ] || [ -L "$WT_PROVISIONER_PLIST" ]; then
     echo "missing provisioner LaunchDaemon" >&2

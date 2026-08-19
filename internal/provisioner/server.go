@@ -101,7 +101,7 @@ func (server *Server) Serve(ctx context.Context) error {
 
 func (server *Server) handleConnection(ctx context.Context, connection *net.UnixConn, serviceUID, serviceGID uint32) {
 	defer connection.Close()
-	_ = connection.SetDeadline(time.Now().Add(60 * time.Second))
+	_ = connection.SetDeadline(time.Now().Add(90 * time.Second))
 	var request Request
 	if err := decodeSingleJSON(connection, MaxRequestBytes, &request); err != nil {
 		_ = connection.SetDeadline(time.Now().Add(5 * time.Second))
@@ -246,7 +246,13 @@ func startTunnel(ctx context.Context, tunnelID string, once bool, serviceUID, se
 	if err := persistDarwinDesiredState(tunnelID, routestate.DesiredRunning); err != nil {
 		return "", err
 	}
+	if err := ensureRouteTreeAccess(serviceUID, serviceGID); err != nil {
+		return "", err
+	}
 	if err := ensureTunnelRuntime(tunnelID, serviceUID, serviceGID); err != nil {
+		return "", err
+	}
+	if err := ensureTunnelLogs(tunnelID, serviceUID, serviceGID); err != nil {
 		return "", err
 	}
 	plistPath, label, err := writeTunnelPlist(tunnelID, once, false)
@@ -453,11 +459,63 @@ func renderTunnelPlist(tunnelID string, once, runAtLoad bool) ([]byte, string, e
 <key>UserName</key><string>%s</string><key>GroupName</key><string>%s</string>
 <key>RunAtLoad</key>%s<key>KeepAlive</key><false/>
 <key>ThrottleInterval</key><integer>5</integer><key>ProcessType</key><string>Background</string>
+<key>StandardOutPath</key><string>/Library/Logs/WarpTweet/tunnel-%s.out.log</string>
+<key>StandardErrorPath</key><string>/Library/Logs/WarpTweet/tunnel-%s.err.log</string>
 </dict></plist>
 `, label, installlayout.DarwinControllerPath,
 		tunnelID, onceArgument, installlayout.DarwinClientServiceUser, installlayout.DarwinClientServiceGroup,
-		runAtLoadValue)
+		runAtLoadValue, tunnelID, tunnelID)
 	return []byte(contents), label, nil
+}
+
+func ensureRouteTreeAccess(uid, gid uint32) error {
+	root := installlayout.DarwinClientRoutesDirectory
+	if err := os.MkdirAll(root, 0o750); err != nil {
+		return err
+	}
+	return filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		owner := 0
+		mode := os.FileMode(0o640)
+		switch {
+		case info.IsDir():
+			mode = 0o750
+		case info.Name() == "identity":
+			owner = int(uid)
+			mode = 0o600
+		case info.Name() == "client.wt", info.Name() == "known_hosts", info.Name() == "known_hosts.empty":
+			mode = 0o440
+		}
+		if err := os.Chown(path, owner, int(gid)); err != nil {
+			return err
+		}
+		return os.Chmod(path, mode)
+	})
+}
+
+func ensureTunnelLogs(tunnelID string, uid, gid uint32) error {
+	if err := os.MkdirAll("/Library/Logs/WarpTweet", 0o755); err != nil {
+		return err
+	}
+	for _, name := range []string{"tunnel-" + tunnelID + ".out.log", "tunnel-" + tunnelID + ".err.log"} {
+		path := filepath.Join("/Library/Logs/WarpTweet", name)
+		file, err := os.OpenFile(path, os.O_CREATE|os.O_APPEND, 0o640)
+		if err != nil {
+			return err
+		}
+		if err := file.Close(); err != nil {
+			return err
+		}
+		if err := os.Chown(path, int(uid), int(gid)); err != nil {
+			return err
+		}
+		if err := os.Chmod(path, 0o640); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func ensureTunnelRuntime(tunnelID string, uid, gid uint32) error {

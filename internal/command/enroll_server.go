@@ -52,7 +52,9 @@ func runServerEnrollListen(ctx context.Context, arguments []string, stdout, stde
 		return fmt.Errorf("host clock: blocked until warptweet server clock-recover")
 	}
 	if _, err := grant.ObserveClock(installlayout.HostClockObservationPath, now); err != nil {
-		_ = enterBlockedClock(manifest, err)
+		if closeErr := enterBlockedClock(manifest, err); closeErr != nil {
+			return closeErr
+		}
 		return fmt.Errorf("host clock: %w", err)
 	}
 	if err := reconcileExpiredGrants(manifest, now); err != nil {
@@ -121,6 +123,9 @@ func runServerEnrollListen(ctx context.Context, arguments []string, stdout, stde
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = httpServer.Shutdown(shutdownCtx)
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return nil
+		}
 		return ctx.Err()
 	case err := <-errCh:
 		if err == nil || errors.Is(err, http.ErrServerClosed) {
@@ -558,7 +563,7 @@ func nextGrantReconcileDelay(now time.Time, records []enrollment.ClientRecord) t
 	}
 	delay := maximum
 	for _, record := range records {
-		if record.Status != enrollment.ClientStatusActive && record.Status != enrollment.ClientStatusExpirationPending {
+		if record.Status != enrollment.ClientStatusActive && record.Status != enrollment.ClientStatusExpirationPending && record.Status != enrollment.ClientStatusRotationPending {
 			continue
 		}
 		if record.AuthorizationNotAfter == "" {
@@ -602,7 +607,9 @@ func enterBlockedClock(manifest server.Config, reason error) error {
 	if err := grant.WriteBlockedClock(installlayout.HostClockBlockedPath, reason.Error(), time.Now().UTC()); err != nil {
 		return err
 	}
-	if err := os.WriteFile(manifest.AuthorizedKeysPath, nil, 0o644); err != nil {
+	if err := withAuthorizedKeysLock(manifest.AuthorizedKeysPath, func() error {
+		return writeAuthorizedKeyLines(manifest.AuthorizedKeysPath, nil)
+	}); err != nil {
 		return err
 	}
 	if err := productionGrantAuthority().TerminateAll(); err != nil {

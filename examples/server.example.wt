@@ -13,6 +13,6 @@
     "port": 5432
   },
   "dedicated_user": "warptweet",
-  "host_key_path": "/opt/warptweet/etc/ssh_host_mldsa44_ed25519_key",
-  "authorized_keys_path": "/opt/warptweet/etc/authorized_keys/warptweet"
+  "host_key_path": "/var/lib/warptweet/ssh/ssh_host_mldsa44_ed25519_key",
+  "authorized_keys_path": "/var/lib/warptweet/authorized_keys/warptweet"
 }

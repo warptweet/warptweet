@@ -22,8 +22,8 @@ func TestRenderProducesExactForwardingOnlyConfiguration(t *testing.T) {
 AddressFamily inet
 Port 2222
 ListenAddress 192.0.2.10
-PidFile /run/warptweet/server/warptweet-sshd.pid
-HostKey /opt/warptweet/etc/ssh_host_mldsa44_ed25519_key
+PidFile /run/warptweet/sshd/warptweet-sshd.pid
+HostKey /var/lib/warptweet/ssh/ssh_host_mldsa44_ed25519_key
 HostKeyAlgorithms ssh-mldsa44-ed25519@openssh.com
 KexAlgorithms mlkem768x25519-sha256
 PubkeyAcceptedAlgorithms ssh-mldsa44-ed25519@openssh.com
@@ -39,7 +39,7 @@ PermitEmptyPasswords no
 PermitRootLogin no
 StrictModes yes
 AllowUsers warptweet
-AuthorizedKeysFile /opt/warptweet/etc/authorized_keys/warptweet
+AuthorizedKeysFile /var/lib/warptweet/authorized_keys/warptweet
 MaxAuthTries 3
 LoginGraceTime 30
 MaxStartups 10:30:60
@@ -466,7 +466,7 @@ func validConfig() Config {
 			Port:    5432,
 		},
 		DedicatedUser:      DefaultDedicatedUser,
-		HostKeyPath:        "/opt/warptweet/etc/ssh_host_mldsa44_ed25519_key",
-		AuthorizedKeysPath: "/opt/warptweet/etc/authorized_keys/warptweet",
+		HostKeyPath:        "/var/lib/warptweet/ssh/ssh_host_mldsa44_ed25519_key",
+		AuthorizedKeysPath: "/var/lib/warptweet/authorized_keys/warptweet",
 	}
 }

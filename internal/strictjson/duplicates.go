@@ -44,19 +44,24 @@ func ValidateManifestObjectNames(input []byte) error {
 	return inspectObjectNames(input, true)
 }
 
+const maxJSONDepth = 32
+
 func inspectObjectNames(input []byte, requireCanonical bool) error {
 	if len(bytes.TrimSpace(input)) == 0 {
 		return nil
 	}
 	decoder := json.NewDecoder(bytes.NewReader(input))
 	decoder.UseNumber()
-	if err := walkValue(decoder, requireCanonical); err != nil {
+	if err := walkValue(decoder, requireCanonical, 1); err != nil {
 		return fmt.Errorf("inspect JSON object members: %w", err)
 	}
 	return nil
 }
 
-func walkValue(decoder *json.Decoder, requireCanonical bool) error {
+func walkValue(decoder *json.Decoder, requireCanonical bool, depth int) error {
+	if depth > maxJSONDepth {
+		return fmt.Errorf("JSON nesting exceeds %d levels", maxJSONDepth)
+	}
 	token, err := decoder.Token()
 	if err != nil {
 		return err
@@ -68,15 +73,15 @@ func walkValue(decoder *json.Decoder, requireCanonical bool) error {
 
 	switch delimiter {
 	case '{':
-		return walkObject(decoder, requireCanonical)
+		return walkObject(decoder, requireCanonical, depth)
 	case '[':
-		return walkArray(decoder, requireCanonical)
+		return walkArray(decoder, requireCanonical, depth)
 	default:
 		return fmt.Errorf("unexpected opening delimiter %q", delimiter)
 	}
 }
 
-func walkObject(decoder *json.Decoder, requireCanonical bool) error {
+func walkObject(decoder *json.Decoder, requireCanonical bool, depth int) error {
 	seen := make(map[string]struct{})
 	for decoder.More() {
 		token, err := decoder.Token()
@@ -94,7 +99,7 @@ func walkObject(decoder *json.Decoder, requireCanonical bool) error {
 			return &DuplicateNameError{Name: name}
 		}
 		seen[name] = struct{}{}
-		if err := walkValue(decoder, requireCanonical); err != nil {
+		if err := walkValue(decoder, requireCanonical, depth+1); err != nil {
 			return err
 		}
 	}
@@ -109,9 +114,9 @@ func walkObject(decoder *json.Decoder, requireCanonical bool) error {
 	return nil
 }
 
-func walkArray(decoder *json.Decoder, requireCanonical bool) error {
+func walkArray(decoder *json.Decoder, requireCanonical bool, depth int) error {
 	for decoder.More() {
-		if err := walkValue(decoder, requireCanonical); err != nil {
+		if err := walkValue(decoder, requireCanonical, depth+1); err != nil {
 			return err
 		}
 	}

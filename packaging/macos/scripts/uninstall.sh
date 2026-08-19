@@ -49,6 +49,13 @@ done
 launchctl bootout system/com.warptweet.provisioner >/dev/null 2>&1 || true
 
 rm -f "$WT_PROVISIONER_PLIST" /var/run/warptweet/provisioner.sock
+if [ -L /usr/local/bin/warptweet ]; then
+    case $(readlink /usr/local/bin/warptweet) in
+        "/Library/Application Support/WarpTweet/bin/warptweet")
+            rm -f /usr/local/bin/warptweet
+            ;;
+    esac
+fi
 rm -rf "$WT_ROOT/bin" "$WT_ROOT/libexec" "$WT_ROOT/share"
 
 if [ "$WT_DESTROY_IDENTITY" -eq 1 ]; then

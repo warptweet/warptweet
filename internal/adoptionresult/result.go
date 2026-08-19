@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"os"
 	"strings"
+
+	"warptweet.com/warptweet/internal/strictjson"
 )
 
 const (
@@ -103,6 +105,9 @@ func ValidateDocument(document Document) error {
 func DecodeStrict(raw []byte) (Document, error) {
 	if len(raw) == 0 || len(raw) > maxResultBytes {
 		return Document{}, fmt.Errorf("adoption-release result is empty or oversized")
+	}
+	if err := strictjson.RejectDuplicateObjectNames(raw); err != nil {
+		return Document{}, err
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()

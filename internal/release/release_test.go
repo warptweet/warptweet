@@ -113,6 +113,8 @@ func TestReleaseScriptsParseAsPOSIXShell(t *testing.T) {
 		"release-candidate.sh",
 		"sign-linux-deb.sh",
 		"apply-openssh-grant-hook.sh",
+		"bootstrap-ubuntu-builder.sh",
+		"build-linux-rc-remote.sh",
 	} {
 		path := filepath.Join(root, "scripts", name)
 		command := exec.Command("sh", "-n", path)

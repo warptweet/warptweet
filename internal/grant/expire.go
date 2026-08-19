@@ -45,7 +45,7 @@ func ValidateExpirePlan(plan ExpirePlan) error {
 		return fmt.Errorf("grant %s is not due to expire", plan.ClientID)
 	}
 	switch plan.Status {
-	case StatusActive, StatusExpirationPending:
+	case StatusActive, StatusExpirationPending, StatusRotationPending:
 	default:
 		return fmt.Errorf("grant status %q cannot expire", plan.Status)
 	}
@@ -70,13 +70,13 @@ func ExecuteExpire(plan ExpirePlan, ops ExpireOps) error {
 	if err := ops.RemoveAuthorization(plan.PublicKey); err != nil {
 		return fmt.Errorf("remove effective authorization: %w", err)
 	}
-	if err := ops.TerminateSession(plan.ClientID, plan.Generation, plan.PublicKeySHA256); err != nil {
+	if err := ops.TerminateSession(plan.ClientID, "", ""); err != nil {
 		return fmt.Errorf("terminate matching session: %w", err)
 	}
 	if err := ops.VerifyAuthorizationGone(plan.PublicKey); err != nil {
 		return fmt.Errorf("authorization still effective: %w", err)
 	}
-	if err := ops.VerifySessionGone(plan.ClientID, plan.Generation, plan.PublicKeySHA256); err != nil {
+	if err := ops.VerifySessionGone(plan.ClientID, "", ""); err != nil {
 		return fmt.Errorf("matching session still effective: %w", err)
 	}
 	if _, err := ops.BurnManagementToken(); err != nil {

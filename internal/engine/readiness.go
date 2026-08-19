@@ -5,12 +5,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"warptweet.com/warptweet/internal/artifactprofile"
@@ -414,14 +416,41 @@ func prepareControlSocketWithOwners(
 	if err := endpoint.validateDirectoryIdentity(); err != nil {
 		return nil, err
 	}
-	if _, err := root.Lstat(controlSocketName); err == nil {
-		return nil, errors.New("managed OpenSSH control path already exists")
-	} else if !errors.Is(err, os.ErrNotExist) {
-		return nil, fmt.Errorf("inspect managed OpenSSH control path: %w", err)
+	if err := removeStaleControlSocket(root, controlSocketName, endpoint.Path); err != nil {
+		return nil, err
 	}
 
 	retainRoot = true
 	return endpoint, nil
+}
+
+func removeStaleControlSocket(root *os.Root, name, path string) error {
+	info, err := root.Lstat(name)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect managed OpenSSH control path: %w", err)
+	}
+	if info.Mode()&os.ModeSocket == 0 {
+		return errors.New("managed OpenSSH control path already exists")
+	}
+	connection, dialErr := net.DialTimeout("unix", path, 200*time.Millisecond)
+	if dialErr == nil {
+		_ = connection.Close()
+		return errors.New("managed OpenSSH control path already exists")
+	}
+	if !isDefinitiveSocketRefusal(dialErr) {
+		return fmt.Errorf("probe managed OpenSSH control path: %w", dialErr)
+	}
+	if err := root.Remove(name); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("remove stale OpenSSH control path: %w", err)
+	}
+	return nil
+}
+
+func isDefinitiveSocketRefusal(err error) bool {
+	return errors.Is(err, syscall.ECONNREFUSED)
 }
 
 func (endpoint *controlSocketEndpoint) validateSocket() error {

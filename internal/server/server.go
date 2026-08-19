@@ -17,7 +17,7 @@ const (
 	// installations should provision for authenticated tunnel connections.
 	DefaultDedicatedUser = "warptweet"
 
-	runtimePIDFile = "/run/warptweet/server/warptweet-sshd.pid"
+	runtimePIDFile = "/run/warptweet/sshd/warptweet-sshd.pid"
 	maxUserLength  = 32
 	sha256HexBytes = 64
 )
@@ -174,7 +174,7 @@ func validate(config Config) (profile.Profile, error) {
 	if config.HostKeyPath != installlayout.ServerHostKeyPath {
 		return profile.Profile{}, invalidField(
 			"HostKeyPath",
-			"must be fixed package path %q",
+			"must be fixed install path %q",
 			installlayout.ServerHostKeyPath,
 		)
 	}
@@ -182,7 +182,7 @@ func validate(config Config) (profile.Profile, error) {
 	if config.AuthorizedKeysPath != expectedAuthorizedKeysPath {
 		return profile.Profile{}, invalidField(
 			"AuthorizedKeysPath",
-			"must be fixed package path %q for dedicated user %q",
+			"must be fixed install path %q for dedicated user %q",
 			expectedAuthorizedKeysPath,
 			config.DedicatedUser,
 		)

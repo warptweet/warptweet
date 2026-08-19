@@ -200,8 +200,8 @@ func darwinProductionClientStateLayout() clientStateLayout {
 			installlayout.DarwinClientRoutesDirectory: {
 				description: "client routes directory",
 				directory:   true,
-				mode:        0o755,
-				group:       clientNodeRootGroup,
+				mode:        0o750,
+				group:       clientNodeServiceGroup,
 			},
 		},
 	}
@@ -828,7 +828,7 @@ func routeGenerationDirectoryPolicy(path string) (clientNodePolicy, bool) {
 	darwin := installlayout.DarwinClientRoutesDirectory
 	for _, root := range []string{linux, darwin} {
 		if path == root {
-			return clientNodePolicy{description: "client routes directory", directory: true, mode: 0o755, group: clientNodeRootGroup}, true
+			return clientNodePolicy{description: "client routes directory", directory: true, mode: 0o750, group: clientNodeServiceGroup}, true
 		}
 		if !strings.HasPrefix(path, root+string(os.PathSeparator)) {
 			continue

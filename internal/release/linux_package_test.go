@@ -23,6 +23,7 @@ func TestLinuxPackageBuildScriptContract(t *testing.T) {
 	for _, required := range []string{
 		`Linux package assembly requires Linux`,
 		`opt/warptweet/bin/warptweet`,
+		`usr/bin/warptweet`,
 		`warptweet-sshd.service`,
 		`warptweet-tunnel@.service`,
 		`sshd`,
@@ -87,7 +88,7 @@ func TestLinuxPackageScriptsForbidNetwork(t *testing.T) {
 	}
 	enrollmentUnit := string(readFile(t, filepath.Join(root, "packaging/systemd/warptweet-enroll.service")))
 	for _, required := range []string{
-		`ReadWritePaths=/var/lib/warptweet /opt/warptweet/etc/authorized_keys /etc/warptweet/enrollment`,
+		`ReadWritePaths=/var/lib/warptweet /etc/warptweet/enrollment /run/warptweet/server`,
 		`ExecStart=/opt/warptweet/bin/warptweet server enroll-listen`,
 	} {
 		if !strings.Contains(enrollmentUnit, required) {

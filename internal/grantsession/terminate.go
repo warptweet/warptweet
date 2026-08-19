@@ -14,9 +14,7 @@ func (authority *Authority) Terminate(clientID, generation, publicKeySHA256 stri
 		return err
 	}
 	defer authority.unlock()
-	records, err := authority.listMatching(func(record Record) bool {
-		return record.ClientID == clientID && record.Generation == generation && record.PublicKeySHA256 == publicKeySHA256
-	})
+	records, err := authority.listMatching(matchGrantSessions(clientID, generation, publicKeySHA256))
 	if err != nil {
 		return err
 	}
@@ -43,9 +41,7 @@ func (authority *Authority) VerifyGone(clientID, generation, publicKeySHA256 str
 		return err
 	}
 	defer authority.unlock()
-	records, err := authority.listMatching(func(record Record) bool {
-		return record.ClientID == clientID && record.Generation == generation && record.PublicKeySHA256 == publicKeySHA256
-	})
+	records, err := authority.listMatching(matchGrantSessions(clientID, generation, publicKeySHA256))
 	if err != nil {
 		return err
 	}
@@ -86,6 +82,21 @@ func (authority *Authority) TerminateAll() error {
 		}
 	}
 	return first
+}
+
+func matchGrantSessions(clientID, generation, publicKeySHA256 string) func(Record) bool {
+	return func(record Record) bool {
+		if record.ClientID != clientID {
+			return false
+		}
+		if generation != "" && record.Generation != generation {
+			return false
+		}
+		if publicKeySHA256 != "" && record.PublicKeySHA256 != publicKeySHA256 {
+			return false
+		}
+		return true
+	}
 }
 
 func osRemove(path string) error {

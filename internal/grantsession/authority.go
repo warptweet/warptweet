@@ -40,6 +40,9 @@ func (authority *Authority) Register(pid int, keyBlobSHA256, connectionID string
 	if err != nil {
 		return Record{}, fmt.Errorf("%w: process identity: %v", ErrRejected, err)
 	}
+	if identity.Exe == "" || !strings.Contains(identity.Exe, "/") {
+		return Record{}, fmt.Errorf("%w: process executable path is unavailable", ErrRejected)
+	}
 	if authority.ExpectedExe != "" {
 		if identity.Exe != authority.ExpectedExe {
 			return Record{}, fmt.Errorf("%w: process is not the WarpTweet data-plane", ErrRejected)
@@ -269,7 +272,10 @@ var knownSSHKeyTypes = []string{
 
 // KeyBlobDigest is the canonical digest of one OpenSSH public-key blob.
 func KeyBlobDigest(publicKey string) (string, error) {
-	fields := splitAuthorizedKeyFields(strings.TrimSpace(publicKey))
+	fields, err := splitAuthorizedKeyFieldsStrict(strings.TrimSpace(publicKey))
+	if err != nil {
+		return "", err
+	}
 	typeIndex := -1
 	for i, field := range fields {
 		if isKnownSSHKeyType(field) {
@@ -298,11 +304,30 @@ func isKnownSSHKeyType(value string) bool {
 }
 
 func splitAuthorizedKeyFields(line string) []string {
+	fields, err := splitAuthorizedKeyFieldsStrict(line)
+	if err != nil {
+		return nil
+	}
+	return fields
+}
+
+func splitAuthorizedKeyFieldsStrict(line string) ([]string, error) {
 	var fields []string
 	var current strings.Builder
 	inQuote := false
+	escaped := false
 	for i := 0; i < len(line); i++ {
 		c := line[i]
+		if escaped {
+			current.WriteByte(c)
+			escaped = false
+			continue
+		}
+		if c == '\\' && inQuote {
+			escaped = true
+			current.WriteByte(c)
+			continue
+		}
 		switch {
 		case c == '"':
 			inQuote = !inQuote
@@ -316,8 +341,11 @@ func splitAuthorizedKeyFields(line string) []string {
 			current.WriteByte(c)
 		}
 	}
+	if inQuote || escaped {
+		return nil, fmt.Errorf("unterminated quoted authorized_keys field")
+	}
 	if current.Len() > 0 {
 		fields = append(fields, current.String())
 	}
-	return fields
+	return fields, nil
 }

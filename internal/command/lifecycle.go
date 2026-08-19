@@ -163,11 +163,12 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		proof = submitted
 	}
 
-	sshDigest := strings.Repeat("0", 64)
-	if digest, err := fileSHA256(layout.SSHPath); err == nil {
-		sshDigest = digest
-	} else if digest, err := fileSHA256(installlayout.SSHPath); err == nil {
-		sshDigest = digest
+	sshDigest, err := fileSHA256(layout.SSHPath)
+	if err != nil {
+		sshDigest, err = fileSHA256(installlayout.SSHPath)
+		if err != nil {
+			return fmt.Errorf("hash ssh engine: %w", err)
+		}
 	}
 	manifest, err := enrollment.BuildClientManifest(invite, view.TunnelID, view.ListenPort, sshDigest)
 	if err != nil {
@@ -926,6 +927,9 @@ func loadOrCreatePendingEnrollment(
 	root := filepath.Join(enrollmentReceiptDir(clientManifestPath), "pending-enrollment")
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		return pendingEnrollment{}, "", "", err
+	}
+	if !enrollment.IsHexID(invite.InviteID) {
+		return pendingEnrollment{}, "", "", fmt.Errorf("invite_id is invalid")
 	}
 	directory := filepath.Join(root, invite.InviteID)
 	statePath := filepath.Join(directory, "enrollment.json")

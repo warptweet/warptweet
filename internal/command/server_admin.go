@@ -55,10 +55,9 @@ func runServerRevoke(arguments []string, stdout, stderr io.Writer) error {
 		return errors.New("server revoke requires exactly one client-id or invite-id")
 	}
 	id := arguments[0]
-	if id == "" {
-		return errors.New("revoke id is required")
+	if !enrollment.IsHexID(id) {
+		return errors.New("revoke id must be a hexadecimal identifier")
 	}
-	// Prefer invite-id revocation when a matching invite exists.
 	if record, err := enrollment.Load(inviteDirectory, id); err == nil {
 		revoked, err := enrollment.Revoke(inviteDirectory, id, time.Now().UTC())
 		if err != nil {
@@ -71,20 +70,10 @@ func runServerRevoke(arguments []string, stdout, stderr io.Writer) error {
 			"prior":     record.Status,
 		})
 	}
-	// Otherwise treat the argument as a managed client marker path suffix and
-	// clear authorized_keys transactionally when it matches the only entry.
-	manifest, err := server.Load(installlayout.ServerManifestPath)
-	if err != nil {
-		return err
+	if _, err := enrollment.LoadClient(installlayout.ClientsDirectory, id); err == nil {
+		return errors.New("server revoke of an enrolled grant requires the client management token via POST /v1/revoke")
 	}
-	if err := clearAuthorizedKeys(manifest.AuthorizedKeysPath); err != nil {
-		return err
-	}
-	return writeJSON(stdout, map[string]any{
-		"status":               "authorization_cleared",
-		"client_id":            id,
-		"authorized_keys_path": manifest.AuthorizedKeysPath,
-	})
+	return fmt.Errorf("unknown invite or client %q", id)
 }
 
 func runServerStatus(ctx context.Context, arguments []string, stdout, stderr io.Writer) error {

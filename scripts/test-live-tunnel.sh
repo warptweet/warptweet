@@ -56,10 +56,10 @@ WT_SSH=/opt/warptweet/libexec/openssh/bin/ssh
 WT_KEYGEN=/opt/warptweet/libexec/openssh/bin/ssh-keygen
 WT_SSHD=/opt/warptweet/libexec/openssh/sbin/sshd
 WT_SERVER_MANIFEST=/etc/warptweet/server.wt
-WT_SERVER_CONFIG=/opt/warptweet/etc/sshd_config
-WT_HOST_KEY=/opt/warptweet/etc/ssh_host_mldsa44_ed25519_key
+WT_SERVER_CONFIG=/etc/warptweet/sshd_config
+WT_HOST_KEY=/var/lib/warptweet/ssh/ssh_host_mldsa44_ed25519_key
 WT_HOST_PUBLIC_KEY="$WT_HOST_KEY.pub"
-WT_AUTHORIZED_KEYS=/opt/warptweet/etc/authorized_keys/warptweet
+WT_AUTHORIZED_KEYS=/var/lib/warptweet/authorized_keys/warptweet
 WT_BUNDLE_MANIFEST=/opt/warptweet/share/openssh-bundle.sha256
 WT_TEST_CONFIG_DIRECTORY=/opt/warptweet/etc/live-gate
 WT_STATE_DIRECTORY=/run/warptweet/live-gate
@@ -827,7 +827,8 @@ for WT_DIRECTORY in \
     /opt/warptweet \
     /opt/warptweet/bin \
     /opt/warptweet/etc \
-    /opt/warptweet/etc/authorized_keys \
+    /var/lib/warptweet/ssh \
+    /var/lib/warptweet/authorized_keys \
     /opt/warptweet/libexec \
     /opt/warptweet/libexec/openssh \
     /opt/warptweet/libexec/openssh/bin \

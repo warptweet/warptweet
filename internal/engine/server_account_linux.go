@@ -60,8 +60,22 @@ func inspectProductionServerAccounts(dedicatedUser string) (serverAccountEvidenc
 	if err != nil {
 		return serverAccountEvidence{}, fmt.Errorf("validate server Unix accounts: %w", err)
 	}
-	if evidence.passwdSHA256 != passwdHash || evidence.groupSHA256 != groupHash ||
-		evidence.shadowSHA256 != shadowHash {
+	passwdAfter, passwdHashAfter, err := readProductionAccountDatabase("/etc/passwd", "passwd", serverAccountDatabasePolicy)
+	if err != nil {
+		return serverAccountEvidence{}, err
+	}
+	clear(passwdAfter)
+	groupAfter, groupHashAfter, err := readProductionAccountDatabase("/etc/group", "group", serverAccountDatabasePolicy)
+	if err != nil {
+		return serverAccountEvidence{}, err
+	}
+	clear(groupAfter)
+	shadowAfter, shadowHashAfter, err := readProductionAccountDatabase("/etc/shadow", "shadow", serverShadowDatabasePolicy)
+	if err != nil {
+		return serverAccountEvidence{}, err
+	}
+	clear(shadowAfter)
+	if passwdHashAfter != passwdHash || groupHashAfter != groupHash || shadowHashAfter != shadowHash {
 		return serverAccountEvidence{}, fmt.Errorf("validate server Unix accounts: account database hash changed unexpectedly")
 	}
 	if err := verifyHeldServerAncestor(etcAnchor, requireProductionRootOwner); err != nil {

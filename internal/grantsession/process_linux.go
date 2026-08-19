@@ -119,7 +119,8 @@ func waitIdentityGone(identity ProcessIdentity, deadline time.Duration) bool {
 }
 
 func looksLikeWarpTweetSession(identity ProcessIdentity) bool {
-	return strings.HasSuffix(identity.Exe, sshdSessionSuffix) || strings.HasSuffix(identity.Exe, "/sbin/sshd")
+	return strings.Contains(identity.Exe, "/") &&
+		(strings.HasSuffix(identity.Exe, sshdSessionSuffix) || strings.HasSuffix(identity.Exe, "/sbin/sshd"))
 }
 
 func peerPID(conn syscall.Conn) (int, error) {

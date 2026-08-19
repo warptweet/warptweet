@@ -39,7 +39,7 @@ const (
 	maxServerCommandOutput   = 1 << 20
 
 	expectedOpenSSHSysconfDir = "/opt/warptweet/etc/openssh"
-	expectedServerPIDFile     = "/run/warptweet/server/warptweet-sshd.pid"
+	expectedServerPIDFile     = "/run/warptweet/sshd/warptweet-sshd.pid"
 )
 
 var (

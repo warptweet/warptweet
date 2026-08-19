@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"syscall"
 	"time"
 )
 
@@ -16,6 +17,7 @@ const (
 	defaultStableWindow    = time.Minute
 	defaultStartupTimeout  = 30 * time.Second
 	defaultMaximumAttempts = 10
+	terminateGrace         = 2 * time.Second
 )
 
 // Policy controls bounded restart behavior for an established tunnel.
@@ -48,11 +50,13 @@ type Runner interface {
 }
 
 // Process is one directly started, foreground data-plane process. Wait must be
-// called exactly once. Terminate must not reap the process.
+// called exactly once. Terminate must not reap the process. Kill is a last-resort
+// force stop after Terminate grace.
 type Process interface {
 	PID() int
 	Wait() error
 	Terminate() error
+	Kill() error
 }
 
 // Launcher starts a command without waiting for it. Readiness is deliberately
@@ -173,6 +177,14 @@ func (process *execProcess) Wait() error {
 }
 
 func (process *execProcess) Terminate() error {
+	err := process.command.Process.Signal(syscall.SIGTERM)
+	if errors.Is(err, os.ErrProcessDone) {
+		return nil
+	}
+	return err
+}
+
+func (process *execProcess) Kill() error {
 	err := process.command.Process.Kill()
 	if errors.Is(err, os.ErrProcessDone) {
 		return nil
@@ -561,10 +573,24 @@ func terminateAndReap(process Process, waitResult <-chan error) error {
 	var waitErr error
 	if waitResult == nil {
 		waitErr = process.Wait()
-	} else {
-		waitErr = <-waitResult
+		return errors.Join(terminateErr, waitErr)
 	}
-	return errors.Join(terminateErr, waitErr)
+	timer := time.NewTimer(terminateGrace)
+	defer timer.Stop()
+	select {
+	case waitErr = <-waitResult:
+		return errors.Join(terminateErr, waitErr)
+	case <-timer.C:
+		terminateErr = errors.Join(terminateErr, process.Kill())
+		killTimer := time.NewTimer(terminateGrace)
+		defer killTimer.Stop()
+		select {
+		case waitErr = <-waitResult:
+			return errors.Join(terminateErr, waitErr)
+		case <-killTimer.C:
+			return errors.Join(terminateErr, errors.New("process did not exit after kill"))
+		}
+	}
 }
 
 func processExitError(boundary string, err error) error {

@@ -182,3 +182,30 @@ func TestWriteReceiptRequiresHostExpiry(t *testing.T) {
 		t.Fatalf("WriteReceipt: %v", err)
 	}
 }
+
+func TestWriteIntentRepairsExistingMode(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := Store{Root: root}
+	routeDir := filepath.Join(root, "staging-db")
+	if err := os.MkdirAll(routeDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WriteIntent(Intent{
+		Kind:          KindDesiredState,
+		SchemaVersion: CurrentSchemaVersion,
+		RouteID:       "staging-db",
+		DesiredState:  DesiredRunning,
+		RestartPolicy: RestartUnlessStopped,
+	}); err != nil {
+		t.Fatalf("WriteIntent: %v", err)
+	}
+	info, err := os.Stat(routeDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o750 {
+		t.Fatalf("route dir mode=%o, want 0750", info.Mode().Perm())
+	}
+}

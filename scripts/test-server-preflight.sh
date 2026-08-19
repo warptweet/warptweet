@@ -304,7 +304,8 @@ install -d -o root -g root -m 0755 \
     /opt/warptweet \
     /opt/warptweet/bin \
     /opt/warptweet/etc \
-    /opt/warptweet/etc/authorized_keys \
+    /var/lib/warptweet/ssh \
+    /var/lib/warptweet/authorized_keys \
     /opt/warptweet/libexec \
     /opt/warptweet/libexec/openssh \
     /opt/warptweet/libexec/openssh/bin \
@@ -342,7 +343,7 @@ fi
 ) || fail "installed OpenSSH bundle failed authentication before execution"
 
 WT_KEYGEN=/opt/warptweet/libexec/openssh/bin/ssh-keygen
-WT_HOST_KEY=/opt/warptweet/etc/ssh_host_mldsa44_ed25519_key
+WT_HOST_KEY=/var/lib/warptweet/ssh/ssh_host_mldsa44_ed25519_key
 WT_CLIENT_KEY=/opt/warptweet/etc/.ci_client_mldsa44_ed25519_key
 "$WT_KEYGEN" -q -t mldsa44-ed25519 -N '' -C warptweet-ci-host -f "$WT_HOST_KEY"
 "$WT_KEYGEN" -q -t mldsa44-ed25519 -N '' -C warptweet-ci-client -f "$WT_CLIENT_KEY"
@@ -367,21 +368,21 @@ WT_SERVER_MANIFEST=/etc/warptweet/server.wt
     printf '%s\n' '  "listen": {"address": "127.0.0.1", "port": 2222},'
     printf '%s\n' '  "target": {"address": "127.0.0.1", "port": 5432},'
     printf '%s\n' '  "dedicated_user": "warptweet",'
-    printf '%s\n' '  "host_key_path": "/opt/warptweet/etc/ssh_host_mldsa44_ed25519_key",'
-    printf '%s\n' '  "authorized_keys_path": "/opt/warptweet/etc/authorized_keys/warptweet"'
+    printf '%s\n' '  "host_key_path": "/var/lib/warptweet/ssh/ssh_host_mldsa44_ed25519_key",'
+    printf '%s\n' '  "authorized_keys_path": "/var/lib/warptweet/authorized_keys/warptweet"'
     printf '%s\n' '}'
 } >"$WT_SERVER_MANIFEST"
 chmod 0644 "$WT_SERVER_MANIFEST"
 
 /opt/warptweet/bin/warptweet render-server \
     --config "$WT_SERVER_MANIFEST" \
-    >/opt/warptweet/etc/sshd_config
-chmod 0644 /opt/warptweet/etc/sshd_config
+    >/etc/warptweet/sshd_config
+chmod 0644 /etc/warptweet/sshd_config
 /opt/warptweet/bin/warptweet render-authorized-key \
     --config "$WT_SERVER_MANIFEST" \
     --public-key "$WT_CLIENT_KEY.pub" \
-    >/opt/warptweet/etc/authorized_keys/warptweet
-chmod 0644 /opt/warptweet/etc/authorized_keys/warptweet
+    >/var/lib/warptweet/authorized_keys/warptweet
+chmod 0644 /var/lib/warptweet/authorized_keys/warptweet
 
 rm -f -- "$WT_CLIENT_KEY" "$WT_CLIENT_KEY.pub"
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -273,5 +274,39 @@ func TestHostInviteFileNamingHelpersMatchProductPolicy(t *testing.T) {
 	}
 	if _, err := enrollment.WriteInviteFileExact(path, []byte("{}\n")); !errors.Is(err, enrollment.ErrInvitePathCollision) {
 		t.Fatalf("exact overwrite err=%v", err)
+	}
+}
+
+func TestEnsureDirectoryModeRepairsExistingMode(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	hostKeyDir := filepath.Join(root, "ssh")
+	keysDir := filepath.Join(root, "authorized_keys")
+	if err := os.Mkdir(hostKeyDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(keysDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureDirectoryMode(hostKeyDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureDirectoryMode(keysDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	hostInfo, err := os.Stat(hostKeyDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hostInfo.Mode().Perm() != 0o700 {
+		t.Fatalf("host key dir mode=%o", hostInfo.Mode().Perm())
+	}
+	keysInfo, err := os.Stat(keysDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keysInfo.Mode().Perm() != 0o755 {
+		t.Fatalf("authorized_keys dir mode=%o", keysInfo.Mode().Perm())
 	}
 }

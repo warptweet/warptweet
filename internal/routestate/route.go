@@ -207,7 +207,7 @@ func (store Store) Reserve(routeID string) error {
 		}
 		return err
 	}
-	return nil
+	return os.Chmod(directory, 0o750)
 }
 
 // WriteIntent persists desired state atomically.
@@ -222,10 +222,13 @@ func (store Store) WriteIntent(intent Intent) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
-	return writeJSONAtomic(path, intent, 0o600)
+	if err := os.Chmod(filepath.Dir(path), 0o750); err != nil {
+		return err
+	}
+	return writeJSONAtomic(path, intent, 0o640)
 }
 
 // LoadIntent reads one desired-state document.
@@ -267,10 +270,13 @@ func (store Store) WriteReceipt(receipt Receipt) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
-	return writeJSONAtomic(path, receipt, 0o600)
+	if err := os.Chmod(filepath.Dir(path), 0o750); err != nil {
+		return err
+	}
+	return writeJSONAtomic(path, receipt, 0o640)
 }
 
 // LoadReceipt reads one enrollment receipt.

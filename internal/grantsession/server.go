@@ -2,6 +2,7 @@ package grantsession
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -23,7 +24,9 @@ func (server *Server) Serve(ctx context.Context) error {
 	if err := os.MkdirAll(dirOf(server.Socket), 0o755); err != nil {
 		return err
 	}
-	_ = os.Remove(server.Socket)
+	if err := removeExistingGrantSocket(server.Socket); err != nil {
+		return err
+	}
 	listener, err := net.Listen("unix", server.Socket)
 	if err != nil {
 		return err
@@ -84,6 +87,20 @@ func (server *Server) handle(connection net.Conn) {
 		}
 	}
 	_, _ = connection.Write(encodeResponse(Response{OK: true}))
+}
+
+func removeExistingGrantSocket(path string) error {
+	info, err := os.Lstat(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSocket == 0 {
+		return fmt.Errorf("grant session path exists and is not a socket")
+	}
+	return os.Remove(path)
 }
 
 func dirOf(path string) string {

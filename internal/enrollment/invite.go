@@ -203,6 +203,9 @@ func ParseAndVerify(raw []byte, secret []byte, now time.Time) (Invite, error) {
 
 // Store persists one invite record under the invites directory.
 func Store(directory string, record Record) error {
+	if !isHexID(record.InviteID) {
+		return fmt.Errorf("%w: invite_id is invalid", ErrInvalidInvite)
+	}
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return err
 	}
@@ -213,8 +216,16 @@ func Store(directory string, record Record) error {
 	return writeJSONAtomic(path, record, 0o600)
 }
 
+// IsHexID reports whether value is a bounded hexadecimal identifier.
+func IsHexID(value string) bool {
+	return isHexID(value)
+}
+
 // Load reads one invite record.
 func Load(directory, inviteID string) (Record, error) {
+	if !isHexID(inviteID) {
+		return Record{}, fmt.Errorf("%w: invite_id is invalid", ErrInvalidInvite)
+	}
 	contents, err := os.ReadFile(recordPath(directory, inviteID))
 	if err != nil {
 		return Record{}, err
@@ -388,6 +399,9 @@ func validateInviteShape(invite Invite) error {
 	}
 	if invite.InviteID == "" || invite.ClientName == "" || invite.Nonce == "" || invite.MAC == "" {
 		return fmt.Errorf("%w: required fields missing", ErrInvalidInvite)
+	}
+	if !isHexID(invite.InviteID) {
+		return fmt.Errorf("%w: invite_id is invalid", ErrInvalidInvite)
 	}
 	if _, err := netip.ParseAddr(invite.ServerAddress); err != nil {
 		return fmt.Errorf("%w: server address: %v", ErrInvalidInvite, err)

@@ -2,6 +2,7 @@ package enrollment
 
 import (
 	"net/netip"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -205,5 +206,48 @@ func TestCreateRejectsUnsafeInputs(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("Create accepted unsafe client name")
+	}
+}
+
+func TestInviteIDRejectsPathTraversal(t *testing.T) {
+	t.Parallel()
+
+	invite := Invite{
+		Kind:                         KindInvite,
+		SchemaVersion:                CurrentSchemaVersion,
+		InviteID:                     "../../../tmp",
+		ClientName:                   "laptop-1",
+		ServerAddress:                "192.0.2.10",
+		ServerPort:                   2222,
+		EnrollPort:                   29722,
+		TargetAddress:                "198.51.100.20",
+		TargetPort:                   5432,
+		Principal:                    "warptweet",
+		ProfileID:                    "profile-v1",
+		Nonce:                        strings.Repeat("ab", 16),
+		MAC:                          strings.Repeat("cd", 32),
+		EnrollmentTLSSPKISHA256:      strings.Repeat("ab", 32),
+		AuthorizationDurationSeconds: 2592000,
+	}
+	if err := validateInviteShape(invite); err == nil {
+		t.Fatal("validateInviteShape accepted a path invite_id")
+	}
+	if _, err := Load(t.TempDir(), "../../../tmp"); err == nil {
+		t.Fatal("Load accepted a path invite_id")
+	}
+}
+
+func TestStoreRejectsTraversalInviteID(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	outside := filepath.Join(filepath.Dir(root), "evil.json")
+	_ = os.Remove(outside)
+	err := Store(root, Record{Invite: Invite{InviteID: "../evil"}})
+	if err == nil {
+		t.Fatal("Store accepted a traversal invite_id")
+	}
+	if _, err := os.Lstat(outside); err == nil {
+		t.Fatal("Store wrote outside the invite directory")
 	}
 }

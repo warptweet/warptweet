@@ -112,7 +112,7 @@ func Call(ctx context.Context, request Request) (Response, error) {
 		return Response{}, fmt.Errorf("connect to installed WarpTweet provisioner: %w", err)
 	}
 	defer connection.Close()
-	deadline := time.Now().Add(60 * time.Second)
+	deadline := time.Now().Add(90 * time.Second)
 	_ = connection.SetDeadline(deadline)
 	encoder := json.NewEncoder(connection)
 	encoder.SetEscapeHTML(false)

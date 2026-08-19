@@ -226,8 +226,8 @@ func writeAuthorizedKeyCommandInputs(t *testing.T) (string, string, string) {
 			Port:    5432,
 		},
 		DedicatedUser:      server.DefaultDedicatedUser,
-		HostKeyPath:        "/opt/warptweet/etc/ssh_host_mldsa44_ed25519_key",
-		AuthorizedKeysPath: "/opt/warptweet/etc/authorized_keys/warptweet",
+		HostKeyPath:        "/var/lib/warptweet/ssh/ssh_host_mldsa44_ed25519_key",
+		AuthorizedKeysPath: "/var/lib/warptweet/authorized_keys/warptweet",
 	}
 	manifestData, err := json.Marshal(manifest)
 	if err != nil {

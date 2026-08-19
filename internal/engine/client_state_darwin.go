@@ -6,8 +6,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"os/user"
 	"strconv"
+	"strings"
 	"syscall"
 )
 
@@ -73,9 +75,11 @@ func lookupDarwinClientServiceIdentity(userName, groupName string) (clientServic
 			expectedDarwinClientServiceHome,
 		)
 	}
-	// user.User does not expose shell on all Go versions; pin shell via Directory
-	// Services when available and otherwise require the dedicated account exists.
-	if shell, shellErr := darwinUserShell(userName); shellErr == nil && shell != expectedDarwinClientServiceShell {
+	shell, err := darwinUserShell(userName)
+	if err != nil {
+		return clientServiceIdentity{}, fmt.Errorf("verify client service shell: %w", err)
+	}
+	if shell != expectedDarwinClientServiceShell {
 		return clientServiceIdentity{}, fmt.Errorf(
 			"client service shell is %q, want %q",
 			shell,
@@ -86,18 +90,21 @@ func lookupDarwinClientServiceIdentity(userName, groupName string) (clientServic
 }
 
 func darwinUserShell(userName string) (string, error) {
-	// Prefer getpwnam-compatible lookup through the system user database.
-	account, err := user.Lookup(userName)
+	if userName == "" || strings.ContainsAny(userName, "/\\:") {
+		return "", fmt.Errorf("service user name is invalid")
+	}
+	if _, err := user.Lookup(userName); err != nil {
+		return "", err
+	}
+	output, err := exec.Command("/usr/bin/dscl", ".", "-read", "/Users/"+userName, "UserShell").Output()
 	if err != nil {
 		return "", err
 	}
-	type shellUser interface {
-		Shell() string
+	fields := strings.Fields(string(output))
+	if len(fields) == 0 {
+		return "", fmt.Errorf("dscl UserShell is empty")
 	}
-	if withShell, ok := any(account).(shellUser); ok {
-		return withShell.Shell(), nil
-	}
-	return expectedDarwinClientServiceShell, nil
+	return fields[len(fields)-1], nil
 }
 
 func inspectDarwinClientFileMetadata(

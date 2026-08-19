@@ -50,6 +50,9 @@ func TestMacOSPackageUsesTypedProvisionerAndDedicatedTunnelJobs(t *testing.T) {
 			t.Errorf("macOS package build omits %q", required)
 		}
 	}
+	if strings.Contains(build, "usr/local/bin") {
+		t.Fatal("macOS package payload must not include /usr/local/bin")
+	}
 	if strings.Contains(build, "com.warptweet.client.plist") {
 		t.Fatal("macOS package still installs the obsolete static client LaunchDaemon")
 	}
@@ -70,6 +73,7 @@ func TestMacOSPackageUsesTypedProvisionerAndDedicatedTunnelJobs(t *testing.T) {
 		`WT_ADMIN_GROUP_ID=$(dscl . -read /Groups/admin PrimaryGroupID`,
 		`chmod -N "$WT_ACL_PATH"`,
 		`chmod -RN "$WT_STATE"`,
+		`/usr/local/bin/warptweet`,
 		`launchctl bootstrap system "$WT_PROVISIONER_PLIST"`,
 		`WT_SOCKET_STATE=$(stat -f '%u:%g:%Lp' "$WT_SOCKET")`,
 		`"0:$WT_ADMIN_GROUP_ID:660"`,

@@ -7,10 +7,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+
 	"path/filepath"
 	"sort"
 	"strings"
 	"time"
+	"warptweet.com/warptweet/internal/strictjson"
 )
 
 const (
@@ -224,6 +226,9 @@ func DefaultChecklistPath(repositoryRoot string) string {
 }
 
 func decodeStrict(raw []byte, destination any) error {
+	if err := strictjson.RejectDuplicateObjectNames(raw); err != nil {
+		return err
+	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(destination); err != nil {
