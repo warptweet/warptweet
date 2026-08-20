@@ -18,7 +18,7 @@ func TestLockPathExclusiveReclaimsClosedSamePID(t *testing.T) {
 	if err := os.WriteFile(lockPath, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	unlock, err := lockPathExclusive(dir, name, "reclaim")
+	unlock, err := lockPathExclusive(dir, name, "reclaim", false)
 	if err != nil {
 		t.Fatalf("reclaim closed same-PID lock: %v", err)
 	}

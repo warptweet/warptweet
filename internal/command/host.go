@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -24,6 +23,7 @@ import (
 	"warptweet.com/warptweet/internal/enrollment"
 	"warptweet.com/warptweet/internal/grant"
 	"warptweet.com/warptweet/internal/installlayout"
+	"warptweet.com/warptweet/internal/outcome"
 	"warptweet.com/warptweet/internal/profile"
 	"warptweet.com/warptweet/internal/server"
 )
@@ -59,6 +59,9 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 	}
 	if stdoutInvite.value && out.value != "" {
 		return errors.New("host --stdout cannot be combined with --out")
+	}
+	if stdoutInvite.value && asJSON.value {
+		return errors.New("host --stdout cannot be combined with --json")
 	}
 	if noInvite.value && (out.value != "" || name.value != "") {
 		return errors.New("host --no-invite cannot be combined with invite naming flags")
@@ -99,35 +102,47 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 	if err := ensureHostDirectories(); err != nil {
 		return err
 	}
-	if grant.ClockIsBlocked(installlayout.HostClockBlockedPath) {
-		return fmt.Errorf("host clock: blocked until warptweet server clock-recover")
-	}
-	if _, err := grant.ObserveClock(installlayout.HostClockObservationPath, time.Now().UTC()); err != nil {
-		if existing, loadErr := server.Load(installlayout.ServerManifestPath); loadErr == nil {
-			if closeErr := enterBlockedClock(existing, err); closeErr != nil {
-				return closeErr
-			}
-		}
-		return fmt.Errorf("host clock: %w", err)
-	}
-	hostPublicKey, createdHostKey, err := ensureHostIdentity(ctx)
-	if err != nil {
-		return err
-	}
-	if err := ensureInviteSecret(); err != nil {
-		return err
-	}
-	enrollmentPin, createdEnrollmentIdentity, renewedEnrollmentCertificate, err := enrollment.EnsureTLSIdentity(
-		installlayout.ServerEnrollmentTLSCertPath,
-		installlayout.ServerEnrollmentTLSKeyPath,
-		[]net.IP{net.IP(listenEndpoint.Addr().AsSlice())},
-		time.Now().UTC(),
+	var (
+		hostPublicKey                string
+		createdHostKey               bool
+		enrollmentPin                string
+		createdEnrollmentIdentity    bool
+		renewedEnrollmentCertificate bool
+		manifest                     server.Config
 	)
-	if err != nil {
-		return fmt.Errorf("ensure enrollment TLS identity: %w", err)
-	}
-	var manifest server.Config
 	if err := withHostStateLock(func() error {
+		if grant.ClockIsBlocked(installlayout.HostClockBlockedPath) {
+			return outcome.New(outcome.CodeClockBlocked, "host clock: blocked until warptweet server clock-recover", "Run host clock recovery before minting invites", 1)
+		}
+		if _, err := grant.ObserveClock(installlayout.HostClockObservationPath, time.Now().UTC()); err != nil {
+			if existing, loadErr := server.Load(installlayout.ServerManifestPath); loadErr == nil {
+				if closeErr := enterBlockedClock(existing, err); closeErr != nil {
+					return closeErr
+				}
+			}
+			return fmt.Errorf("host clock: %w", err)
+		}
+		key, created, err := ensureHostIdentity(ctx)
+		if err != nil {
+			return err
+		}
+		hostPublicKey = key
+		createdHostKey = created
+		if err := ensureInviteSecret(); err != nil {
+			return err
+		}
+		pin, createdTLS, renewedTLS, err := enrollment.EnsureTLSIdentity(
+			installlayout.ServerEnrollmentTLSCertPath,
+			installlayout.ServerEnrollmentTLSKeyPath,
+			[]net.IP{net.IP(listenEndpoint.Addr().AsSlice())},
+			time.Now().UTC(),
+		)
+		if err != nil {
+			return fmt.Errorf("ensure enrollment TLS identity: %w", err)
+		}
+		enrollmentPin = pin
+		createdEnrollmentIdentity = createdTLS
+		renewedEnrollmentCertificate = renewedTLS
 		if err := refuseHostTargetChange(targetEndpoint); err != nil {
 			return err
 		}
@@ -208,17 +223,6 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 	raw = append(raw, '\n')
 
 	if stdoutInvite.value {
-		if asJSON.value {
-			var inviteObject any
-			if err := json.Unmarshal(raw, &inviteObject); err != nil {
-				return err
-			}
-			result["invite_id"] = invite.InviteID
-			result["invite_expires_at"] = invite.ExpiresAt
-			result["authorization_duration_seconds"] = invite.AuthorizationDurationSeconds
-			result["invite"] = inviteObject
-			return writeJSON(stdout, result)
-		}
 		_, err := stdout.Write(raw)
 		return err
 	}
@@ -526,7 +530,12 @@ func defaultHostLabel() string {
 const hostStateLockName = ".host.lock"
 
 func withHostStateLock(fn func() error) error {
-	return enrollment.WithExclusiveLock(serverStateDirectory, hostStateLockName, fn)
+	err := enrollment.WithNonBlockingExclusiveLock(serverStateDirectory, hostStateLockName, fn)
+	if errors.Is(err, enrollment.ErrBusy) {
+		lockPath := filepath.Join(serverStateDirectory, hostStateLockName)
+		return fmt.Errorf("%w: another host command holds %s", outcome.ErrHostBusy, lockPath)
+	}
+	return err
 }
 
 func refuseHostTargetChange(targetEndpoint netip.AddrPort) error {

@@ -184,5 +184,10 @@ func writeInviteExclusive(path string, contents []byte) error {
 		_ = os.Remove(path)
 		return err
 	}
-	return nil
+	directory, err := os.Open(filepath.Dir(path))
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	return directory.Sync()
 }

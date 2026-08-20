@@ -137,7 +137,7 @@ func TestServerInitRequiresFlags(t *testing.T) {
 	if code == 0 {
 		t.Fatal("init accepted missing flags")
 	}
-	if !strings.Contains(stderr.String(), "replaced by warptweet host") {
+	if !strings.Contains(stderr.String(), "replaced by") || !strings.Contains(stderr.String(), "warptweet host") {
 		t.Fatalf("stderr=%s", stderr.String())
 	}
 }

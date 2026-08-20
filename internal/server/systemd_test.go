@@ -86,14 +86,41 @@ func TestReconcileUnitUsesTypedController(t *testing.T) {
 	unit := readUnit(t, "warptweet-reconcile.service")
 	requireUnitLines(t, unit,
 		"Description=WarpTweet client route reconciler",
+		"Requires=warptweet-provisioner.service",
+		"After=network-online.target warptweet-provisioner.service",
 		"AssertFileIsExecutable=/opt/warptweet/bin/warptweet",
 		"Type=oneshot",
-		"KillMode=process",
+		"KillMode=control-group",
 		"ExecStart=/opt/warptweet/bin/warptweet reconcile",
 		"User=root",
 		"NoNewPrivileges=yes",
 		"ProtectSystem=strict",
+		"PrivateTmp=yes",
+		"CapabilityBoundingSet=",
+		"MemoryDenyWriteExecute=yes",
 	)
+}
+
+func TestProvisionerUnitIsRootProjector(t *testing.T) {
+	t.Parallel()
+
+	unit := readUnit(t, "warptweet-provisioner.service")
+	requireUnitLines(t, unit,
+		"Description=WarpTweet client provisioner",
+		"AssertFileIsExecutable=/opt/warptweet/bin/warptweet-provisioner",
+		"ExecStart=/opt/warptweet/bin/warptweet-provisioner serve",
+		"User=root",
+		"KillMode=control-group",
+		"NoNewPrivileges=yes",
+		"ProtectSystem=strict",
+		"ReadWritePaths=/etc/warptweet /run/warptweet",
+		"CapabilityBoundingSet=",
+		"PrivateTmp=yes",
+		"MemoryDenyWriteExecute=yes",
+	)
+	if strings.Contains(unit, "warptweet run") || strings.Contains(unit, "/usr/bin/ssh") {
+		t.Fatal("provisioner unit must not exec the tunnel engine")
+	}
 }
 
 func TestTunnelUnitUsesControllerContractWithoutAmbientPrivileges(t *testing.T) {
@@ -106,7 +133,7 @@ func TestTunnelUnitUsesControllerContractWithoutAmbientPrivileges(t *testing.T) 
 		"AssertPathExists=/etc/warptweet/routes/%i/active.json",
 		"Type=notify",
 		"NotifyAccess=main",
-		"ExecStart=/opt/warptweet/bin/warptweet run --route %i --once",
+		"ExecStart=/opt/warptweet/bin/warptweet run --route %i --once --managed-lifecycle",
 		"User=warptweet-client",
 		"Group=warptweet-client",
 		"RuntimeDirectory=warptweet/tunnels/%i",

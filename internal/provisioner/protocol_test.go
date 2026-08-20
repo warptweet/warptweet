@@ -1,10 +1,15 @@
 package provisioner
 
 import (
-	"bytes"
 	"encoding/json"
+	"os"
+	"path/filepath"
+	"reflect"
+	"runtime"
 	"strings"
 	"testing"
+
+	"warptweet.com/warptweet/internal/installlayout"
 )
 
 func TestValidateRequestAcceptsOnlyActionSpecificFields(t *testing.T) {
@@ -19,6 +24,7 @@ func TestValidateRequestAcceptsOnlyActionSpecificFields(t *testing.T) {
 		{name: "enroll", request: Request{Version: 1, Action: ActionEnroll, Invite: invite}},
 		{name: "enroll once", request: Request{Version: 1, Action: ActionEnroll, Invite: invite, Once: true}, wantErr: "only for up"},
 		{name: "up", request: Request{Version: 1, Action: ActionUp, TunnelID: "db-1"}},
+		{name: "repair", request: Request{Version: 1, Action: ActionRepair, TunnelID: "db-1"}},
 		{name: "up proof", request: Request{Version: 1, Action: ActionUp, TunnelID: "db-1", Proof: json.RawMessage(`{}`)}, wantErr: "another action"},
 		{name: "status all", request: Request{Version: 1, Action: ActionStatus}},
 		{name: "status once", request: Request{Version: 1, Action: ActionStatus, Once: true}, wantErr: "another action"},
@@ -63,47 +69,6 @@ func TestDecodeSingleJSONRejectsUnknownTrailingAndOversizedInput(t *testing.T) {
 	}
 }
 
-func TestRenderTunnelPlistIsClosedAndDeterministic(t *testing.T) {
-	t.Parallel()
-
-	first, label, err := renderTunnelPlist("db-1", false, true)
-	if err != nil {
-		t.Fatalf("renderTunnelPlist: %v", err)
-	}
-	second, secondLabel, err := renderTunnelPlist("db-1", false, true)
-	if err != nil {
-		t.Fatalf("renderTunnelPlist repeat: %v", err)
-	}
-	if label != "com.warptweet.tunnel.db-1" || secondLabel != label || !bytes.Equal(first, second) {
-		t.Fatalf("nondeterministic plist or label %q/%q", label, secondLabel)
-	}
-	text := string(first)
-	for _, required := range []string{
-		"<string>/Library/Application Support/WarpTweet/bin/warptweet</string>",
-		"<string>run</string>",
-		"<string>--managed-lifecycle</string>",
-		"<string>_warptweet</string>",
-		"<key>KeepAlive</key><false/>",
-	} {
-		if !strings.Contains(text, required) {
-			t.Errorf("plist omits %q", required)
-		}
-	}
-	if strings.Contains(text, "--once") {
-		t.Fatal("default managed plist unexpectedly disables bounded in-process restart")
-	}
-	once, _, err := renderTunnelPlist("db-1", true, true)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Count(string(once), "<string>--once</string>") != 1 {
-		t.Fatal("once plist does not contain exactly one --once argument")
-	}
-	if _, _, err := renderTunnelPlist(`db</string>`, false, true); err == nil {
-		t.Fatal("plist renderer accepted XML injection")
-	}
-}
-
 func TestSafeRemoteErrorRemovesControlCharacters(t *testing.T) {
 	t.Parallel()
 
@@ -113,22 +78,73 @@ func TestSafeRemoteErrorRemovesControlCharacters(t *testing.T) {
 	}
 }
 
-func TestParseTunnelJobBindsProgramAndPID(t *testing.T) {
+func TestTunnelStartActionsIncludeRepair(t *testing.T) {
 	t.Parallel()
 
-	label := "com.warptweet.tunnel.db-1"
-	job, err := parseTunnelJob(label, "{\n\tprogram = /Library/Application Support/WarpTweet/bin/warptweet\n\tpid = 4321\n}\n")
-	if err != nil || !job.loaded || job.pid != 4321 {
-		t.Fatalf("parseTunnelJob = %+v, %v", job, err)
+	if !isTunnelStartAction(ActionUp) || !isTunnelStartAction(ActionRepair) {
+		t.Fatal("up and repair must start the projected tunnel")
 	}
-	for _, output := range []string{
-		"program = /tmp/warptweet\npid = 4321\n",
-		"program = /Library/Application Support/WarpTweet/bin/warptweet\npid = nope\n",
-		"program = /Library/Application Support/WarpTweet/bin/warptweet\npid = 1\npid = 2\n",
-		"pid = 4321\n",
-	} {
-		if _, err := parseTunnelJob(label, output); err == nil {
-			t.Fatalf("accepted unbound launchd output %q", output)
+	for _, action := range []string{ActionEnroll, ActionConnect, ActionStatus, ActionDown, ActionRotate, ActionRevoke, "exec"} {
+		if isTunnelStartAction(action) {
+			t.Fatalf("%q must not start a tunnel", action)
+		}
+	}
+}
+
+func TestEnrollControllerArgsForwardProof(t *testing.T) {
+	t.Parallel()
+
+	request := Request{
+		PrepareOnly:   true,
+		ListenPort:    15432,
+		RestartPolicy: "manual",
+		Proof:         json.RawMessage(`{"ok":true}`),
+	}
+	got := enrollControllerArgs("/tmp/invite", "/tmp/proof", request)
+	want := []string{"enroll", "--yes", "--prepare-only", "--listen-port", "15432", "--restart", "manual", "--proof", "/tmp/proof", "/tmp/invite"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("args=%v want=%v", got, want)
+	}
+	if got := enrollControllerArgs("/tmp/invite", "", Request{}); !reflect.DeepEqual(got, []string{"enroll", "--yes", "/tmp/invite"}) {
+		t.Fatalf("args without proof=%v", got)
+	}
+}
+
+func TestMaterializeEnrollInputsWritesProof(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	invitePath, proofPath, err := materializeEnrollInputs(root, Request{
+		Invite: json.RawMessage(`{"kind":"warptweet.invite"}`),
+		Proof:  json.RawMessage(`{"proof":true}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Dir(invitePath) != root || filepath.Dir(proofPath) != root {
+		t.Fatalf("paths=%s %s", invitePath, proofPath)
+	}
+	proof, err := os.ReadFile(proofPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(proof) != "{\"proof\":true}\n" {
+		t.Fatalf("proof=%q", proof)
+	}
+}
+
+func TestSocketPathMatchesPlatformLayout(t *testing.T) {
+	t.Parallel()
+
+	path := SocketPath()
+	switch runtime.GOOS {
+	case "darwin":
+		if path != installlayout.DarwinProvisionerSocket {
+			t.Fatalf("socket=%q", path)
+		}
+	default:
+		if path != installlayout.LinuxProvisionerSocket {
+			t.Fatalf("socket=%q", path)
 		}
 	}
 }

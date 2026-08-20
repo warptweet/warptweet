@@ -10,30 +10,33 @@ do not substitute for this gate.
 
 ## Canonical checklist
 
-`packaging/evidence/checklist-v1.json` enumerates every required positive and
+`packaging/evidence/checklist-v2.json` enumerates every required positive and
 negative case from the Homebrew delivery contract. The matrix records client
 artifact profiles `darwin-arm64` / `darwin-amd64` against server profiles
 `linux-amd64` / `linux-arm64`. Missing runner pairs are `not_run`, never `pass`.
 
 ## Evidence document
 
-Schema: `schemas/release-evidence-v1.schema.json`
+Schema: `schemas/release-evidence-v2.schema.json`
 
 Go validation: `internal/releaseevidence`
 
 Every evidence document MUST bind:
 
+- `contract_id` and `contract_checklist_sha256`
+- `clean_tree_proof`
 - release version and source commit
 - client and server package SHA-256
 - client and server artifact-profile IDs
 - client and server engine manifest SHA-256
 - platform and architecture strings
+- `host_target`, `authorization_policy`, `route_count`, and `restart_policies`
 - test identity, exact commands, timestamps
 - `package_to_package: true`
 - `source_tree_substitution: false`
 - one result for every checklist id
 
-`releaseevidence.Complete` is true only when every result is `pass`.
+`releaseevidence.CompleteV2` is true only when every result is `pass`.
 
 ## Harness
 

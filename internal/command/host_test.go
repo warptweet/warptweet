@@ -3,6 +3,7 @@ package command
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -85,6 +86,11 @@ func TestHostRejectsMutuallyExclusiveFlags(t *testing.T) {
 			want: "host --stdout cannot be combined with --no-invite",
 		},
 		{
+			name: "stdout with json",
+			args: []string{"host", "--to", "5432", "--stdout", "--json"},
+			want: "host --stdout cannot be combined with --json",
+		},
+		{
 			name: "stdout with out",
 			args: []string{"host", "--to", "5432", "--stdout", "--out", "invite.wtinvite"},
 			want: "host --stdout cannot be combined with --out",
@@ -109,7 +115,11 @@ func TestHostRejectsMutuallyExclusiveFlags(t *testing.T) {
 			if code == 0 || !strings.Contains(stderr.String(), testCase.want) {
 				t.Fatalf("code=%d stderr=%s want %q", code, stderr.String(), testCase.want)
 			}
-			if stdout.Len() != 0 {
+			if strings.Contains(strings.Join(testCase.args, " "), "--json") {
+				if !strings.Contains(stdout.String(), `"code":"usage"`) {
+					t.Fatalf("json stdout=%s", stdout.String())
+				}
+			} else if stdout.Len() != 0 {
 				t.Fatalf("stdout=%s, want empty before filesystem work", stdout.String())
 			}
 		})
@@ -155,8 +165,37 @@ func TestLegacyGatewayCommandIsRejected(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := Run(context.Background(), []string{"gateway", "--to", "5432"}, nil, &stdout, &stderr)
-	if code != 2 || !strings.Contains(stderr.String(), `unknown command "gateway"`) {
+	if code != 2 || !strings.Contains(stderr.String(), "gateway was replaced by") {
 		t.Fatalf("code=%d stderr=%s", code, stderr.String())
+	}
+}
+
+func TestReplacementCommandsEmitOneJSONObject(t *testing.T) {
+	t.Parallel()
+
+	cases := [][]string{
+		{"gateway", "--json"},
+		{"server", "init", "--json"},
+		{"server", "invite", "--json"},
+	}
+	for _, args := range cases {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		code := Run(context.Background(), args, nil, &stdout, &stderr)
+		if code != 2 {
+			t.Fatalf("%v code=%d stderr=%s", args, code, stderr.String())
+		}
+		var payload map[string]any
+		if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+			t.Fatalf("%v decode %q: %v", args, stdout.String(), err)
+		}
+		if payload["ok"] != false {
+			t.Fatalf("%v payload=%v", args, payload)
+		}
+		errorObject, _ := payload["error"].(map[string]any)
+		if errorObject["replacement"] == nil || errorObject["code"] != "usage" {
+			t.Fatalf("%v error=%v", args, errorObject)
+		}
 	}
 }
 
@@ -207,43 +246,24 @@ func TestBuildConnectArgs(t *testing.T) {
 	cases := []struct {
 		name       string
 		yes        bool
-		once       bool
 		listenPort uint16
 		wantEnroll []string
-		wantUp     []string
 	}{
 		{
 			name:       "no flags",
 			wantEnroll: []string{"--restart", "unless-stopped", "invite.wtinvite"},
-			wantUp:     []string{"tunnel-1"},
 		},
 		{
 			name:       "yes true",
 			yes:        true,
 			listenPort: 15432,
 			wantEnroll: []string{"--listen-port", "15432", "--restart", "unless-stopped", "--yes", "invite.wtinvite"},
-			wantUp:     []string{"tunnel-1"},
 		},
 		{
 			name:       "yes false",
 			yes:        false,
 			listenPort: 15432,
 			wantEnroll: []string{"--listen-port", "15432", "--restart", "unless-stopped", "invite.wtinvite"},
-			wantUp:     []string{"tunnel-1"},
-		},
-		{
-			name:       "once true",
-			once:       true,
-			listenPort: 15432,
-			wantEnroll: []string{"--listen-port", "15432", "--restart", "unless-stopped", "invite.wtinvite"},
-			wantUp:     []string{"--once", "tunnel-1"},
-		},
-		{
-			name:       "once false",
-			once:       false,
-			listenPort: 15432,
-			wantEnroll: []string{"--listen-port", "15432", "--restart", "unless-stopped", "invite.wtinvite"},
-			wantUp:     []string{"tunnel-1"},
 		},
 	}
 	for _, test := range cases {
@@ -252,10 +272,6 @@ func TestBuildConnectArgs(t *testing.T) {
 			gotEnroll := buildConnectEnrollArgs("invite.wtinvite", test.yes, "", test.listenPort, "unless-stopped")
 			if !reflect.DeepEqual(gotEnroll, test.wantEnroll) {
 				t.Fatalf("enroll args=%v want=%v", gotEnroll, test.wantEnroll)
-			}
-			gotUp := buildConnectUpArgs("tunnel-1", test.once)
-			if !reflect.DeepEqual(gotUp, test.wantUp) {
-				t.Fatalf("up args=%v want=%v", gotUp, test.wantUp)
 			}
 		})
 	}

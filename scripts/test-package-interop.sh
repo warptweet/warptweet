@@ -60,7 +60,7 @@ esac
 
 WT_SCRIPT_DIRECTORY=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 WT_REPOSITORY_ROOT=$(CDPATH= cd -- "$WT_SCRIPT_DIRECTORY/.." && pwd)
-WT_CHECKLIST="$WT_REPOSITORY_ROOT/packaging/evidence/checklist-v1.json"
+WT_CHECKLIST="$WT_REPOSITORY_ROOT/packaging/evidence/checklist-v2.json"
 if [ ! -f "$WT_CHECKLIST" ]; then
     fail "checklist missing: $WT_CHECKLIST"
 fi
@@ -136,7 +136,7 @@ run_positive_engine_identity_trust_preflight() {
         WT_SERVER_CTRL=${WARPTWEET_SERVER_CONTROLLER:-/opt/warptweet/bin/warptweet}
         WT_SERVER_CFG=${WARPTWEET_SERVER_MANIFEST:-/etc/warptweet/server.wt}
         if [ -x "$WT_SERVER_CTRL" ] && [ -f "$WT_SERVER_CFG" ]; then
-            if "$WT_SERVER_CTRL" doctor-server --config "$WT_SERVER_CFG" >/tmp/wt-doctor-server.json 2>/tmp/wt-doctor-server.err; then
+            if "$WT_SERVER_CTRL" doctor-server --config "$WT_SERVER_CFG" >"$WT_TMP/wt-doctor-server.json" 2>"$WT_TMP/wt-doctor-server.err"; then
                 record_result engine-identity-trust-preflight positive pass "doctor-server preflight_ready"
             else
                 record_result engine-identity-trust-preflight positive fail "doctor-server failed"
@@ -153,7 +153,7 @@ run_positive_engine_identity_trust_preflight() {
         record_result engine-identity-trust-preflight positive not_run "client paths unset"
         return 0
     fi
-    if "$WT_CLIENT_CTRL" doctor --config "$WT_CLIENT_CFG" --tunnel "$WT_TUNNEL" >/tmp/wt-doctor-client.json 2>/tmp/wt-doctor-client.err; then
+    if "$WT_CLIENT_CTRL" doctor --config "$WT_CLIENT_CFG" --tunnel "$WT_TUNNEL" >"$WT_TMP/wt-doctor-client.json" 2>"$WT_TMP/wt-doctor-client.err"; then
         record_result engine-identity-trust-preflight positive pass "doctor preflight_ready"
     else
         record_result engine-identity-trust-preflight positive fail "doctor failed"
@@ -282,13 +282,10 @@ run_case_not_run engine-and-package-tamper negative "requires dual-host tamper h
 run_case_not_run bounded-floods negative "requires dual-host flood harness"
 run_case_not_run availability-faults negative "requires dual-host fault harness"
 
-WT_SCHEMA=${WARPTWEET_EVIDENCE_SCHEMA_VERSION:-2}
-case "$WT_SCHEMA" in
-    1|2) ;;
-    *)
-        fail "unsupported WARPTWEET_EVIDENCE_SCHEMA_VERSION=$WT_SCHEMA"
-        ;;
-esac
+WT_SCHEMA=2
+if [ -n "${WARPTWEET_EVIDENCE_SCHEMA_VERSION:-}" ] && [ "$WARPTWEET_EVIDENCE_SCHEMA_VERSION" != "2" ]; then
+    fail "only evidence schema 2 is supported"
+fi
 WT_CONTRACT_DIGEST=$(sed -n 's/^[[:space:]]*ContractChecklistSHA256 = "\([0-9a-f]\{64\}\)".*/\1/p' \
     "$WT_REPOSITORY_ROOT/internal/adoptionresult/result.go" | head -n 1)
 if [ -z "$WT_CONTRACT_DIGEST" ]; then
@@ -330,8 +327,7 @@ if [ "${WARPTWEET_ALLOW_SOURCE_TREE:-}" = "1" ]; then
     WT_PKG_TO_PKG=false
 fi
 
-if [ "$WT_SCHEMA" = "2" ]; then
-    cat >"$WARPTWEET_EVIDENCE_OUTPUT" <<EOF
+cat >"$WARPTWEET_EVIDENCE_OUTPUT" <<EOF
 {
   "kind": "warptweet.release-evidence",
   "schema_version": 2,
@@ -364,34 +360,6 @@ if [ "$WT_SCHEMA" = "2" ]; then
   "results": $WT_RESULTS_JSON
 }
 EOF
-else
-    cat >"$WARPTWEET_EVIDENCE_OUTPUT" <<EOF
-{
-  "kind": "warptweet.release-evidence",
-  "schema_version": 1,
-  "release_version": "$WARPTWEET_RELEASE_VERSION",
-  "source_commit": "$WARPTWEET_SOURCE_COMMIT",
-  "client_package_sha256": "$WARPTWEET_CLIENT_PACKAGE_SHA256",
-  "server_package_sha256": "$WARPTWEET_SERVER_PACKAGE_SHA256",
-  "client_artifact_profile_id": "$WARPTWEET_CLIENT_ARTIFACT_PROFILE_ID",
-  "server_artifact_profile_id": "$WARPTWEET_SERVER_ARTIFACT_PROFILE_ID",
-  "client_engine_manifest_sha256": "$WARPTWEET_CLIENT_ENGINE_MANIFEST_SHA256",
-  "server_engine_manifest_sha256": "$WARPTWEET_SERVER_ENGINE_MANIFEST_SHA256",
-  "client_platform": "$WT_CLIENT_PLATFORM",
-  "server_platform": "$WT_SERVER_PLATFORM",
-  "client_architecture": "$WT_CLIENT_ARCH",
-  "server_architecture": "$WT_SERVER_ARCH",
-  "test_identity": "$WT_TEST_IDENTITY",
-  "commands": ["./scripts/test-package-interop.sh"],
-  "started_at": "$WT_STARTED_AT",
-  "finished_at": "$WT_FINISHED_AT",
-  "redacted_log_path": "$WT_REDACTED_LOG",
-  "package_to_package": $WT_PKG_TO_PKG,
-  "source_tree_substitution": $WT_SRC_SUB,
-  "results": $WT_RESULTS_JSON
-}
-EOF
-fi
 
 pass "wrote evidence document $WARPTWEET_EVIDENCE_OUTPUT"
 

@@ -11,3 +11,10 @@
 /scripts/interop/config.env
 /scripts/interop/work/
 /.cache/
+/artifacts/
+docs/reviews
+*.wtinvite
+*.pem
+*.key
+*.p12
+*.pfx

@@ -87,7 +87,7 @@ Validate or render a manifest without opening a connection:
 ./bin/warptweet validate --config client.wt
 ./bin/warptweet render-client --config client.wt --tunnel database-primary
 ./bin/warptweet render-server --config server.wt
-./bin/warptweet render-authorized-key --config server.wt --public-key client.pub
+./bin/warptweet render-authorized-key --config server.wt --public-key client.pub --not-after 2026-09-17T00:00:00Z
 ./bin/warptweet render-known-host --config client.wt --tunnel database-primary --public-key host.pub
 ```
 
@@ -157,6 +157,6 @@ Local loopback is a host boundary, not per-process authentication. A deployment 
 
 ## Contributing and security
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) before proposing changes. Report suspected vulnerabilities using the private process in [SECURITY.md](SECURITY.md). `security@warptweet.com` remains a placeholder and the repository owner must confirm that it is provisioned, monitored, and externally reachable before public publication.
+See [CONTRIBUTING.md](CONTRIBUTING.md) before proposing changes. Report suspected vulnerabilities privately to `security@warptweet.com` using the process in [SECURITY.md](SECURITY.md).
 
 WarpTweet is licensed under the [Apache License 2.0](LICENSE). The intended OpenSSH bundle remains under its upstream licenses; see [NOTICE](NOTICE).

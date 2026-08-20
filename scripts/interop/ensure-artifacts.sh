@@ -205,7 +205,13 @@ ensure_server_deb_docker() {
     ensure_sources
 
     _out_deb=warptweet_${WARPTWEET_RELEASE_VERSION}_amd64.deb
-    _go_image=${WARPTWEET_INTEROP_GO_IMAGE:-golang:1.26.5-bookworm}
+    _go_image=${WARPTWEET_INTEROP_GO_IMAGE:-}
+    case "$_go_image" in
+        *@sha256:*) ;;
+        *)
+            ensure_die "WARPTWEET_INTEROP_GO_IMAGE must be a digest-pinned image (name@sha256:...)"
+            ;;
+    esac
     ensure_log "building Linux server package in Docker ($_go_image, linux/amd64); first run is long"
 
     # Mount repo + cache; write .deb into artifacts.
@@ -375,10 +381,25 @@ if [ "$_need_go" -eq 1 ]; then
     *) echo "unsupported remote arch: $_arch" >&2; exit 1 ;;
   esac
   _go_tgz="go${WT_GO_VERSION}.linux-${_go_arch}.tar.gz"
-  curl -fsSL "https://go.dev/dl/${_go_tgz}" -o "/tmp/${_go_tgz}"
+  _go_sha=''
+  case "${WT_GO_VERSION}:${_go_arch}" in
+    1.26.5:amd64) _go_sha='5c2c3b16caefa1d968a94c1daca04a7ca301a496d9b086e17ad77bb81393f053' ;;
+    1.26.5:arm64) _go_sha='fe4789e92b1f33358680864bbe8704289e7bb5fc207d80623c308935bd696d49' ;;
+    *) echo "no reviewed SHA-256 for go${WT_GO_VERSION} linux/${_go_arch}" >&2; exit 1 ;;
+  esac
+  _go_tmp=$(mktemp -d)
+  chmod 0700 "$_go_tmp"
+  trap 'rm -rf "$_go_tmp"' EXIT
+  curl --proto '=https' --tlsv1.2 --fail --location "https://go.dev/dl/${_go_tgz}" -o "$_go_tmp/${_go_tgz}"
+  _got=$(sha256sum "$_go_tmp/${_go_tgz}" | awk '{print $1}')
+  if [ "$_got" != "$_go_sha" ]; then
+    echo "Go archive checksum mismatch for ${_go_tgz}" >&2
+    exit 1
+  fi
   sudo rm -rf "$_go_root"
-  sudo tar -C /usr/local -xzf "/tmp/${_go_tgz}"
-  rm -f "/tmp/${_go_tgz}"
+  sudo tar -C /usr/local -xzf "$_go_tmp/${_go_tgz}"
+  rm -rf "$_go_tmp"
+  trap - EXIT
 fi
 export PATH="/usr/local/go/bin:$PATH"
 go version

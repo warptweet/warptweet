@@ -23,7 +23,9 @@ import (
 	"warptweet.com/warptweet/internal/grant"
 	"warptweet.com/warptweet/internal/knownhosts"
 	"warptweet.com/warptweet/internal/lifecycle"
+	"warptweet.com/warptweet/internal/outcome"
 	"warptweet.com/warptweet/internal/profile"
+	"warptweet.com/warptweet/internal/routestate"
 	"warptweet.com/warptweet/internal/server"
 	"warptweet.com/warptweet/internal/supervisor"
 	"warptweet.com/warptweet/internal/systemdnotify"
@@ -41,6 +43,16 @@ type commandDependencies struct {
 	validateEffectiveClient      func(context.Context, string, engine.ClientSpec) error
 	attestManagedClient          func(context.Context, engine.Binary, string, engine.ClientSpec) (engine.ManagedClientLaunch, error)
 	newServiceNotifier           func() (serviceNotifier, error)
+	authorizeManagedRun          func() error
+	openRouteStore               func() (routeStore, error)
+	enroll                       func(context.Context, []string, io.Writer, io.Writer) error
+	up                           func(context.Context, []string, io.Writer, io.Writer, commandDependencies) error
+	repair                       func(context.Context, []string, io.Writer, io.Writer, commandDependencies) error
+}
+
+type routeStore interface {
+	LoadTransaction(string) (routestate.Transaction, error)
+	WriteTransaction(routestate.Transaction) error
 }
 
 type serviceNotifier interface {
@@ -64,6 +76,17 @@ func (writer *synchronizedWriter) Write(data []byte) (int, error) {
 	return writer.writer.Write(data)
 }
 
+func authorizeManagedTunnelRun(dependencies commandDependencies) error {
+	if dependencies.authorizeManagedRun != nil {
+		return dependencies.authorizeManagedRun()
+	}
+	return requireServiceManagedRun()
+}
+
+func managedRunUnauthorized() error {
+	return errors.New("run is unit-only; invoke warptweet up <route> so the service manager starts the tunnel")
+}
+
 func productionCommandDependencies() commandDependencies {
 	return commandDependencies{
 		loadProductionClientManifest: engine.LoadProductionClientManifest,
@@ -74,6 +97,7 @@ func productionCommandDependencies() commandDependencies {
 		newServiceNotifier: func() (serviceNotifier, error) {
 			return systemdnotify.FromEnvironment(os.Getenv)
 		},
+		authorizeManagedRun: requireServiceManagedRun,
 	}
 }
 
@@ -126,6 +150,8 @@ func runWithDependencies(
 		err = runHost(ctx, arguments[1:], stdout, stderr)
 	case "connect":
 		err = runConnect(ctx, arguments[1:], stdout, stderr, dependencies)
+	case "repair":
+		err = runRepair(ctx, arguments[1:], stdout, stderr, dependencies)
 	case "server":
 		err = runServer(ctx, arguments[1:], stdout, stderr)
 	case "enroll":
@@ -149,16 +175,38 @@ func runWithDependencies(
 	case "help", "-h", "--help":
 		writeUsage(stdout)
 		return 0
+	case "gateway":
+		err = outcome.Replaced("gateway", "warptweet host --to <port|ip:port>")
 	default:
 		fmt.Fprintf(stderr, "warptweet: unknown command %q\n", arguments[0])
 		writeUsage(stderr)
 		return 2
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "warptweet: %v\n", err)
-		return 1
+		classified := outcome.From(err)
+		if wantsJSON(arguments) {
+			if writeErr := writeJSON(stdout, classified.Object()); writeErr != nil {
+				fmt.Fprintf(stderr, "warptweet: %v\n", writeErr)
+			}
+		}
+		if classified.Code != outcome.CodeHelp {
+			fmt.Fprintf(stderr, "warptweet: %s\n", classified.Error())
+			if classified.Hint != "" {
+				fmt.Fprintf(stderr, "%s\n", classified.Hint)
+			}
+		}
+		return classified.ExitCode()
 	}
 	return 0
+}
+
+func wantsJSON(arguments []string) bool {
+	for _, argument := range arguments {
+		if argument == "--json" {
+			return true
+		}
+	}
+	return false
 }
 
 func runVersion(arguments []string, stdout, stderr io.Writer) error {
@@ -269,7 +317,7 @@ func runRenderClient(arguments []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	spec, err := clientSpec(manifest, tunnelID)
+	spec, err := clientSpec(manifest, tunnelID, manifestPath)
 	if err != nil {
 		return err
 	}
@@ -357,7 +405,7 @@ func runRenderKnownHost(arguments []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if _, err := clientSpec(manifest, tunnelID.value); err != nil {
+	if _, err := clientSpec(manifest, tunnelID.value, manifestPath.value); err != nil {
 		return err
 	}
 	publicKey, err := readHostPublicKeyFile(publicKeyPath.value)
@@ -417,7 +465,7 @@ func runDoctor(
 	if err != nil {
 		return err
 	}
-	spec, err := clientSpec(manifest, tunnelID)
+	spec, err := clientSpec(manifest, tunnelID, manifestPath)
 	if err != nil {
 		return err
 	}
@@ -569,6 +617,9 @@ func runTunnel(
 	if err := parseFlags(flags, arguments); err != nil {
 		return err
 	}
+	if err := authorizeManagedTunnelRun(dependencies); err != nil {
+		return err
+	}
 	if routeID.value != "" {
 		if manifestPath.value != "" || tunnelID.value != "" {
 			return errors.New("run --route cannot be combined with --config or --tunnel")
@@ -609,7 +660,7 @@ func runTunnel(
 	if err != nil {
 		return err
 	}
-	spec, err := clientSpec(manifest, tunnelID.value)
+	spec, err := clientSpec(manifest, tunnelID.value, manifestPath.value)
 	if err != nil {
 		return err
 	}
@@ -765,7 +816,7 @@ func parseClientSelection(name string, arguments []string, stderr io.Writer) (st
 	return manifestPath.value, tunnelID.value, nil
 }
 
-func clientSpec(manifest config.Config, tunnelID string) (engine.ClientSpec, error) {
+func clientSpec(manifest config.Config, tunnelID, manifestPath string) (engine.ClientSpec, error) {
 	var selectedTunnel *config.Tunnel
 	for index := range manifest.Tunnels {
 		if manifest.Tunnels[index].ID == tunnelID {
@@ -787,24 +838,26 @@ func clientSpec(manifest config.Config, tunnelID string) (engine.ClientSpec, err
 	identityFile := layout.ClientIdentityPath
 	knownHostsFile := layout.ClientKnownHostsPath
 	emptyTrust := layout.ClientGlobalKnownHostsPath
-	store, storeErr := productionRouteStore()
-	if storeErr != nil {
-		return engine.ClientSpec{}, storeErr
-	}
-	activeManifest, manifestErr := store.ManifestPath(selectedTunnel.ID)
-	if manifestErr != nil {
-		if !os.IsNotExist(manifestErr) {
-			return engine.ClientSpec{}, manifestErr
+	if productionClientManifest(manifestPath, layout.ClientManifestPath) {
+		store, storeErr := productionRouteStore()
+		if storeErr != nil {
+			return engine.ClientSpec{}, storeErr
 		}
-	} else {
-		identity, idErr := store.IdentityPath(selectedTunnel.ID)
-		if idErr != nil {
-			return engine.ClientSpec{}, idErr
+		activeManifest, manifestErr := store.ManifestPath(selectedTunnel.ID)
+		if manifestErr != nil {
+			if !os.IsNotExist(manifestErr) {
+				return engine.ClientSpec{}, manifestErr
+			}
+		} else {
+			identity, idErr := store.IdentityPath(selectedTunnel.ID)
+			if idErr != nil {
+				return engine.ClientSpec{}, idErr
+			}
+			generationDir := filepath.Dir(activeManifest)
+			identityFile = identity
+			knownHostsFile = filepath.Join(generationDir, "known_hosts")
+			emptyTrust = filepath.Join(generationDir, "known_hosts.empty")
 		}
-		generationDir := filepath.Dir(activeManifest)
-		identityFile = identity
-		knownHostsFile = filepath.Join(generationDir, "known_hosts")
-		emptyTrust = filepath.Join(generationDir, "known_hosts.empty")
 	}
 	return engine.ClientSpec{
 		TunnelID:             selectedTunnel.ID,
@@ -836,6 +889,21 @@ func resolveActiveRoute(routeID string) (resolvedRoute, error) {
 		return resolvedRoute{}, err
 	}
 	return resolvedRoute{manifest: manifest}, nil
+}
+
+func productionClientManifest(path, productionPath string) bool {
+	if path == "" || productionPath == "" {
+		return false
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		resolved = filepath.Clean(path)
+	}
+	want, err := filepath.EvalSymlinks(productionPath)
+	if err != nil {
+		want = filepath.Clean(productionPath)
+	}
+	return filepath.Clean(resolved) == filepath.Clean(want)
 }
 
 func productionClientLayout() (artifactprofile.Layout, error) {
@@ -910,7 +978,10 @@ func parseFlags(flags *flag.FlagSet, arguments []string) error {
 
 func parseFlagsAllowArgs(flags *flag.FlagSet, arguments []string) ([]string, error) {
 	if err := flags.Parse(arguments); err != nil {
-		return nil, err
+		if errors.Is(err, flag.ErrHelp) {
+			return nil, outcome.Help()
+		}
+		return nil, outcome.Usage(err.Error())
 	}
 	return flags.Args(), nil
 }
@@ -1020,31 +1091,38 @@ func writeJSON(writer io.Writer, value any) error {
 	return encoder.Encode(value)
 }
 
-func writeUsage(writer io.Writer) {
-	_, _ = io.WriteString(writer, `WarpTweet: open-source fail-closed post-quantum TCP tunneling
+type publicCommand struct {
+	Name  string
+	Usage string
+}
 
-Usage:
-  warptweet host --to <port|ip:port> [--name <label>] [--access-for 30d] [--out path] [--stdout] [--listen ip:port] [--no-invite] [--json]
-  warptweet connect <invite.wtinvite> [--yes] [--listen-port <port>] [--restart unless-stopped|manual] [--proof <proof.json>]
-  warptweet profile
-  warptweet validate --config <manifest.wt>
-  warptweet render-client --config <client.wt> --tunnel <id>
-  warptweet render-server --config <server.wt>
-  warptweet render-authorized-key --config <server.wt> --public-key <client.pub> --not-after <rfc3339>
-  warptweet render-known-host --config <client.wt> --tunnel <id> --public-key <host.pub>
-  warptweet doctor --config <client.wt> --tunnel <id>
-  warptweet doctor-server --config <server.wt>
-  warptweet run --route <id> [--once]
-  warptweet run --config <client.wt> --tunnel <id> [--once]
-  warptweet enroll <invite.wtinvite> [--yes] [--prepare-only] [--proof <proof.json>]
-  warptweet routes [--json]
-  warptweet up <route-id>
-  warptweet status [<route-id>] [--json]
-  warptweet down <route-id>
-  warptweet reconcile
-  warptweet rotate <tunnel-id>
-  warptweet revoke <tunnel-id>
-  warptweet uninstall --preserve-identity
-  warptweet version
-`)
+var publicCommands = []publicCommand{
+	{Name: "host", Usage: "warptweet host --to <port|ip:port> [--name <label>] [--access-for 30d] [--out path] [--stdout] [--listen ip:port] [--no-invite] [--json]"},
+	{Name: "connect", Usage: "warptweet connect <invite.wtinvite> [--yes] [--listen-port <port>] [--restart unless-stopped|manual] [--proof <proof.json>]"},
+	{Name: "profile", Usage: "warptweet profile"},
+	{Name: "validate", Usage: "warptweet validate --config <manifest.wt>"},
+	{Name: "render-client", Usage: "warptweet render-client --config <client.wt> --tunnel <id>"},
+	{Name: "render-server", Usage: "warptweet render-server --config <server.wt>"},
+	{Name: "render-authorized-key", Usage: "warptweet render-authorized-key --config <server.wt> --public-key <client.pub> --not-after <rfc3339>"},
+	{Name: "render-known-host", Usage: "warptweet render-known-host --config <client.wt> --tunnel <id> --public-key <host.pub>"},
+	{Name: "doctor", Usage: "warptweet doctor --config <client.wt> --tunnel <id>"},
+	{Name: "doctor-server", Usage: "warptweet doctor-server --config <server.wt>"},
+	{Name: "enroll", Usage: "warptweet enroll <invite.wtinvite> [--yes] [--prepare-only] [--proof <proof.json>]"},
+	{Name: "routes", Usage: "warptweet routes [--json]"},
+	{Name: "up", Usage: "warptweet up <route-id>"},
+	{Name: "repair", Usage: "warptweet repair <route-id>"},
+	{Name: "status", Usage: "warptweet status [<route-id>] [--json]"},
+	{Name: "down", Usage: "warptweet down <route-id>"},
+	{Name: "reconcile", Usage: "warptweet reconcile"},
+	{Name: "rotate", Usage: "warptweet rotate <tunnel-id>"},
+	{Name: "revoke", Usage: "warptweet revoke <tunnel-id>"},
+	{Name: "uninstall", Usage: "warptweet uninstall --preserve-identity"},
+	{Name: "version", Usage: "warptweet version"},
+}
+
+func writeUsage(writer io.Writer) {
+	_, _ = io.WriteString(writer, "WarpTweet: open-source fail-closed post-quantum TCP tunneling\n\nUsage:\n")
+	for _, command := range publicCommands {
+		_, _ = io.WriteString(writer, "  "+command.Usage+"\n")
+	}
 }

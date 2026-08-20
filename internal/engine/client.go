@@ -686,8 +686,12 @@ func hashClientExecutable(file *os.File) (string, error) {
 		return "", fmt.Errorf("seek OpenSSH binary for hashing: %w", err)
 	}
 	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
+	written, err := io.Copy(hash, io.LimitReader(file, maxServerExecutableBytes+1))
+	if err != nil {
 		return "", fmt.Errorf("hash OpenSSH binary: %w", err)
+	}
+	if written > maxServerExecutableBytes {
+		return "", fmt.Errorf("OpenSSH binary exceeds %d bytes", maxServerExecutableBytes)
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
 }

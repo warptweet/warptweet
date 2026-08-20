@@ -1,15 +1,16 @@
-.PHONY: build check check-go fmt-check script-check site-build site-check site-down site-preview site-up test test-enrollment-control-plane test-openssh-integration test-race vet interop interop-help
+.PHONY: build check check-go fmt-check script-check gosec site-build site-check site-down site-preview site-up test test-enrollment-control-plane test-openssh-integration test-race vet interop interop-help
 
 GOCACHE ?= /private/tmp/warptweet-go-build
 SITE_DEV_HOST ?= 127.0.0.1
 SITE_DEV_PORT ?= 4321
 
 # Dual-host local-dev interop: zero args. Configure via repo-root .env (see .env.example).
-# Auto-builds missing artifacts/*.deb + *.pkg (OpenSSH stages cached). Not full WP8 evidence.
+# Auto-builds missing artifacts/*.deb + *.pkg (OpenSSH stages cached). Partial evidence fails.
 
 build:
 	mkdir -p bin
 	CGO_ENABLED=1 GOCACHE=$(GOCACHE) go build -trimpath -buildvcs=false -ldflags="-buildid=" -o bin/warptweet ./cmd/warptweet
+	CGO_ENABLED=1 GOCACHE=$(GOCACHE) go build -trimpath -buildvcs=false -ldflags="-buildid=" -o bin/warptweet-provisioner ./cmd/warptweet-provisioner
 
 fmt-check:
 	@test -z "$$(gofmt -l $$(find cmd internal tests -name '*.go' -type f -print))"
@@ -18,10 +19,10 @@ vet:
 	GOCACHE=$(GOCACHE) go vet ./...
 
 script-check:
-	@for script in scripts/*.sh scripts/interop/*.sh scripts/interop/lib/*.sh; do \
-		[ -f "$$script" ] || continue; \
-		sh -n "$$script"; \
-	done
+	./scripts/check-shell.sh
+
+gosec:
+	./scripts/check-gosec.sh
 
 test:
 	GOCACHE=$(GOCACHE) go test ./...

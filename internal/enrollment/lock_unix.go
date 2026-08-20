@@ -3,13 +3,14 @@
 package enrollment
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"syscall"
 )
 
-func lockPathExclusive(directory, name, label string) (unlock func(), err error) {
+func lockPathExclusive(directory, name, label string, nonBlocking bool) (unlock func(), err error) {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return nil, err
 	}
@@ -18,8 +19,15 @@ func lockPathExclusive(directory, name, label string) (unlock func(), err error)
 	if err != nil {
 		return nil, err
 	}
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
+	how := syscall.LOCK_EX
+	if nonBlocking {
+		how |= syscall.LOCK_NB
+	}
+	if err := syscall.Flock(int(file.Fd()), how); err != nil {
 		_ = file.Close()
+		if nonBlocking && (errors.Is(err, syscall.EWOULDBLOCK) || errors.Is(err, syscall.EAGAIN)) {
+			return nil, fmt.Errorf("lock %s at %s: %w", label, lockPath, ErrBusy)
+		}
 		return nil, fmt.Errorf("lock %s: %w", label, err)
 	}
 	return func() {

@@ -1,6 +1,8 @@
 package releaseevidence
 
 import (
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -117,4 +119,13 @@ func sampleReportV2(checklist Checklist) ReportV2 {
 		SourceTreeSubstitution:     false,
 		Results:                    results,
 	}
+}
+
+func repositoryRoot(t *testing.T) string {
+	t.Helper()
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	return filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
 }

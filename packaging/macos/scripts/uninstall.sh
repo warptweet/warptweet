@@ -56,7 +56,7 @@ if [ -L /usr/local/bin/warptweet ]; then
             ;;
     esac
 fi
-rm -rf "$WT_ROOT/bin" "$WT_ROOT/libexec" "$WT_ROOT/share"
+rm -rf "${WT_ROOT:?}/bin" "${WT_ROOT:?}/libexec" "${WT_ROOT:?}/share"
 
 if [ "$WT_DESTROY_IDENTITY" -eq 1 ]; then
     printf '%s\n' "Destroying WarpTweet identity and trust state under $WT_STATE"
@@ -66,7 +66,7 @@ if [ "$WT_DESTROY_IDENTITY" -eq 1 ]; then
         echo "identity destruction aborted" >&2
         exit 1
     fi
-    rm -rf "$WT_STATE"
+    rm -rf "${WT_STATE:?}"
 else
     echo "preserving identity and trust state under $WT_STATE"
 fi

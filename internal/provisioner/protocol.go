@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"runtime"
 	"strings"
 	"time"
 
@@ -31,7 +32,24 @@ const (
 	ActionDown    = "down"
 	ActionRotate  = "rotate"
 	ActionRevoke  = "revoke"
+	ActionRepair  = "repair"
 )
+
+func isTunnelStartAction(action string) bool {
+	switch action {
+	case ActionUp, ActionRepair:
+		return true
+	default:
+		return false
+	}
+}
+
+func SocketPath() string {
+	if runtime.GOOS == "darwin" {
+		return installlayout.DarwinProvisionerSocket
+	}
+	return installlayout.LinuxProvisionerSocket
+}
 
 type Request struct {
 	Version       int             `json:"version"`
@@ -83,7 +101,7 @@ func ValidateRequest(request Request) error {
 				return err
 			}
 		}
-	case ActionUp, ActionDown, ActionRotate, ActionRevoke:
+	case ActionUp, ActionDown, ActionRotate, ActionRevoke, ActionRepair:
 		if len(request.Invite) != 0 {
 			return errors.New("only enroll may carry an invite document")
 		}
@@ -107,7 +125,7 @@ func Call(ctx context.Context, request Request) (Response, error) {
 		return Response{}, err
 	}
 	dialer := net.Dialer{Timeout: 3 * time.Second}
-	connection, err := dialer.DialContext(ctx, "unix", installlayout.DarwinProvisionerSocket)
+	connection, err := dialer.DialContext(ctx, "unix", SocketPath())
 	if err != nil {
 		return Response{}, fmt.Errorf("connect to installed WarpTweet provisioner: %w", err)
 	}

@@ -7,8 +7,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"time"
 
+	"warptweet.com/warptweet/internal/adoptionresult"
 	"warptweet.com/warptweet/internal/releaseevidence"
 )
 
@@ -28,18 +28,21 @@ func TestRepositoryGateKeepsHomebrewCTADark(t *testing.T) {
 		gate.QualificationMessage != QualificationMessage {
 		t.Fatalf("unexpected gate constants: %+v", gate)
 	}
+	if gate.Links["evidence_checklist"] != "packaging/evidence/checklist-v2.json" {
+		t.Fatalf("evidence checklist = %q", gate.Links["evidence_checklist"])
+	}
 	if err := ValidateEnabledCTA(root, gate); err != nil {
 		t.Fatalf("ValidateEnabledCTA dark gate: %v", err)
 	}
 }
 
-func TestEnabledCTARequiresCompleteEvidence(t *testing.T) {
+func TestEnabledCTARequiresCompleteV2Evidence(t *testing.T) {
 	t.Parallel()
 
 	root := repositoryRoot(t)
-	checklist, err := releaseevidence.LoadChecklist(releaseevidence.DefaultChecklistPath(root))
+	checklist, err := releaseevidence.LoadChecklistV2(releaseevidence.DefaultChecklistV2Path(root))
 	if err != nil {
-		t.Fatalf("LoadChecklist: %v", err)
+		t.Fatalf("LoadChecklistV2: %v", err)
 	}
 
 	missing := Gate{
@@ -50,11 +53,36 @@ func TestEnabledCTARequiresCompleteEvidence(t *testing.T) {
 		NextCommand:              DefaultNextCommand,
 		QualificationMessage:     QualificationMessage,
 		RequiredEvidenceDocument: "packaging/evidence/does-not-exist.json",
+		Links:                    map[string]string{"evidence_checklist": "packaging/evidence/checklist-v2.json"},
 	}
 	if err := ValidateEnabledCTA(root, missing); err == nil {
 		t.Fatal("enabled CTA accepted missing evidence document")
 	}
 
+	pseudoRoot, evidenceRel := writeV2EvidenceTree(t, root, completeV2Report(checklist))
+	enabled := Gate{
+		Kind:                     Kind,
+		SchemaVersion:            SchemaVersion,
+		HomebrewCTAEnabled:       true,
+		HomebrewCommand:          DefaultHomebrewCommand,
+		NextCommand:              DefaultNextCommand,
+		QualificationMessage:     QualificationMessage,
+		RequiredEvidenceDocument: evidenceRel,
+		Links:                    map[string]string{"evidence_checklist": "packaging/evidence/checklist-v2.json"},
+	}
+	if err := ValidateEnabledCTA(pseudoRoot, enabled); err != nil {
+		t.Fatalf("ValidateEnabledCTA complete v2 evidence: %v", err)
+	}
+}
+
+func TestEnabledCTARejectsV1Evidence(t *testing.T) {
+	t.Parallel()
+
+	root := repositoryRoot(t)
+	checklist, err := releaseevidence.LoadChecklistV2(releaseevidence.DefaultChecklistV2Path(root))
+	if err != nil {
+		t.Fatalf("LoadChecklistV2: %v", err)
+	}
 	results := make([]releaseevidence.Result, 0, len(checklist.Positive)+len(checklist.Negative))
 	for _, item := range checklist.Positive {
 		results = append(results, releaseevidence.Result{ID: item.ID, Class: "positive", Status: "pass"})
@@ -62,42 +90,131 @@ func TestEnabledCTARequiresCompleteEvidence(t *testing.T) {
 	for _, item := range checklist.Negative {
 		results = append(results, releaseevidence.Result{ID: item.ID, Class: "negative", Status: "pass"})
 	}
-	now := time.Date(2026, 8, 12, 20, 0, 0, 0, time.UTC)
-	report := releaseevidence.Report{
+	v1 := map[string]any{
+		"kind":                          releaseevidence.Kind,
+		"schema_version":                1,
+		"release_version":               "1.0.0",
+		"source_commit":                 strings.Repeat("a", 40),
+		"client_package_sha256":         strings.Repeat("b", 64),
+		"server_package_sha256":         strings.Repeat("c", 64),
+		"client_artifact_profile_id":    "darwin-arm64",
+		"server_artifact_profile_id":    "linux-amd64",
+		"client_engine_manifest_sha256": strings.Repeat("d", 64),
+		"server_engine_manifest_sha256": strings.Repeat("e", 64),
+		"client_platform":               "darwin",
+		"server_platform":               "linux",
+		"client_architecture":           "arm64",
+		"server_architecture":           "amd64",
+		"test_identity":                 "ci",
+		"commands":                      []string{"./scripts/test-package-interop.sh"},
+		"started_at":                    "2026-08-12T20:00:00Z",
+		"finished_at":                   "2026-08-12T21:00:00Z",
+		"package_to_package":            true,
+		"source_tree_substitution":      false,
+		"results":                       results,
+	}
+	pseudoRoot, evidenceRel := writeJSONEvidenceTree(t, root, v1)
+	enabled := Gate{
+		Kind:                     Kind,
+		SchemaVersion:            SchemaVersion,
+		HomebrewCTAEnabled:       true,
+		HomebrewCommand:          DefaultHomebrewCommand,
+		NextCommand:              DefaultNextCommand,
+		QualificationMessage:     QualificationMessage,
+		RequiredEvidenceDocument: evidenceRel,
+		Links:                    map[string]string{"evidence_checklist": "packaging/evidence/checklist-v2.json"},
+	}
+	if err := ValidateEnabledCTA(pseudoRoot, enabled); err == nil {
+		t.Fatal("enabled CTA accepted complete v1 evidence")
+	}
+}
+
+func TestLoadGateRejectsTrailingJSON(t *testing.T) {
+	t.Parallel()
+
+	root := repositoryRoot(t)
+	valid, err := os.ReadFile(DefaultGatePath(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []struct {
+		suffix string
+	}{
+		{suffix: "}"},
+		{suffix: `{"ok":false}`},
+	} {
+		path := filepath.Join(t.TempDir(), "gate.json")
+		if err := os.WriteFile(path, append(append([]byte(nil), valid...), name.suffix...), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := LoadGate(path); err == nil {
+			t.Fatalf("LoadGate accepted trailing %q", name.suffix)
+		}
+	}
+}
+
+func completeV2Report(checklist releaseevidence.Checklist) releaseevidence.ReportV2 {
+	return sampleReportV2(checklist)
+}
+
+func sampleReportV2(checklist releaseevidence.Checklist) releaseevidence.ReportV2 {
+	results := make([]releaseevidence.Result, 0, len(checklist.Positive)+len(checklist.Negative))
+	for _, item := range checklist.Positive {
+		results = append(results, releaseevidence.Result{ID: item.ID, Class: "positive", Status: "pass"})
+	}
+	for _, item := range checklist.Negative {
+		results = append(results, releaseevidence.Result{ID: item.ID, Class: "negative", Status: "pass"})
+	}
+	return releaseevidence.ReportV2{
 		Kind:                       releaseevidence.Kind,
-		SchemaVersion:              releaseevidence.SchemaVersion,
-		ReleaseVersion:             "1.0.0",
+		SchemaVersion:              releaseevidence.SchemaVersionV2,
+		ContractID:                 adoptionresult.ContractID,
+		ContractChecklistSHA256:    adoptionresult.ContractChecklistSHA256,
+		ReleaseVersion:             "0.1.0-rc.1",
 		SourceCommit:               strings.Repeat("a", 40),
+		CleanTreeProof:             "git-status-empty",
 		ClientPackageSHA256:        strings.Repeat("b", 64),
 		ServerPackageSHA256:        strings.Repeat("c", 64),
 		ClientArtifactProfileID:    "darwin-arm64",
 		ServerArtifactProfileID:    "linux-amd64",
-		ClientEngineManifestSHA256: strings.Repeat("d", 64),
-		ServerEngineManifestSHA256: strings.Repeat("e", 64),
+		ClientEngineManifestSHA256: strings.Repeat("e", 64),
+		ServerEngineManifestSHA256: strings.Repeat("f", 64),
 		ClientPlatform:             "darwin",
 		ServerPlatform:             "linux",
 		ClientArchitecture:         "arm64",
 		ServerArchitecture:         "amd64",
-		TestIdentity:               "ci",
+		HostTarget:                 "127.0.0.1:5432",
+		AuthorizationPolicy:        "30d-default-365d-max",
+		RouteCount:                 1,
+		RestartPolicies:            []string{"unless-stopped"},
+		TestIdentity:               "v2-harness",
 		Commands:                   []string{"./scripts/test-package-interop.sh"},
-		StartedAt:                  now.Format(time.RFC3339Nano),
-		FinishedAt:                 now.Add(time.Hour).Format(time.RFC3339Nano),
+		StartedAt:                  "2026-08-16T00:00:00Z",
+		FinishedAt:                 "2026-08-16T00:01:00Z",
 		PackageToPackage:           true,
 		SourceTreeSubstitution:     false,
 		Results:                    results,
 	}
+}
 
+func writeV2EvidenceTree(t *testing.T, sourceRoot string, report releaseevidence.ReportV2) (string, string) {
+	t.Helper()
+	return writeJSONEvidenceTree(t, sourceRoot, report)
+}
+
+func writeJSONEvidenceTree(t *testing.T, sourceRoot string, report any) (string, string) {
+	t.Helper()
 	pseudoRoot := t.TempDir()
 	evidenceRel := "packaging/evidence/sample-complete.json"
 	checklistDir := filepath.Join(pseudoRoot, "packaging", "evidence")
 	if err := os.MkdirAll(checklistDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	sourceChecklist, err := os.ReadFile(releaseevidence.DefaultChecklistPath(root))
+	sourceChecklist, err := os.ReadFile(releaseevidence.DefaultChecklistV2Path(sourceRoot))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(checklistDir, "checklist-v1.json"), sourceChecklist, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(checklistDir, "checklist-v2.json"), sourceChecklist, 0o644); err != nil {
 		t.Fatal(err)
 	}
 	encoded, err := json.Marshal(report)
@@ -107,18 +224,7 @@ func TestEnabledCTARequiresCompleteEvidence(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(pseudoRoot, evidenceRel), encoded, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	enabled := Gate{
-		Kind:                     Kind,
-		SchemaVersion:            SchemaVersion,
-		HomebrewCTAEnabled:       true,
-		HomebrewCommand:          DefaultHomebrewCommand,
-		NextCommand:              DefaultNextCommand,
-		QualificationMessage:     QualificationMessage,
-		RequiredEvidenceDocument: evidenceRel,
-	}
-	if err := ValidateEnabledCTA(pseudoRoot, enabled); err != nil {
-		t.Fatalf("ValidateEnabledCTA complete evidence: %v", err)
-	}
+	return pseudoRoot, evidenceRel
 }
 
 func repositoryRoot(t *testing.T) string {

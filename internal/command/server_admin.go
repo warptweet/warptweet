@@ -19,6 +19,7 @@ import (
 	"warptweet.com/warptweet/internal/enrollment"
 	"warptweet.com/warptweet/internal/grant"
 	"warptweet.com/warptweet/internal/installlayout"
+	"warptweet.com/warptweet/internal/outcome"
 	"warptweet.com/warptweet/internal/server"
 )
 
@@ -44,7 +45,7 @@ func runServer(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	case "clock-recover":
 		return runServerClockRecover(ctx, arguments[1:], stdout, stderr)
 	case "init", "invite":
-		return fmt.Errorf("server %s was replaced by warptweet host", arguments[0])
+		return outcome.Replaced("server "+arguments[0], "warptweet host --to <port|ip:port>")
 	default:
 		return fmt.Errorf("unknown server subcommand %q", arguments[0])
 	}

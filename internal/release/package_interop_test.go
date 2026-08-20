@@ -89,9 +89,9 @@ func TestReleaseEvidenceChecklistMatchesHomebrewDelivery(t *testing.T) {
 	t.Parallel()
 
 	root := repositoryRoot(t)
-	checklist, err := releaseevidence.LoadChecklist(releaseevidence.DefaultChecklistPath(root))
+	checklist, err := releaseevidence.LoadChecklistV2(releaseevidence.DefaultChecklistV2Path(root))
 	if err != nil {
-		t.Fatalf("LoadChecklist: %v", err)
+		t.Fatalf("LoadChecklistV2: %v", err)
 	}
 	requiredPositive := []string{
 		"pkg-signature-and-manifest",
@@ -103,6 +103,14 @@ func TestReleaseEvidenceChecklistMatchesHomebrewDelivery(t *testing.T) {
 		"pid-bound-readiness",
 		"deterministic-target-payload",
 		"stop-restart-rotate-revoke-upgrade",
+		"second-client-grant",
+		"two-independent-routes",
+		"reboot-unless-stopped-manual-down",
+		"live-expiry-and-revocation",
+		"clock-rollback-fail-closed",
+		"target-change-denial",
+		"compose-loopback-postgres",
+		"agent-skill-delivery",
 	}
 	requiredNegative := []string{
 		"classical-only-kex-host-client",
@@ -114,6 +122,8 @@ func TestReleaseEvidenceChecklistMatchesHomebrewDelivery(t *testing.T) {
 		"engine-and-package-tamper",
 		"bounded-floods",
 		"availability-faults",
+		"pid-reuse-and-stop-failure",
+		"silent-renewal-and-port-reassignment",
 	}
 	have := map[string]string{}
 	for _, item := range checklist.Positive {
@@ -132,7 +142,7 @@ func TestReleaseEvidenceChecklistMatchesHomebrewDelivery(t *testing.T) {
 			t.Errorf("missing negative case %q", id)
 		}
 	}
-	schemaPath := filepath.Join(root, "schemas", "release-evidence-v1.schema.json")
+	schemaPath := filepath.Join(root, "schemas", "release-evidence-v2.schema.json")
 	schema := string(readFile(t, schemaPath))
 	for _, required := range []string{
 		`"const": "warptweet.release-evidence"`,
@@ -140,6 +150,8 @@ func TestReleaseEvidenceChecklistMatchesHomebrewDelivery(t *testing.T) {
 		`"source_tree_substitution"`,
 		`"client_package_sha256"`,
 		`"server_package_sha256"`,
+		`"contract_id"`,
+		`"host_target"`,
 	} {
 		if !strings.Contains(schema, required) {
 			t.Errorf("schema omits %q", required)

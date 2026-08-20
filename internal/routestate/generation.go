@@ -141,39 +141,51 @@ func (store Store) LoadActive(routeID string) (Active, error) {
 
 // ReservePort claims a unique route ID and listen port before invite consumption.
 func (store Store) ReservePort(routeID string, listenPort uint16) error {
-	if listenPort == 0 {
-		return fmt.Errorf("%w: listen port must be a nonzero TCP port", ErrInvalidRoute)
-	}
 	unlock, err := store.lockRoot()
 	if err != nil {
 		return err
 	}
 	defer unlock()
+	_, err = store.reservePortLocked(routeID, listenPort)
+	return err
+}
+
+func (store Store) reservePortLocked(routeID string, listenPort uint16) (bool, error) {
+	if listenPort == 0 {
+		return false, fmt.Errorf("%w: listen port must be a nonzero TCP port", ErrInvalidRoute)
+	}
 	if existing, loadErr := store.loadReservation(routeID); loadErr == nil &&
 		existing.RouteID == routeID && existing.ListenPort == listenPort {
-		return nil
+		return false, nil
 	}
 	if err := store.Reserve(routeID); err != nil {
 		if existing, loadErr := store.loadReservation(routeID); loadErr == nil &&
 			existing.RouteID == routeID && existing.ListenPort == listenPort {
-			return nil
+			return false, nil
 		}
-		return err
+		return false, err
 	}
 	owner, taken, err := store.PortOwner(listenPort)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if taken && owner != routeID {
 		_ = os.RemoveAll(filepath.Join(store.Root, routeID))
-		return fmt.Errorf("%w: listen port %d is already reserved by %s", ErrInvalidRoute, listenPort, owner)
+		return false, fmt.Errorf("%w: listen port %d is already reserved by %s", ErrInvalidRoute, listenPort, owner)
 	}
-	return writeJSONAtomic(filepath.Join(store.Root, routeID, "reservation.json"), Reservation{
+	if err := writeJSONAtomic(filepath.Join(store.Root, routeID, "reservation.json"), Reservation{
 		Kind:          KindReservation,
 		SchemaVersion: CurrentSchemaVersion,
 		RouteID:       routeID,
 		ListenPort:    listenPort,
-	}, 0o600)
+	}, 0o600); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (store Store) releaseReservationLocked(routeID string) error {
+	return os.RemoveAll(filepath.Join(store.Root, routeID))
 }
 
 func (store Store) lockRoot() (func(), error) {

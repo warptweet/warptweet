@@ -30,6 +30,7 @@ func TestLifecycleUsageMentionsCommands(t *testing.T) {
 		"warptweet up",
 		"warptweet status",
 		"warptweet down",
+		"warptweet repair",
 		"warptweet rotate",
 		"warptweet revoke",
 		"warptweet uninstall --preserve-identity",
@@ -140,10 +141,30 @@ func TestRotateAndRevokeRequireEnrollmentReceipt(t *testing.T) {
 		// Off-matrix hosts may fail layout resolution before receipt load.
 		if strings.Contains(message, "artifact profile") ||
 			strings.Contains(message, "client layout") ||
-			strings.Contains(message, "operation not permitted") {
+			strings.Contains(message, "operation not permitted") ||
+			strings.Contains(message, "provisioner_unavailable") {
 			continue
 		}
 		t.Fatalf("%v stderr=%s", test.args, message)
+	}
+}
+
+func TestRunRejectsDirectInvocation(t *testing.T) {
+	t.Parallel()
+
+	for _, args := range [][]string{
+		{"run", "--route", "staging-db"},
+		{"run", "--route", "staging-db", "--managed-lifecycle"},
+	} {
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		code := Run(context.Background(), args, nil, &stdout, &stderr)
+		if code != 1 {
+			t.Fatalf("%v code=%d stderr=%s", args, code, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "unit-only") {
+			t.Fatalf("%v stderr=%s", args, stderr.String())
+		}
 	}
 }
 

@@ -26,6 +26,8 @@ func TestLinuxPackageBuildScriptContract(t *testing.T) {
 		`usr/bin/warptweet`,
 		`warptweet-sshd.service`,
 		`warptweet-tunnel@.service`,
+		`warptweet-provisioner.service`,
+		`warptweet-provisioner`,
 		`sshd`,
 		`ssh-keygen`,
 		`dpkg-deb`,
@@ -81,10 +83,37 @@ func TestLinuxPackageScriptsForbidNetwork(t *testing.T) {
 		`/var/lib/warptweet/invites`,
 		`usermod -L warptweet-client`,
 		`usermod -L warptweet-sshd`,
+		`warptweet-operator`,
+		`--uid "$WT_UID"`,
+		`systemctl enable warptweet-provisioner.service`,
 	} {
 		if !strings.Contains(postinst, required) {
 			t.Errorf("postinst omits %q", required)
 		}
+	}
+	if strings.Contains(postinst, "|| true") {
+		t.Fatal("postinst discards security-boundary failures")
+	}
+	prerm := string(readFile(t, filepath.Join(root, "packaging/linux/prerm.sh")))
+	for _, required := range []string{
+		`warptweet-provisioner.service`,
+		`warptweet-reconcile.service`,
+		`warptweet-tunnel@`,
+		`list-unit-files`,
+		`stop_disable "$WT_UNIT"`,
+		`remove | deconfigure | 0`,
+		`try-restart`,
+	} {
+		if !strings.Contains(prerm, required) {
+			t.Errorf("prerm omits %q", required)
+		}
+	}
+	spec := string(readFile(t, filepath.Join(root, "scripts/build-linux-packages.sh")))
+	if strings.Contains(spec, "linux-postinst.sh || true") || strings.Contains(spec, "linux-prerm.sh || true") {
+		t.Fatal("RPM spec discards maintainer-script failures")
+	}
+	if !strings.Contains(spec, `/bin/sh /opt/warptweet/share/linux-prerm.sh "$1"`) {
+		t.Fatal("RPM preun must pass the remaining-package count to prerm")
 	}
 	enrollmentUnit := string(readFile(t, filepath.Join(root, "packaging/systemd/warptweet-enroll.service")))
 	for _, required := range []string{

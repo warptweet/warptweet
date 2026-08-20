@@ -70,16 +70,17 @@ if [ "$WT_NEED_GO" -eq 1 ]; then
             exit 65
             ;;
     esac
-    curl -fsSL "https://go.dev/dl/${WT_TGZ}" -o "/tmp/${WT_TGZ}"
-    WT_GOT_SHA256=$(sha256sum "/tmp/${WT_TGZ}" | awk '{print $1}')
+    WT_TMP=$(mktemp -d)
+    chmod 0700 "$WT_TMP"
+    trap 'rm -rf "$WT_TMP"' EXIT
+    curl --proto '=https' --tlsv1.2 --fail --location "https://go.dev/dl/${WT_TGZ}" -o "$WT_TMP/${WT_TGZ}"
+    WT_GOT_SHA256=$(sha256sum "$WT_TMP/${WT_TGZ}" | awk '{print $1}')
     if [ "$WT_GOT_SHA256" != "$WT_TGZ_SHA256" ]; then
-        rm -f "/tmp/${WT_TGZ}"
         echo "Go archive checksum mismatch for ${WT_TGZ}" >&2
         exit 65
     fi
     rm -rf "$WT_GO_ROOT"
-    tar -C /usr/local -xzf "/tmp/${WT_TGZ}"
-    rm -f "/tmp/${WT_TGZ}"
+    tar -C /usr/local -xzf "$WT_TMP/${WT_TGZ}"
 fi
 
 install -d -o root -g root -m 0755 /var/tmp/warptweet-rc

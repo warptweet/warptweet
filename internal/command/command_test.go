@@ -111,7 +111,8 @@ func TestRunOnceExercisesCompleteLocalControlPlane(t *testing.T) {
 		"--config", manifestPath,
 		"--tunnel", "database-primary",
 		"--once",
-	}, &stdout, &stderr, testCommandDependencies(t, enginePath, cancel))
+		"--managed-lifecycle",
+	}, &stdout, &stderr, testCommandDependencies(t, enginePath, nil))
 	if code != 0 {
 		t.Fatalf("code = %d, stderr = %s", code, stderr.String())
 	}
@@ -172,7 +173,6 @@ func TestProductionNetworkCommandsRequireFixedClientManifest(t *testing.T) {
 	manifestPath, _ := writeClientManifest(t, false)
 	for _, arguments := range [][]string{
 		{"doctor", "--config", manifestPath, "--tunnel", "database-primary"},
-		{"run", "--config", manifestPath, "--tunnel", "database-primary", "--once"},
 	} {
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
@@ -208,6 +208,7 @@ func TestRunFailsClosedWhenServiceReadinessCannotBePublished(t *testing.T) {
 		"--config", manifestPath,
 		"--tunnel", "database-primary",
 		"--once",
+		"--managed-lifecycle",
 	}, &stdout, &stderr, dependencies)
 	if code != 1 {
 		t.Fatalf("code = %d, want 1; stderr = %s", code, stderr.String())
@@ -344,6 +345,7 @@ func testCommandDependencies(t *testing.T, enginePath string, onReady func()) co
 		newServiceNotifier: func() (serviceNotifier, error) {
 			return &recordingServiceNotifier{onReady: onReady}, nil
 		},
+		authorizeManagedRun: func() error { return nil },
 	}
 }
 

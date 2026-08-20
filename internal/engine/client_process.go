@@ -29,8 +29,8 @@ func (execClientCommandRunner) Run(
 	command.Env = append([]string(nil), environment...)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
-	command.Stdout = &stdout
-	command.Stderr = &stderr
+	command.Stdout = &limitedBuffer{limit: maxServerCommandOutput, buf: &stdout}
+	command.Stderr = &limitedBuffer{limit: maxServerCommandOutput, buf: &stderr}
 	err := command.Run()
 	result := clientCommandOutput{
 		stdout: append([]byte(nil), stdout.Bytes()...),
@@ -53,4 +53,21 @@ func (execClientCommandRunner) Run(
 // OpenSSL process overrides.
 func sanitizedClientEnvironment(_ []string) []string {
 	return []string{"LANG=C", "LC_ALL=C"}
+}
+
+type limitedBuffer struct {
+	limit int
+	buf   *bytes.Buffer
+}
+
+func (buffer *limitedBuffer) Write(payload []byte) (int, error) {
+	remaining := buffer.limit - buffer.buf.Len()
+	if remaining <= 0 {
+		return 0, fmt.Errorf("command output exceeded %d bytes", buffer.limit)
+	}
+	if len(payload) > remaining {
+		_, _ = buffer.buf.Write(payload[:remaining])
+		return remaining, fmt.Errorf("command output exceeded %d bytes", buffer.limit)
+	}
+	return buffer.buf.Write(payload)
 }

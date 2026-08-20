@@ -15,7 +15,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"warptweet.com/warptweet/internal/artifactprofile"
@@ -24,6 +23,7 @@ import (
 	"warptweet.com/warptweet/internal/installlayout"
 	"warptweet.com/warptweet/internal/knownhosts"
 	"warptweet.com/warptweet/internal/lifecycle"
+	"warptweet.com/warptweet/internal/outcome"
 	"warptweet.com/warptweet/internal/profile"
 	"warptweet.com/warptweet/internal/provisioner"
 	"warptweet.com/warptweet/internal/routestate"
@@ -128,6 +128,12 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	publicKey := pending.PublicKey
 	managementToken := pending.ManagementToken
 
+	if !prepareOnly.value {
+		if err := persistReservedRoute(routeStore, view.TunnelID, view.ListenPort, invite.InviteID, generationID); err != nil {
+			return err
+		}
+	}
+
 	request := enrollment.EnrollmentRequest{
 		InviteID:        invite.InviteID,
 		Nonce:           invite.Nonce,
@@ -222,9 +228,6 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		})
 	}
 
-	if err := routeStore.ReservePort(view.TunnelID, view.ListenPort); err != nil {
-		return err
-	}
 	generationDir, err := routeStore.GenerationDir(view.TunnelID, generationID)
 	if err != nil {
 		return err
@@ -274,6 +277,17 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		return err
 	}
 	if err := persistRouteEnrollment(view.TunnelID, listenEndpoint, receipt, restartPolicy); err != nil {
+		_ = routeStore.WriteTransaction(routestate.Transaction{
+			RouteID:    view.TunnelID,
+			Phase:      routestate.PhaseFailed,
+			ListenPort: view.ListenPort,
+			InviteID:   invite.InviteID,
+			Generation: generationID,
+			Error:      err.Error(),
+		})
+		return err
+	}
+	if err := persistEnrolledRoute(routeStore, view.TunnelID, view.ListenPort, invite.InviteID, generationID); err != nil {
 		return err
 	}
 	if err := os.RemoveAll(stageRoot); err != nil {
@@ -304,6 +318,25 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		"target_health":                  lifecycle.TargetHealthNotChecked,
 		"next":                           "warptweet up " + view.TunnelID,
 	})
+}
+
+func runRepair(ctx context.Context, arguments []string, stdout, stderr io.Writer, dependencies commandDependencies) error {
+	flags := newFlagSet("repair", stderr)
+	positionals, err := parseFlagsAllowArgs(flags, arguments)
+	if err != nil {
+		return err
+	}
+	if len(positionals) != 1 {
+		return errors.New("repair requires exactly one route id")
+	}
+	if handled, err := callInstalledProvisioner(ctx, provisioner.Request{
+		Version:  provisioner.ProtocolVersion,
+		Action:   provisioner.ActionRepair,
+		TunnelID: positionals[0],
+	}, stdout); handled {
+		return err
+	}
+	return runUp(ctx, []string{positionals[0]}, stdout, stderr, dependencies)
 }
 
 func runUp(ctx context.Context, arguments []string, stdout, stderr io.Writer, dependencies commandDependencies) error {
@@ -346,7 +379,7 @@ func runUp(ctx context.Context, arguments []string, stdout, stderr io.Writer, de
 	if err != nil {
 		return err
 	}
-	if current.Phase == lifecycle.PhaseReady && current.PID > 0 && processAlive(current.PID) {
+	if current.Phase == lifecycle.PhaseReady && current.Generation != "" {
 		return writeJSON(stdout, map[string]any{
 			"status":          "already_ready",
 			"tunnel_id":       tunnelID,
@@ -362,179 +395,22 @@ func runUp(ctx context.Context, arguments []string, stdout, stderr io.Writer, de
 		Phase:        lifecycle.PhasePreparing,
 		TargetHealth: lifecycle.TargetHealthNotChecked,
 	})
-
-	routeStore, routeErr := productionRouteStore()
-	manifestPath := layout.ClientManifestPath
-	if routeErr == nil {
-		if resolved, resolveErr := routeStore.ManifestPath(tunnelID); resolveErr == nil {
-			manifestPath = resolved
-		}
-	}
-	manifest, err := dependencies.loadProductionClientManifest(manifestPath)
-	if err != nil {
+	if err := projectManagedTunnel(ctx, tunnelID, true); err != nil {
 		_ = store.Write(lifecycle.State{TunnelID: tunnelID, Phase: lifecycle.PhaseFailed, Error: err.Error(), TargetHealth: lifecycle.TargetHealthNotChecked})
 		return err
 	}
-	spec, err := clientSpec(manifest, tunnelID)
-	if err != nil {
-		_ = store.Write(lifecycle.State{TunnelID: tunnelID, Phase: lifecycle.PhaseFailed, Error: err.Error(), TargetHealth: lifecycle.TargetHealthNotChecked})
-		return err
-	}
-	listenEndpoint := fmt.Sprintf("%s:%d", spec.ListenAddress, spec.ListenPort)
-
-	self, err := os.Executable()
+	state, err := store.Read(tunnelID)
 	if err != nil {
 		return err
 	}
-	args := []string{"run", "--route", tunnelID}
-	if manifestPath == layout.ClientManifestPath {
-		args = []string{"run", "--config", layout.ClientManifestPath, "--tunnel", tunnelID}
-	}
-	if once.value || !once.set {
-		// Default to --once for up so package/service managers own restart policy.
-		args = append(args, "--once")
-	}
-	readyRead, readyWrite, err := os.Pipe()
-	if err != nil {
-		return fmt.Errorf("create readiness pipe: %w", err)
-	}
-	defer readyRead.Close()
-	args = append(args, "--ready-fd", "3")
-	cmd := exec.CommandContext(ctx, self, args...)
-	cmd.Env = []string{"LANG=C", "LC_ALL=C"}
-	cmd.ExtraFiles = []*os.File{readyWrite}
-	if err := cmd.Start(); err != nil {
-		_ = readyWrite.Close()
-		_ = store.Write(lifecycle.State{TunnelID: tunnelID, Phase: lifecycle.PhaseFailed, Error: err.Error(), TargetHealth: lifecycle.TargetHealthNotChecked})
-		return err
-	}
-	_ = readyWrite.Close()
-	_ = store.Write(lifecycle.State{
-		TunnelID:       tunnelID,
-		Phase:          lifecycle.PhaseAwaitingReadiness,
-		PID:            cmd.Process.Pid,
-		ListenEndpoint: listenEndpoint,
-		TargetHealth:   lifecycle.TargetHealthNotChecked,
-	})
-
-	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
-	readyResult := make(chan struct {
-		sshPID int
-		err    error
-	}, 1)
-	go func() {
-		line, readErr := bufio.NewReader(io.LimitReader(readyRead, 128)).ReadString('\n')
-		if readErr != nil {
-			readyResult <- struct {
-				sshPID int
-				err    error
-			}{err: fmt.Errorf("read authenticated readiness: %w", readErr)}
-			return
-		}
-		fields := strings.Fields(line)
-		if len(fields) != 2 || fields[0] != "READY" {
-			readyResult <- struct {
-				sshPID int
-				err    error
-			}{err: errors.New("authenticated readiness message is malformed")}
-			return
-		}
-		sshPID, parseErr := strconv.Atoi(fields[1])
-		if parseErr != nil || sshPID <= 0 {
-			readyResult <- struct {
-				sshPID int
-				err    error
-			}{err: errors.New("authenticated readiness PID is invalid")}
-			return
-		}
-		readyResult <- struct {
-			sshPID int
-			err    error
-		}{sshPID: sshPID}
-	}()
-	timer := time.NewTimer(45 * time.Second)
-	defer timer.Stop()
-	select {
-	case err := <-done:
-		phase := lifecycle.PhaseFailed
-		message := "process exited before ready"
-		if err == nil {
-			phase = lifecycle.PhaseStopped
-			message = ""
-		} else {
-			message = err.Error()
-		}
-		_ = store.Write(lifecycle.State{
-			TunnelID:       tunnelID,
-			Phase:          phase,
-			ListenEndpoint: listenEndpoint,
-			TargetHealth:   lifecycle.TargetHealthNotChecked,
-			Error:          message,
-		})
-		if err != nil {
-			return fmt.Errorf("tunnel exited: %w", err)
-		}
-	case ready := <-readyResult:
-		if ready.err != nil {
-			processErr := terminateAndReapCommand(cmd, done)
-			_ = store.Write(lifecycle.State{TunnelID: tunnelID, Phase: lifecycle.PhaseFailed, Error: ready.err.Error(), TargetHealth: lifecycle.TargetHealthNotChecked})
-			return errors.Join(ready.err, processErr)
-		}
-		if !processAlive(cmd.Process.Pid) {
-			processErr := <-done
-			return fmt.Errorf("tunnel exited at authenticated readiness boundary: %w", processErr)
-		}
-		_ = store.Write(lifecycle.State{
-			TunnelID:       tunnelID,
-			Phase:          lifecycle.PhaseReady,
-			PID:            cmd.Process.Pid,
-			ListenEndpoint: listenEndpoint,
-			TargetHealth:   lifecycle.TargetHealthNotChecked,
-		})
-	case <-timer.C:
-		processErr := terminateAndReapCommand(cmd, done)
-		err := errors.New("timed out waiting for authenticated tunnel readiness")
-		_ = store.Write(lifecycle.State{TunnelID: tunnelID, Phase: lifecycle.PhaseFailed, Error: err.Error(), TargetHealth: lifecycle.TargetHealthNotChecked})
-		return errors.Join(err, processErr)
-	case <-ctx.Done():
-		processErr := terminateAndReapCommand(cmd, done)
-		err := ctx.Err()
-		_ = store.Write(lifecycle.State{TunnelID: tunnelID, Phase: lifecycle.PhaseFailed, Error: err.Error(), TargetHealth: lifecycle.TargetHealthNotChecked})
-		return errors.Join(err, processErr)
-	}
-
 	return writeJSON(stdout, map[string]any{
 		"status":          "started",
 		"tunnel_id":       tunnelID,
-		"phase":           lifecycle.PhaseReady,
-		"pid":             cmd.Process.Pid,
-		"listen_endpoint": listenEndpoint,
+		"phase":           state.Phase,
+		"pid":             state.PID,
+		"listen_endpoint": state.ListenEndpoint,
 		"target_health":   lifecycle.TargetHealthNotChecked,
 	})
-}
-
-func terminateAndReapCommand(cmd *exec.Cmd, done <-chan error) error {
-	if cmd == nil || cmd.Process == nil {
-		return nil
-	}
-	_ = cmd.Process.Signal(syscall.SIGTERM)
-	timer := time.NewTimer(5 * time.Second)
-	defer timer.Stop()
-	select {
-	case err := <-done:
-		return err
-	case <-timer.C:
-	}
-	_ = cmd.Process.Signal(syscall.SIGKILL)
-	killTimer := time.NewTimer(2 * time.Second)
-	defer killTimer.Stop()
-	select {
-	case err := <-done:
-		return err
-	case <-killTimer.C:
-		return errors.New("tunnel controller did not exit after SIGKILL")
-	}
 }
 
 func runStatus(arguments []string, stdout, stderr io.Writer) error {
@@ -635,34 +511,16 @@ func runDown(arguments []string, stdout, stderr io.Writer) error {
 		TargetHealth:   lifecycle.TargetHealthNotChecked,
 		Generation:     state.Generation,
 	})
-	if state.PID > 0 {
-		_ = store.Signal(tunnelID, syscall.SIGTERM)
-		deadline := time.Now().Add(5 * time.Second)
-		for time.Now().Before(deadline) {
-			if !processAlive(state.PID) {
-				break
-			}
-			time.Sleep(50 * time.Millisecond)
-		}
-		if processAlive(state.PID) {
-			_ = store.Signal(tunnelID, syscall.SIGKILL)
-			killDeadline := time.Now().Add(2 * time.Second)
-			for time.Now().Before(killDeadline) && processAlive(state.PID) {
-				time.Sleep(50 * time.Millisecond)
-			}
-		}
-		if processAlive(state.PID) {
-			_ = store.Write(lifecycle.State{
-				TunnelID:       tunnelID,
-				Phase:          lifecycle.PhaseFailed,
-				PID:            state.PID,
-				ListenEndpoint: state.ListenEndpoint,
-				TargetHealth:   lifecycle.TargetHealthNotChecked,
-				Generation:     state.Generation,
-				Error:          "process remained after SIGKILL",
-			})
-			return fmt.Errorf("down: process %d remained after SIGKILL", state.PID)
-		}
+	if err := projectManagedTunnel(context.Background(), tunnelID, false); err != nil {
+		_ = store.Write(lifecycle.State{
+			TunnelID:       tunnelID,
+			Phase:          lifecycle.PhaseFailed,
+			ListenEndpoint: state.ListenEndpoint,
+			TargetHealth:   lifecycle.TargetHealthNotChecked,
+			Generation:     state.Generation,
+			Error:          err.Error(),
+		})
+		return err
 	}
 	_ = store.Write(lifecycle.State{
 		TunnelID:       tunnelID,
@@ -708,7 +566,7 @@ func runRotate(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	}
 	defer lifecycle.Unlock(lock)
 
-	if err := stopTunnelProcess(store, tunnelID); err != nil {
+	if err := stopTunnelProcess(ctx, store, tunnelID); err != nil {
 		return err
 	}
 
@@ -834,7 +692,7 @@ func runRevokeTunnel(ctx context.Context, arguments []string, stdout, stderr io.
 	}
 	defer lifecycle.Unlock(lock)
 
-	if err := stopTunnelProcess(store, tunnelID); err != nil {
+	if err := stopTunnelProcess(ctx, store, tunnelID); err != nil {
 		return err
 	}
 
@@ -1110,31 +968,11 @@ func writeEnrollmentReceipt(clientManifestPath string, receipt enrollmentReceipt
 	return writeFileAtomic(filepath.Join(dir, receipt.TunnelID+".json"), raw, 0o600)
 }
 
-func stopTunnelProcess(store lifecycle.Store, tunnelID string) error {
-	state, err := store.Read(tunnelID)
-	if err != nil {
+func stopTunnelProcess(ctx context.Context, store lifecycle.Store, tunnelID string) error {
+	if _, err := store.Read(tunnelID); err != nil {
 		return err
 	}
-	if state.PID <= 0 {
-		return nil
-	}
-	_ = store.Signal(tunnelID, syscall.SIGTERM)
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if !processAlive(state.PID) {
-			return nil
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	_ = store.Signal(tunnelID, syscall.SIGKILL)
-	killDeadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(killDeadline) {
-		if !processAlive(state.PID) {
-			return nil
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	return fmt.Errorf("tunnel %s process %d did not exit after stop", tunnelID, state.PID)
+	return projectManagedTunnel(ctx, tunnelID, false)
 }
 
 func loadEnrollmentReceipt(clientManifestPath, tunnelID string) (enrollmentReceipt, error) {
@@ -1166,6 +1004,58 @@ func productionRouteStore() (routestate.Store, error) {
 		root = filepath.Join(dir, "routes")
 	}
 	return routestate.Store{Root: root}, nil
+}
+
+func openRouteStore(dependencies commandDependencies) (routeStore, error) {
+	if dependencies.openRouteStore != nil {
+		return dependencies.openRouteStore()
+	}
+	return productionRouteStore()
+}
+
+func invokeEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer, dependencies commandDependencies) error {
+	if dependencies.enroll != nil {
+		return dependencies.enroll(ctx, arguments, stdout, stderr)
+	}
+	return runEnroll(ctx, arguments, stdout, stderr)
+}
+
+func invokeUp(ctx context.Context, arguments []string, stdout, stderr io.Writer, dependencies commandDependencies) error {
+	if dependencies.up != nil {
+		return dependencies.up(ctx, arguments, stdout, stderr, dependencies)
+	}
+	return runUp(ctx, arguments, stdout, stderr, dependencies)
+}
+
+func invokeRepair(ctx context.Context, arguments []string, stdout, stderr io.Writer, dependencies commandDependencies) error {
+	if dependencies.repair != nil {
+		return dependencies.repair(ctx, arguments, stdout, stderr, dependencies)
+	}
+	return runRepair(ctx, arguments, stdout, stderr, dependencies)
+}
+
+type reservedRouteStore interface {
+	ReserveAndWriteTransaction(routestate.Transaction) error
+}
+
+func persistReservedRoute(store reservedRouteStore, routeID string, listenPort uint16, inviteID, generation string) error {
+	return store.ReserveAndWriteTransaction(routestate.Transaction{
+		RouteID:    routeID,
+		Phase:      routestate.PhaseReserved,
+		ListenPort: listenPort,
+		InviteID:   inviteID,
+		Generation: generation,
+	})
+}
+
+func persistEnrolledRoute(store routeStore, routeID string, listenPort uint16, inviteID, generation string) error {
+	return store.WriteTransaction(routestate.Transaction{
+		RouteID:    routeID,
+		Phase:      routestate.PhaseEnrolled,
+		ListenPort: listenPort,
+		InviteID:   inviteID,
+		Generation: generation,
+	})
 }
 
 func persistRouteEnrollment(routeID, listenEndpoint string, receipt enrollmentReceipt, restartPolicy string) error {
@@ -1483,25 +1373,14 @@ func runReconcile(ctx context.Context, arguments []string, stdout, stderr io.Wri
 		}
 		if !routestate.ShouldStartAtBoot(route.Intent, bootID) {
 			if route.Intent.DesiredState == routestate.DesiredStopped {
-				if runtime.GOOS == "linux" {
-					if err := projectLinuxTunnel(ctx, route.RouteID, false); err != nil {
-						projectionErrors[route.RouteID] = err.Error()
-					}
+				if err := projectManagedTunnel(ctx, route.RouteID, false); err != nil {
+					projectionErrors[route.RouteID] = err.Error()
 				}
-				_ = runDown([]string{route.RouteID}, io.Discard, stderr)
 			}
 			skipped = append(skipped, route.RouteID)
 			continue
 		}
-		if runtime.GOOS == "linux" {
-			if err := projectLinuxTunnel(ctx, route.RouteID, true); err != nil {
-				projectionErrors[route.RouteID] = err.Error()
-				if err := runUp(ctx, []string{route.RouteID}, io.Discard, stderr, dependencies); err != nil {
-					failed[route.RouteID] = err.Error()
-					continue
-				}
-			}
-		} else if err := runUp(ctx, []string{route.RouteID}, io.Discard, stderr, dependencies); err != nil {
+		if err := projectManagedTunnel(ctx, route.RouteID, true); err != nil {
 			failed[route.RouteID] = err.Error()
 			continue
 		}
@@ -1517,12 +1396,23 @@ func runReconcile(ctx context.Context, arguments []string, stdout, stderr io.Wri
 	})
 }
 
-func projectLinuxTunnel(ctx context.Context, routeID string, start bool) error {
+func projectManagedTunnel(ctx context.Context, routeID string, start bool) error {
 	if err := routestate.ValidateRouteID(routeID); err != nil {
 		return err
 	}
+	switch runtime.GOOS {
+	case "linux":
+		return projectLinuxTunnel(ctx, routeID, start)
+	case "darwin":
+		return fmt.Errorf("%w: start or reinstall the WarpTweet client package so the provisioner socket exists", outcome.ErrProvisionerUnavailable)
+	default:
+		return fmt.Errorf("%w: no service-manager projector for %s", outcome.ErrPackageBoundary, runtime.GOOS)
+	}
+}
+
+func projectLinuxTunnel(ctx context.Context, routeID string, start bool) error {
 	if _, err := exec.LookPath("systemctl"); err != nil {
-		return err
+		return fmt.Errorf("%w: systemctl is required to project warptweet-tunnel@%s", outcome.ErrPackageBoundary, routeID)
 	}
 	unit := "warptweet-tunnel@" + routeID + ".service"
 	action := "stop"
@@ -1563,9 +1453,11 @@ func runUninstall(arguments []string, stdout, stderr io.Writer) error {
 	}
 	store := lifecycle.Store{Root: layout.ClientRuntimeRoot}
 	states, _ := store.List()
+	stopErrors := map[string]string{}
 	for _, state := range states {
-		if state.PID > 0 {
-			_ = store.Signal(state.TunnelID, syscall.SIGTERM)
+		if err := projectManagedTunnel(context.Background(), state.TunnelID, false); err != nil {
+			stopErrors[state.TunnelID] = err.Error()
+			continue
 		}
 		_ = store.Write(lifecycle.State{
 			TunnelID:       state.TunnelID,
@@ -1575,11 +1467,18 @@ func runUninstall(arguments []string, stdout, stderr io.Writer) error {
 			Generation:     state.Generation,
 		})
 	}
-	return writeJSON(stdout, map[string]any{
-		"status":   "stopped_local_tunnels",
-		"identity": "preserved",
-		"note":     "package removal remains a platform package manager concern",
-	})
+	if err := writeJSON(stdout, map[string]any{
+		"status":      "stopped_local_tunnels",
+		"identity":    "preserved",
+		"stop_errors": stopErrors,
+		"note":        "package removal remains a platform package manager concern",
+	}); err != nil {
+		return err
+	}
+	if len(stopErrors) > 0 {
+		return fmt.Errorf("uninstall: %d tunnels failed to stop", len(stopErrors))
+	}
+	return nil
 }
 
 func ensureRouteGenerationDirectories(generationDir string) error {
@@ -1731,12 +1630,4 @@ func truncateMiddle(value string, max int) string {
 	}
 	keep := (max - 3) / 2
 	return value[:keep] + "..." + value[len(value)-keep:]
-}
-
-func processAlive(pid int) bool {
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return process.Signal(syscall.Signal(0)) == nil
 }

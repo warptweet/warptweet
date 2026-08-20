@@ -151,6 +151,96 @@ func TestAcceptStoresClientAndRevokeBurnsToken(t *testing.T) {
 	}
 }
 
+func TestReconcilePendingRevocationsCompletesStuckRecord(t *testing.T) {
+	t.Parallel()
+
+	secret, err := GenerateSecret()
+	if err != nil {
+		t.Fatalf("GenerateSecret: %v", err)
+	}
+	now := time.Date(2026, 8, 14, 20, 0, 0, 0, time.UTC)
+	invite, record, err := Create(CreateInput{
+		ClientName:              "laptop-1",
+		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
+		ServerPort:              2222,
+		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
+		TargetPort:              5432,
+		Principal:               "warptweet",
+		ProfileID:               profile.CurrentID,
+		ArtifactProfileID:       "linux-amd64",
+		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
+		Now:                     now,
+		Secret:                  secret,
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	invites := t.TempDir()
+	clients := t.TempDir()
+	if err := Store(invites, record); err != nil {
+		t.Fatalf("Store: %v", err)
+	}
+	result, err := Accept(AcceptInput{
+		Directory:        invites,
+		ClientsDirectory: clients,
+		Request: EnrollmentRequest{
+			InviteID:        invite.InviteID,
+			Nonce:           invite.Nonce,
+			ClientName:      invite.ClientName,
+			PublicKey:       testCompositePublicKey(),
+			ProfileID:       profile.CurrentID,
+			TunnelID:        "laptop-1",
+			ListenAddress:   "127.0.0.1",
+			ListenPort:      15432,
+			ManagementToken: testManagementToken,
+		},
+		HostPublicKey:        invite.HostPublicKey,
+		Principal:            invite.Principal,
+		ProfileID:            profile.CurrentID,
+		TargetAddress:        invite.TargetAddress,
+		TargetPort:           invite.TargetPort,
+		ServerAddress:        invite.ServerAddress,
+		Now:                  now.Add(time.Minute),
+		InstallAuthorization: func(string, time.Time) error { return nil },
+	})
+	if err != nil {
+		t.Fatalf("Accept: %v", err)
+	}
+	if _, err := RevokeClient(clients, ManagementRequest{
+		ClientID:        result.ClientID,
+		ManagementToken: testManagementToken,
+		TunnelID:        "laptop-1",
+	}, now.Add(2*time.Minute), func(string) error {
+		return errors.New("injected authorization removal failure")
+	}, SessionEnforcement{}); err == nil {
+		t.Fatal("expected injected failure")
+	}
+	var terminated, verified int
+	if err := ReconcilePendingRevocations(clients, now.Add(3*time.Minute), func(string) error { return nil }, SessionEnforcement{
+		TerminateSession: func(string, string, string) error {
+			terminated++
+			return nil
+		},
+		VerifySessionGone: func(string, string, string) error {
+			verified++
+			return nil
+		},
+	}); err != nil {
+		t.Fatalf("ReconcilePendingRevocations: %v", err)
+	}
+	if terminated != 1 || verified != 1 {
+		t.Fatalf("session hooks terminate=%d verify=%d", terminated, verified)
+	}
+	loaded, err := LoadClient(clients, result.ClientID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Status != ClientStatusRevoked {
+		t.Fatalf("status=%s, want revoked", loaded.Status)
+	}
+}
+
 func TestRotateClientIssuesNewToken(t *testing.T) {
 	t.Parallel()
 

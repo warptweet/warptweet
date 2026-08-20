@@ -140,11 +140,8 @@ func TestUsageIncludesDoctorServer(t *testing.T) {
 	if !strings.Contains(stdout.String(), "warptweet doctor-server --config <server.wt>") {
 		t.Fatalf("usage omits doctor-server: %s", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "warptweet run --route <id> [--once]") {
-		t.Fatalf("usage omits run --route form: %s", stdout.String())
-	}
-	if !strings.Contains(stdout.String(), "warptweet run --config <client.wt> --tunnel <id> [--once]") {
-		t.Fatalf("usage omits closed run command: %s", stdout.String())
+	if strings.Contains(stdout.String(), "warptweet run ") {
+		t.Fatalf("usage exposes unit-only run command: %s", stdout.String())
 	}
 	if strings.Contains(stdout.String(), "--runtime-dir") {
 		t.Fatalf("usage exposes removed runtime-directory option: %s", stdout.String())

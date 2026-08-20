@@ -8,7 +8,7 @@
   "required_evidence_document": "",
   "links": {
     "cask_template": "homebrew/Casks/warptweet.rb.tmpl",
-    "evidence_checklist": "packaging/evidence/checklist-v1.json",
+    "evidence_checklist": "packaging/evidence/checklist-v2.json",
     "security_policy": "SECURITY.md",
     "uninstall_macos": "docs/2026-08-12_macos-pkg-and-cask.md",
     "package_interop": "docs/2026-08-12_package-interop-evidence.md"

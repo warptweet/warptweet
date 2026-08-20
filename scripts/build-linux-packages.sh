@@ -51,6 +51,11 @@ if [ ! -x "$WT_CONTROLLER_INPUT" ] || [ -L "$WT_CONTROLLER_INPUT" ]; then
     echo "controller must be a non-symlink executable" >&2
     exit 66
 fi
+WT_PROVISIONER_INPUT=$(dirname "$WT_CONTROLLER_INPUT")/warptweet-provisioner
+if [ ! -x "$WT_PROVISIONER_INPUT" ] || [ -L "$WT_PROVISIONER_INPUT" ]; then
+    echo "warptweet-provisioner must be a non-symlink executable next to the controller" >&2
+    exit 66
+fi
 if [ ! -d "$WT_STAGE_INPUT/opt/warptweet/libexec/openssh" ]; then
     echo "OpenSSH stage missing fixed layout under opt/warptweet/libexec/openssh" >&2
     exit 66
@@ -81,6 +86,7 @@ mkdir -p \
 # Copy staged OpenSSH server inventory.
 cp -a "$WT_STAGE_INPUT/opt/warptweet/." "$WT_ROOT/opt/warptweet/"
 install -m 0755 "$WT_CONTROLLER_INPUT" "$WT_ROOT/opt/warptweet/bin/warptweet"
+install -m 0755 "$WT_PROVISIONER_INPUT" "$WT_ROOT/opt/warptweet/bin/warptweet-provisioner"
 mkdir -p "$WT_ROOT/usr/bin"
 ln -s /opt/warptweet/bin/warptweet "$WT_ROOT/usr/bin/warptweet"
 install -m 0644 "$WT_REPOSITORY_ROOT/packaging/systemd/warptweet-sshd.service" \
@@ -91,6 +97,8 @@ install -m 0644 "$WT_REPOSITORY_ROOT/packaging/systemd/warptweet-tunnel@.service
     "$WT_ROOT/lib/systemd/system/warptweet-tunnel@.service"
 install -m 0644 "$WT_REPOSITORY_ROOT/packaging/systemd/warptweet-reconcile.service" \
     "$WT_ROOT/lib/systemd/system/warptweet-reconcile.service"
+install -m 0644 "$WT_REPOSITORY_ROOT/packaging/systemd/warptweet-provisioner.service" \
+    "$WT_ROOT/lib/systemd/system/warptweet-provisioner.service"
 install -m 0755 "$WT_REPOSITORY_ROOT/packaging/linux/postinst.sh" \
     "$WT_OUTPUT_INPUT/postinst.sh"
 install -m 0755 "$WT_REPOSITORY_ROOT/packaging/linux/prerm.sh" \
@@ -148,15 +156,16 @@ cp -a $WT_ROOT/. %{buildroot}/
 /lib/systemd/system/warptweet-enroll.service
 /lib/systemd/system/warptweet-tunnel@.service
 /lib/systemd/system/warptweet-reconcile.service
+/lib/systemd/system/warptweet-provisioner.service
 /var/empty/warptweet-sshd
 /var/lib/warptweet
 /run/warptweet
 
 %post
-/bin/sh /opt/warptweet/share/linux-postinst.sh || true
+/bin/sh /opt/warptweet/share/linux-postinst.sh
 
 %preun
-/bin/sh /opt/warptweet/share/linux-prerm.sh || true
+/bin/sh /opt/warptweet/share/linux-prerm.sh "$1"
 EOF
 
 install -m 0755 "$WT_REPOSITORY_ROOT/packaging/linux/postinst.sh" \

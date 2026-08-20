@@ -36,6 +36,17 @@ const (
 	GrantAuthorityLockPath      = "/var/lib/warptweet/grant.lock"
 	HostClockBlockedPath        = "/var/lib/warptweet/blocked-clock.json"
 	ClientRoutesDirectory       = "/etc/warptweet/routes"
+	LinuxProvisionerPath        = "/opt/warptweet/bin/warptweet-provisioner"
+	LinuxProvisionerRunRoot     = "/run/warptweet"
+	LinuxProvisionerSocket      = LinuxProvisionerRunRoot + "/provisioner.sock"
+	LinuxOperatorGroup          = "warptweet-operator"
+	LinuxHostUID                = 900
+	LinuxHostGID                = 900
+	LinuxPrivsepUID             = 901
+	LinuxPrivsepGID             = 901
+	LinuxClientUID              = 920
+	LinuxClientGID              = 920
+	LinuxOperatorGID            = 923
 	OpenSSHSourceReceiptPath    = "/opt/warptweet/share/openssh-source.txt"
 	OpenSSLSourceReceiptPath    = "/opt/warptweet/share/openssl-source.txt"
 	OpenSSHLicensePath          = "/opt/warptweet/share/licenses/openssh/LICENCE"

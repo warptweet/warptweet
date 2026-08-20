@@ -49,6 +49,7 @@ func EnsureTLSIdentity(certPath, keyPath string, addresses []net.IP, now time.Ti
 		filepath.Dir(keyPath),
 		enrollmentTLSIdentityLockName(keyPath, certPath),
 		"enrollment TLS identity",
+		false,
 	)
 	if err != nil {
 		return "", false, false, err

@@ -53,11 +53,13 @@ func TestRenderAuthorizedKeyCommandRejectsAmbiguousArguments(t *testing.T) {
 		name      string
 		arguments []string
 		wantError string
+		wantCode  int
 	}{
 		{
 			name:      "missing both flags",
 			arguments: []string{"render-authorized-key"},
 			wantError: "requires --config, --public-key, and --not-after",
+			wantCode:  1,
 		},
 		{
 			name: "missing public key",
@@ -65,6 +67,7 @@ func TestRenderAuthorizedKeyCommandRejectsAmbiguousArguments(t *testing.T) {
 				"render-authorized-key", "--config", manifestPath,
 			},
 			wantError: "requires --config, --public-key, and --not-after",
+			wantCode:  1,
 		},
 		{
 			name: "missing manifest",
@@ -72,6 +75,7 @@ func TestRenderAuthorizedKeyCommandRejectsAmbiguousArguments(t *testing.T) {
 				"render-authorized-key", "--public-key", publicKeyPath,
 			},
 			wantError: "requires --config, --public-key, and --not-after",
+			wantCode:  1,
 		},
 		{
 			name: "unexpected positional argument",
@@ -83,6 +87,7 @@ func TestRenderAuthorizedKeyCommandRejectsAmbiguousArguments(t *testing.T) {
 				"extra",
 			},
 			wantError: "unexpected positional arguments",
+			wantCode:  2,
 		},
 		{
 			name: "unknown flag",
@@ -93,6 +98,7 @@ func TestRenderAuthorizedKeyCommandRejectsAmbiguousArguments(t *testing.T) {
 				"--output", "authorized_keys",
 			},
 			wantError: "flag provided but not defined",
+			wantCode:  2,
 		},
 		{
 			name: "duplicate manifest flag",
@@ -103,6 +109,7 @@ func TestRenderAuthorizedKeyCommandRejectsAmbiguousArguments(t *testing.T) {
 				"--public-key", publicKeyPath,
 			},
 			wantError: "--config may be specified only once",
+			wantCode:  2,
 		},
 		{
 			name: "duplicate public-key flag",
@@ -113,6 +120,7 @@ func TestRenderAuthorizedKeyCommandRejectsAmbiguousArguments(t *testing.T) {
 				"--public-key", publicKeyPath,
 			},
 			wantError: "--public-key may be specified only once",
+			wantCode:  2,
 		},
 	}
 
@@ -124,8 +132,8 @@ func TestRenderAuthorizedKeyCommandRejectsAmbiguousArguments(t *testing.T) {
 			var stdout bytes.Buffer
 			var stderr bytes.Buffer
 			code := Run(context.Background(), test.arguments, nil, &stdout, &stderr)
-			if code != 1 {
-				t.Fatalf("code = %d, want 1; stderr = %s", code, stderr.String())
+			if code != test.wantCode {
+				t.Fatalf("code = %d, want %d; stderr = %s", code, test.wantCode, stderr.String())
 			}
 			if stdout.Len() != 0 {
 				t.Fatalf("command wrote stdout on failure: %q", stdout.String())

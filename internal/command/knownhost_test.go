@@ -49,11 +49,13 @@ func TestRenderKnownHostCommandRejectsAmbiguousArguments(t *testing.T) {
 		name      string
 		arguments []string
 		wantError string
+		wantCode  int
 	}{
 		{
 			name:      "missing all flags",
 			arguments: []string{"render-known-host"},
 			wantError: "requires --config, --tunnel, and --public-key",
+			wantCode:  1,
 		},
 		{
 			name: "missing manifest",
@@ -61,6 +63,7 @@ func TestRenderKnownHostCommandRejectsAmbiguousArguments(t *testing.T) {
 				"render-known-host", "--tunnel", "database-primary", "--public-key", publicKeyPath,
 			},
 			wantError: "requires --config, --tunnel, and --public-key",
+			wantCode:  1,
 		},
 		{
 			name: "missing tunnel",
@@ -68,6 +71,7 @@ func TestRenderKnownHostCommandRejectsAmbiguousArguments(t *testing.T) {
 				"render-known-host", "--config", manifestPath, "--public-key", publicKeyPath,
 			},
 			wantError: "requires --config, --tunnel, and --public-key",
+			wantCode:  1,
 		},
 		{
 			name: "missing public key",
@@ -75,6 +79,7 @@ func TestRenderKnownHostCommandRejectsAmbiguousArguments(t *testing.T) {
 				"render-known-host", "--config", manifestPath, "--tunnel", "database-primary",
 			},
 			wantError: "requires --config, --tunnel, and --public-key",
+			wantCode:  1,
 		},
 		{
 			name: "unexpected positional argument",
@@ -86,6 +91,7 @@ func TestRenderKnownHostCommandRejectsAmbiguousArguments(t *testing.T) {
 				"extra",
 			},
 			wantError: "unexpected positional arguments",
+			wantCode:  2,
 		},
 		{
 			name: "unknown flag",
@@ -97,6 +103,7 @@ func TestRenderKnownHostCommandRejectsAmbiguousArguments(t *testing.T) {
 				"--output", "known_hosts",
 			},
 			wantError: "flag provided but not defined",
+			wantCode:  2,
 		},
 		{
 			name: "duplicate manifest flag",
@@ -108,6 +115,7 @@ func TestRenderKnownHostCommandRejectsAmbiguousArguments(t *testing.T) {
 				"--public-key", publicKeyPath,
 			},
 			wantError: "--config may be specified only once",
+			wantCode:  2,
 		},
 		{
 			name: "duplicate tunnel flag",
@@ -119,6 +127,7 @@ func TestRenderKnownHostCommandRejectsAmbiguousArguments(t *testing.T) {
 				"--public-key", publicKeyPath,
 			},
 			wantError: "--tunnel may be specified only once",
+			wantCode:  2,
 		},
 		{
 			name: "duplicate public-key flag",
@@ -130,6 +139,7 @@ func TestRenderKnownHostCommandRejectsAmbiguousArguments(t *testing.T) {
 				"--public-key", publicKeyPath,
 			},
 			wantError: "--public-key may be specified only once",
+			wantCode:  2,
 		},
 		{
 			name: "tunnel absent from manifest",
@@ -140,6 +150,7 @@ func TestRenderKnownHostCommandRejectsAmbiguousArguments(t *testing.T) {
 				"--public-key", publicKeyPath,
 			},
 			wantError: `manifest contains no tunnel with ID "missing-tunnel"`,
+			wantCode:  1,
 		},
 	}
 
@@ -151,8 +162,8 @@ func TestRenderKnownHostCommandRejectsAmbiguousArguments(t *testing.T) {
 			var stdout bytes.Buffer
 			var stderr bytes.Buffer
 			code := Run(context.Background(), test.arguments, nil, &stdout, &stderr)
-			if code != 1 {
-				t.Fatalf("code = %d, want 1; stderr = %s", code, stderr.String())
+			if code != test.wantCode {
+				t.Fatalf("code = %d, want %d; stderr = %s", code, test.wantCode, stderr.String())
 			}
 			if stdout.Len() != 0 {
 				t.Fatalf("command wrote stdout on failure: %q", stdout.String())

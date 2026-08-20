@@ -103,7 +103,7 @@ func runServerEnrollListen(ctx context.Context, arguments []string, stdout, stde
 	if err != nil {
 		return fmt.Errorf("listen for enrollment: %w", err)
 	}
-	listener := tls.NewListener(tcpListener, tlsConfig)
+	listener := tls.NewListener(newLimitedListener(tcpListener, enrollmentAcceptLimit), tlsConfig)
 
 	errCh := make(chan error, 1)
 	go func() {
@@ -323,20 +323,30 @@ func writeEnrollmentJSON(
 	_ = encoder.Encode(result)
 }
 
+type tokenBucket struct {
+	tokens float64
+	last   time.Time
+}
+
 type enrollmentRateLimiter struct {
 	mu         sync.Mutex
-	window     time.Duration
-	max        int
+	rate       float64
+	burst      float64
 	maxSources int
-	entries    map[string][]time.Time
+	buckets    map[string]*tokenBucket
+	order      []string
 }
 
 func newEnrollmentRateLimiter(window time.Duration, max int) *enrollmentRateLimiter {
+	seconds := window.Seconds()
+	if seconds <= 0 {
+		seconds = 1
+	}
 	return &enrollmentRateLimiter{
-		window:     window,
-		max:        max,
+		rate:       float64(max) / seconds,
+		burst:      float64(max),
 		maxSources: enrollmentRateLimitMaxSources,
-		entries:    map[string][]time.Time{},
+		buckets:    map[string]*tokenBucket{},
 	}
 }
 
@@ -345,65 +355,45 @@ func (limiter *enrollmentRateLimiter) allow(source string) bool {
 		source = "unknown"
 	}
 	now := time.Now()
-	cutoff := now.Add(-limiter.window)
 	limiter.mu.Lock()
 	defer limiter.mu.Unlock()
-
-	// Evict inactive sources globally so unique remotes cannot grow without bound.
-	for key, events := range limiter.entries {
-		kept := events[:0]
-		for _, event := range events {
-			if event.After(cutoff) {
-				kept = append(kept, event)
-			}
-		}
-		if len(kept) == 0 {
-			delete(limiter.entries, key)
-			continue
-		}
-		limiter.entries[key] = kept
+	bucket := limiter.touchLocked(source, now)
+	elapsed := now.Sub(bucket.last).Seconds()
+	if elapsed < 0 {
+		elapsed = 0
 	}
-
-	events := limiter.entries[source]
-	if len(events) >= limiter.max {
+	bucket.tokens += elapsed * limiter.rate
+	if bucket.tokens > limiter.burst {
+		bucket.tokens = limiter.burst
+	}
+	bucket.last = now
+	if bucket.tokens < 1 {
 		return false
 	}
-	if _, exists := limiter.entries[source]; !exists {
-		for len(limiter.entries) >= limiter.maxSources {
-			if !limiter.evictOldestSourceLocked() {
-				return false
-			}
-		}
-	}
-	limiter.entries[source] = append(events, now)
+	bucket.tokens--
 	return true
 }
 
-func (limiter *enrollmentRateLimiter) evictOldestSourceLocked() bool {
-	if len(limiter.entries) == 0 {
-		return false
-	}
-	var oldestKey string
-	var oldestTime time.Time
-	first := true
-	for key, events := range limiter.entries {
-		if len(events) == 0 {
-			delete(limiter.entries, key)
-			return true
+func (limiter *enrollmentRateLimiter) touchLocked(source string, now time.Time) *tokenBucket {
+	if bucket, ok := limiter.buckets[source]; ok {
+		for i, key := range limiter.order {
+			if key == source {
+				limiter.order = append(limiter.order[:i], limiter.order[i+1:]...)
+				break
+			}
 		}
-		// Most recent event approximates source activity within the window.
-		last := events[len(events)-1]
-		if first || last.Before(oldestTime) {
-			oldestKey = key
-			oldestTime = last
-			first = false
-		}
+		limiter.order = append(limiter.order, source)
+		return bucket
 	}
-	if oldestKey == "" {
-		return false
+	for len(limiter.buckets) >= limiter.maxSources && len(limiter.order) > 0 {
+		oldest := limiter.order[0]
+		limiter.order = limiter.order[1:]
+		delete(limiter.buckets, oldest)
 	}
-	delete(limiter.entries, oldestKey)
-	return true
+	bucket := &tokenBucket{tokens: limiter.burst, last: now}
+	limiter.buckets[source] = bucket
+	limiter.order = append(limiter.order, source)
+	return bucket
 }
 
 func requestSource(request *http.Request) string {
@@ -482,6 +472,23 @@ func acceptAndAuthorizeLocked(
 }
 
 func reconcileExpiredGrants(manifest server.Config, now time.Time) error {
+	if err := enrollment.ReconcilePendingRevocations(
+		installlayout.ClientsDirectory,
+		now,
+		func(publicKey string) error {
+			return removeAuthorizedKeyForPublicKey(manifest.AuthorizedKeysPath, publicKey)
+		},
+		enrollment.SessionEnforcement{
+			TerminateSession: func(clientID, generation, publicKeySHA256 string) error {
+				return productionGrantAuthority().Terminate(clientID, generation, publicKeySHA256)
+			},
+			VerifySessionGone: func(clientID, generation, publicKeySHA256 string) error {
+				return productionGrantAuthority().VerifyGone(clientID, generation, publicKeySHA256)
+			},
+		},
+	); err != nil {
+		return err
+	}
 	return enrollment.ReconcileExpiredClients(installlayout.ClientsDirectory, now, func(record enrollment.ClientRecord) grant.ExpireOps {
 		return grantExpireOps(manifest, record)
 	})
@@ -877,4 +884,55 @@ func removeAuthorizedKeyForPublicKey(path, publicKey string) error {
 		}
 		return writeAuthorizedKeyLines(path, filtered)
 	})
+}
+
+const enrollmentAcceptLimit = 64
+
+type limitedListener struct {
+	net.Listener
+	limit  chan struct{}
+	closed chan struct{}
+	once   sync.Once
+}
+
+type limitedConn struct {
+	net.Conn
+	release sync.Once
+	limit   chan struct{}
+}
+
+func newLimitedListener(inner net.Listener, slots int) *limitedListener {
+	return &limitedListener{
+		Listener: inner,
+		limit:    make(chan struct{}, slots),
+		closed:   make(chan struct{}),
+	}
+}
+
+func (listener *limitedListener) Accept() (net.Conn, error) {
+	select {
+	case <-listener.closed:
+		return nil, net.ErrClosed
+	case listener.limit <- struct{}{}:
+	}
+	connection, err := listener.Listener.Accept()
+	if err != nil {
+		<-listener.limit
+		return nil, err
+	}
+	return &limitedConn{Conn: connection, limit: listener.limit}, nil
+}
+
+func (listener *limitedListener) Close() error {
+	listener.once.Do(func() {
+		close(listener.closed)
+	})
+	return listener.Listener.Close()
+}
+
+func (connection *limitedConn) Close() error {
+	connection.release.Do(func() {
+		<-connection.limit
+	})
+	return connection.Conn.Close()
 }

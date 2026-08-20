@@ -93,34 +93,85 @@ func TestStaticOpenSSLBuildCIExercisesSupportedArchitectures(t *testing.T) {
 	}
 }
 
-func TestReleaseScriptsParseAsPOSIXShell(t *testing.T) {
+func TestShellCheckCoversEveryPOSIXScript(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("POSIX release scripts are Linux build inputs")
+		t.Skip("POSIX scripts are Unix build inputs")
 	}
 
 	root := repositoryRoot(t)
-	for _, name := range []string{
-		"fetch-openssh.sh",
-		"fetch-openssl.sh",
-		"build-openssh.sh",
-		"build-openssh-darwin.sh",
-		"build-macos-pkg.sh",
-		"build-linux-packages.sh",
-		"provision-openssh-build-account.sh",
-		"test-server-preflight.sh",
-		"test-live-tunnel.sh",
-		"test-package-interop.sh",
-		"release-candidate.sh",
-		"sign-linux-deb.sh",
-		"apply-openssh-grant-hook.sh",
-		"bootstrap-ubuntu-builder.sh",
-		"build-linux-rc-remote.sh",
-	} {
-		path := filepath.Join(root, "scripts", name)
-		command := exec.Command("sh", "-n", path)
-		if output, err := command.CombinedOutput(); err != nil {
-			t.Errorf("sh -n %s: %v: %s", name, err, output)
+	checker := filepath.Join(root, "scripts", "check-shell.sh")
+	info, err := os.Stat(checker)
+	if err != nil {
+		t.Fatalf("stat check-shell.sh: %v", err)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		t.Fatal("check-shell.sh is not executable")
+	}
+
+	listed := map[string]struct{}{}
+	command := exec.Command(checker, "--list")
+	command.Dir = root
+	output, err := command.Output()
+	if err != nil {
+		t.Fatalf("check-shell.sh --list: %v", err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
+		if line == "" {
+			continue
 		}
+		listed[line] = struct{}{}
+	}
+
+	discovered := map[string]struct{}{}
+	for _, dir := range []string{"scripts", "packaging"} {
+		err := filepath.WalkDir(filepath.Join(root, dir), func(path string, entry os.DirEntry, walkErr error) error {
+			if walkErr != nil {
+				return walkErr
+			}
+			if entry.IsDir() {
+				return nil
+			}
+			name := entry.Name()
+			if strings.HasSuffix(name, ".sh") ||
+				path == filepath.Join(root, "packaging", "macos", "scripts", "preinstall") ||
+				path == filepath.Join(root, "packaging", "macos", "scripts", "postinstall") {
+				discovered[path] = struct{}{}
+			}
+			return nil
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(discovered) == 0 {
+		t.Fatal("no POSIX scripts discovered")
+	}
+	for path := range discovered {
+		if _, ok := listed[path]; !ok {
+			t.Errorf("check-shell.sh --list omits %s", path)
+		}
+	}
+	for path := range listed {
+		if _, ok := discovered[path]; !ok {
+			t.Errorf("check-shell.sh --list includes unexpected %s", path)
+		}
+	}
+
+	values := readEnvironmentFile(t, filepath.Join(root, "third_party", "shellcheck", "source.env"))
+	for _, key := range []string{
+		"SHELLCHECK_VERSION",
+		"SHELLCHECK_RELEASE_TAG",
+		"SHELLCHECK_LINUX_X86_64_SHA256",
+		"SHELLCHECK_LINUX_AARCH64_SHA256",
+		"SHELLCHECK_DARWIN_X86_64_SHA256",
+		"SHELLCHECK_DARWIN_AARCH64_SHA256",
+	} {
+		if values[key] == "" {
+			t.Errorf("shellcheck pin omits %s", key)
+		}
+	}
+	if values["SHELLCHECK_VERSION"] != "0.11.0" || values["SHELLCHECK_RELEASE_TAG"] != "v0.11.0" {
+		t.Fatalf("unexpected ShellCheck pin %q / %q", values["SHELLCHECK_VERSION"], values["SHELLCHECK_RELEASE_TAG"])
 	}
 }
 

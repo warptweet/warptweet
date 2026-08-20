@@ -11,10 +11,36 @@ const indexHtml = await readFile(resolve(root, "dist/index.html"), "utf8");
 if (releaseGate.kind !== "warptweet.public-release-gate" || releaseGate.schema_version !== 1) {
   throw new Error("public release gate document is invalid");
 }
+if (releaseGate.links?.evidence_checklist !== "packaging/evidence/checklist-v2.json") {
+  throw new Error("public release gate must point at the v2 evidence checklist");
+}
 
 const llms = await readFile(resolve(root, "dist/llms.txt"), "utf8");
 if (!llms.includes("WarpTweet gives a developer or agent one local service socket")) {
   throw new Error("llms.txt must publish the product thesis");
+}
+
+function isConnectNextCommand(value) {
+  if (typeof value !== "string") {
+    return false;
+  }
+  const tokens = value.trim().split(/\s+/);
+  return tokens[0] === "warptweet" && tokens[1] === "connect";
+}
+
+const nextCommandRejects = [
+  ["prefixed text", "please run warptweet connect <invite-file>"],
+  ["incorrect action", "warptweet enroll <invite-file>"],
+  ["non-string", 12]
+];
+for (const [label, value] of nextCommandRejects) {
+  if (isConnectNextCommand(value)) {
+    throw new Error(`next_command validator accepted ${label}`);
+  }
+}
+
+if (!isConnectNextCommand(releaseGate.next_command)) {
+  throw new Error("public-release next_command must be the connect action");
 }
 
 if (!releaseGate.homebrew_cta_enabled) {
@@ -39,6 +65,9 @@ if (!releaseGate.homebrew_cta_enabled) {
   }
   if (!indexHtml.includes(releaseGate.next_command)) {
     throw new Error("enabled Homebrew CTA must render the enroll next action");
+  }
+  if (indexHtml.includes("/docs/package-interop")) {
+    throw new Error("enabled Homebrew CTA must not link to a nonexistent /docs/package-interop route");
   }
 }
 

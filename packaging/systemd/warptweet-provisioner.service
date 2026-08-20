@@ -1,0 +1,49 @@
+[Unit]
+Description=WarpTweet client provisioner
+After=network-online.target
+Wants=network-online.target
+AssertFileIsExecutable=/opt/warptweet/bin/warptweet-provisioner
+DefaultDependencies=yes
+
+[Service]
+Type=simple
+KillMode=control-group
+User=root
+Group=root
+ExecStart=/opt/warptweet/bin/warptweet-provisioner serve
+Restart=on-failure
+RestartSec=2s
+TimeoutStopSec=15s
+StandardInput=null
+StandardOutput=journal
+StandardError=journal
+UnsetEnvironment=DISPLAY LD_AUDIT LD_LIBRARY_PATH LD_PRELOAD OPENSSL_CONF OPENSSL_CONF_INCLUDE OPENSSL_MODULES SSH_ASKPASS SSH_ASKPASS_REQUIRE SSH_AUTH_SOCK
+AmbientCapabilities=
+CapabilityBoundingSet=
+NoNewPrivileges=yes
+KeyringMode=private
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+PrivateDevices=yes
+PrivateMounts=yes
+PrivateTmp=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectHome=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectSystem=strict
+ReadOnlyPaths=/opt/warptweet
+ReadWritePaths=/etc/warptweet /run/warptweet
+RemoveIPC=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

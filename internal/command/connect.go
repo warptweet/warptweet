@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 
+	"warptweet.com/warptweet/internal/outcome"
 	"warptweet.com/warptweet/internal/routestate"
 )
 
@@ -16,12 +18,10 @@ func runConnect(ctx context.Context, arguments []string, stdout, stderr io.Write
 	flags := newFlagSet("connect", stderr)
 	yes := onceBoolFlag{name: "--yes"}
 	proofPath := onceStringFlag{name: "--proof"}
-	once := onceBoolFlag{name: "--once"}
 	restart := onceStringFlag{name: "--restart"}
 	listenPort := onceStringFlag{name: "--listen-port"}
 	flags.Var(&yes, "yes", "skip interactive confirmation")
 	flags.Var(&proofPath, "proof", "path to server enrollment proof JSON")
-	flags.Var(&once, "once", "do not restart after exit when bringing the tunnel up")
 	flags.Var(&restart, "restart", "durable restart policy: unless-stopped or manual")
 	flags.Var(&listenPort, "listen-port", "loopback listen port (default 15432)")
 	positionals, err := parseFlagsAllowArgs(flags, arguments)
@@ -53,7 +53,7 @@ func runConnect(ctx context.Context, arguments []string, stdout, stderr io.Write
 
 	// Capture enroll JSON on a buffer; interactive prompts use user-facing stdout.
 	var enrollOut strings.Builder
-	if err := runEnroll(ctx, enrollArgs, &enrollOut, stdout); err != nil {
+	if err := invokeEnroll(ctx, enrollArgs, &enrollOut, stdout, dependencies); err != nil {
 		return err
 	}
 
@@ -61,11 +61,36 @@ func runConnect(ctx context.Context, arguments []string, stdout, stderr io.Write
 	if err != nil {
 		return err
 	}
-	upArgs := buildConnectUpArgs(tunnelID, once.value)
+	store, err := openRouteStore(dependencies)
+	if err != nil {
+		return err
+	}
+	tx, loadErr := store.LoadTransaction(tunnelID)
+	if loadErr != nil && !errors.Is(loadErr, os.ErrNotExist) {
+		return loadErr
+	}
+	if loadErr == nil && tx.Phase == routestate.PhaseEnrolledNotReady {
+		if err := invokeRepair(ctx, []string{tunnelID}, stdout, stderr, dependencies); err != nil {
+			return err
+		}
+		if err := store.WriteTransaction(transitionConnectTransaction(tx, tunnelID, routestate.PhaseConnected, "")); err != nil {
+			return err
+		}
+		_, err = fmt.Fprintf(stdout, "connected\nopen     %s\nservice  %s\ntunnel   %s\n", listenEndpoint, serviceEndpoint, tunnelID)
+		return err
+	}
+
+	upArgs := []string{tunnelID}
 	var upOut strings.Builder
-	if err := runUp(ctx, upArgs, &upOut, stderr, dependencies); err != nil {
+	if err := invokeUp(ctx, upArgs, &upOut, stderr, dependencies); err != nil {
+		if writeErr := store.WriteTransaction(transitionConnectTransaction(tx, tunnelID, routestate.PhaseEnrolledNotReady, err.Error())); writeErr != nil {
+			return writeErr
+		}
 		fmt.Fprintf(stdout, "enrolled_not_ready\nopen     %s\ntunnel   %s\nerror    %v\n", listenEndpoint, tunnelID, err)
-		return fmt.Errorf("enrolled as %s but not ready: %w", tunnelID, err)
+		return outcome.New(outcome.CodeEnrolledNotReady, "enrolled as "+tunnelID+" but not ready", "Run warptweet repair "+tunnelID, 1)
+	}
+	if err := store.WriteTransaction(transitionConnectTransaction(tx, tunnelID, routestate.PhaseConnected, "")); err != nil {
+		return err
 	}
 
 	if serviceEndpoint != "" {
@@ -74,6 +99,14 @@ func runConnect(ctx context.Context, arguments []string, stdout, stderr io.Write
 		_, err = fmt.Fprintf(stdout, "connected\nopen     %s\ntunnel   %s\n", listenEndpoint, tunnelID)
 	}
 	return err
+}
+
+func transitionConnectTransaction(tx routestate.Transaction, routeID, phase, journalError string) routestate.Transaction {
+	tx.RouteID = routeID
+	tx.Phase = phase
+	tx.Error = journalError
+	tx.UpdatedAt = ""
+	return tx
 }
 
 func buildConnectEnrollArgs(invitePath string, yes bool, proofPath string, listenPort uint16, restartPolicy string) []string {
@@ -89,15 +122,6 @@ func buildConnectEnrollArgs(invitePath string, yes bool, proofPath string, liste
 		args = append(args, "--proof", proofPath)
 	}
 	return append(args, invitePath)
-}
-
-func buildConnectUpArgs(tunnelID string, once bool) []string {
-	// Flags before the tunnel id positional.
-	var args []string
-	if once {
-		args = append(args, "--once")
-	}
-	return append(args, tunnelID)
 }
 
 func parseEnrollConnectFields(enrollJSON string) (tunnelID, listenEndpoint, serviceEndpoint string, err error) {

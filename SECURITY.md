@@ -4,9 +4,7 @@ WarpTweet is implemented and reviewable security software. Its controller is pre
 
 ## Private reporting
 
-Private reporting address placeholder: `security@warptweet.com`
-
-Publication gate for the repository owner: confirm that this mailbox is provisioned, monitored by authorized maintainers, and able to receive external mail before publishing WarpTweet. Until that confirmation is recorded, do not treat the address as an operational reporting channel. If the repository is already public and the mailbox is unconfirmed, contact the owner through an existing private channel rather than opening a public vulnerability report.
+Report suspected vulnerabilities to `security@warptweet.com`.
 
 Do not file a public issue for a suspected vulnerability before maintainers have had an opportunity to assess it privately.
 
@@ -54,8 +52,6 @@ Maintainers should:
 5. Prepare a fix, regression test, release note, and migration or revocation guidance where required.
 6. Credit the reporter if requested and safe.
 7. Publish only after affected users have actionable remediation and disclosure is coordinated.
-
-No response or remediation time commitment is promised while the reporting mailbox and release process remain unconfirmed.
 
 ## Supported versions
 

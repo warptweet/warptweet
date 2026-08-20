@@ -209,3 +209,110 @@ func TestWriteIntentRepairsExistingMode(t *testing.T) {
 		t.Fatalf("route dir mode=%o, want 0750", info.Mode().Perm())
 	}
 }
+
+func TestWriteAndLoadTransaction(t *testing.T) {
+	t.Parallel()
+
+	store := Store{Root: t.TempDir()}
+	if err := store.WriteTransaction(Transaction{
+		RouteID:    "staging-db",
+		Phase:      PhaseReserved,
+		ListenPort: 15432,
+		InviteID:   "invite-1",
+		Generation: "gen-1",
+	}); err != nil {
+		t.Fatalf("WriteTransaction: %v", err)
+	}
+	loaded, err := store.LoadTransaction("staging-db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Phase != PhaseReserved || loaded.ListenPort != 15432 || loaded.InviteID != "invite-1" {
+		t.Fatalf("loaded=%+v", loaded)
+	}
+	if err := store.WriteTransaction(Transaction{RouteID: "staging-db", Phase: "not-a-phase"}); err == nil {
+		t.Fatal("accepted unknown phase")
+	}
+}
+
+func TestReserveAndWriteTransactionIsAtomic(t *testing.T) {
+	t.Parallel()
+
+	store := Store{Root: t.TempDir()}
+	if err := store.ReserveAndWriteTransaction(Transaction{
+		RouteID:    "staging-db",
+		Phase:      PhaseReserved,
+		ListenPort: 15432,
+		InviteID:   "invite-1",
+		Generation: "gen-1",
+	}); err != nil {
+		t.Fatalf("ReserveAndWriteTransaction: %v", err)
+	}
+	loaded, err := store.LoadTransaction("staging-db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Phase != PhaseReserved || loaded.ListenPort != 15432 || loaded.InviteID != "invite-1" {
+		t.Fatalf("loaded=%+v", loaded)
+	}
+	reservation, err := store.loadReservation("staging-db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reservation.ListenPort != 15432 {
+		t.Fatalf("reservation=%+v", reservation)
+	}
+	if err := store.ReserveAndWriteTransaction(Transaction{RouteID: "staging-db", Phase: PhaseConnected, ListenPort: 15432}); err == nil {
+		t.Fatal("accepted non-reserved phase")
+	}
+}
+
+func TestReserveAndWriteTransactionKeepsExistingReservationOnWriteFailure(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := Store{Root: root}
+	if err := store.ReservePort("staging-db", 15432); err != nil {
+		t.Fatal(err)
+	}
+	routeDir := filepath.Join(root, "staging-db")
+	if err := os.Mkdir(filepath.Join(routeDir, "transaction.json"), 0o500); err != nil {
+		t.Fatal(err)
+	}
+	err := store.ReserveAndWriteTransaction(Transaction{
+		RouteID:    "staging-db",
+		Phase:      PhaseReserved,
+		ListenPort: 15432,
+		InviteID:   "invite-1",
+		Generation: "gen-1",
+	})
+	if err == nil {
+		t.Fatal("expected write failure")
+	}
+	reservation, loadErr := store.loadReservation("staging-db")
+	if loadErr != nil {
+		t.Fatalf("pre-existing reservation was released: %v", loadErr)
+	}
+	if reservation.ListenPort != 15432 {
+		t.Fatalf("reservation=%+v", reservation)
+	}
+}
+
+func TestLoadTransactionRejectsUnsupportedPhase(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	store := Store{Root: root}
+	routeDir := filepath.Join(root, "staging-db")
+	if err := os.MkdirAll(routeDir, 0o750); err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte(`{"kind":"warptweet.route-transaction","schema_version":1,"route_id":"staging-db","phase":"not-a-phase","updated_at":"2026-08-19T00:00:00Z"}` + "\n")
+	if err := os.WriteFile(filepath.Join(routeDir, "transaction.json"), raw, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	_, err := store.LoadTransaction("staging-db")
+	if err == nil || !errors.Is(err, ErrInvalidRoute) {
+		t.Fatalf("LoadTransaction err=%v", err)
+	}
+}

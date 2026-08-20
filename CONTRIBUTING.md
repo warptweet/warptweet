@@ -100,7 +100,7 @@ Do not combine a cryptographic profile change with unrelated product work. Do no
 
 ## Security reports
 
-Do not submit suspected vulnerabilities through a public issue or pull request. Follow [SECURITY.md](SECURITY.md), including its warning that the placeholder reporting mailbox must be confirmed before publication.
+Do not submit suspected vulnerabilities through a public issue or pull request. Follow [SECURITY.md](SECURITY.md) and report them to `security@warptweet.com`.
 
 ## Licensing
 

@@ -164,13 +164,6 @@ func (store Store) Read(tunnelID string) (State, error) {
 	if err := json.Unmarshal(contents, &state); err != nil {
 		return State{}, err
 	}
-	if state.PID > 0 && !processAlive(state.PID) {
-		if state.Phase == PhaseReady || state.Phase == PhaseStarting || state.Phase == PhaseAwaitingReadiness {
-			state.Phase = PhaseFailed
-			state.Error = "process exited"
-			state.PID = 0
-		}
-	}
 	if state.TargetHealth == "" {
 		state.TargetHealth = TargetHealthNotChecked
 	}
@@ -198,31 +191,6 @@ func (store Store) List() ([]State, error) {
 		states = append(states, state)
 	}
 	return states, nil
-}
-
-// Signal sends a signal to the recorded PID when alive.
-func (store Store) Signal(tunnelID string, signal syscall.Signal) error {
-	state, err := store.Read(tunnelID)
-	if err != nil {
-		return err
-	}
-	if state.PID <= 0 {
-		return errors.New("no running process")
-	}
-	process, err := os.FindProcess(state.PID)
-	if err != nil {
-		return err
-	}
-	return process.Signal(signal)
-}
-
-func processAlive(pid int) bool {
-	process, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	err = process.Signal(syscall.Signal(0))
-	return err == nil
 }
 
 func validateTunnelID(tunnelID string) error {

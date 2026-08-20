@@ -230,7 +230,7 @@ func resumeAcceptedEnrollment(input AcceptInput, invite Record, clientID, public
 		client.InviteID != invite.InviteID ||
 		client.TunnelID != input.Request.TunnelID ||
 		client.PublicKey != publicKey ||
-		client.ManagementTokenSHA256 != HashManagementToken(input.Request.ManagementToken) {
+		!constantTimeDigestEqual(client.ManagementTokenSHA256, HashManagementToken(input.Request.ManagementToken)) {
 		return AcceptResult{}, fmt.Errorf("%w: invite retry does not match accepted enrollment", ErrInvalidInvite)
 	}
 	if input.InstallAuthorization == nil {
@@ -259,7 +259,7 @@ func storeOrResumePendingClient(directory string, want ClientRecord) (ClientReco
 		existing.InviteID != want.InviteID ||
 		existing.TunnelID != want.TunnelID ||
 		existing.PublicKey != want.PublicKey ||
-		existing.ManagementTokenSHA256 != want.ManagementTokenSHA256 ||
+		!constantTimeDigestEqual(existing.ManagementTokenSHA256, want.ManagementTokenSHA256) ||
 		existing.Principal != want.Principal ||
 		existing.ProfileID != want.ProfileID ||
 		existing.ServerAddress != want.ServerAddress ||
@@ -382,7 +382,7 @@ func grantIDFor(inviteID, publicKey string) string {
 }
 
 func lockInvite(directory, inviteID string) (unlock func(), err error) {
-	return lockPathExclusive(directory, "."+inviteID+".lock", "invite")
+	return lockPathExclusive(directory, "."+inviteID+".lock", "invite", false)
 }
 
 func isHexID(value string) bool {

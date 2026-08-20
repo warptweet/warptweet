@@ -5,12 +5,15 @@ package publicrelease
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"warptweet.com/warptweet/internal/releaseevidence"
+	"warptweet.com/warptweet/internal/strictjson"
 )
 
 const (
@@ -45,14 +48,12 @@ func LoadGate(path string) (Gate, error) {
 	if err != nil {
 		return Gate{}, err
 	}
-	var gate Gate
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&gate); err != nil {
+	if err := strictjson.RejectDuplicateObjectNames(raw); err != nil {
 		return Gate{}, err
 	}
-	if decoder.More() {
-		return Gate{}, fmt.Errorf("trailing JSON values")
+	var gate Gate
+	if err := decodeExactlyOneJSON(raw, &gate); err != nil {
+		return Gate{}, err
 	}
 	if err := ValidateGate(gate); err != nil {
 		return Gate{}, err
@@ -74,6 +75,11 @@ func ValidateGate(gate Gate) error {
 	if gate.QualificationMessage != QualificationMessage {
 		return fmt.Errorf("qualification_message must be %q", QualificationMessage)
 	}
+	if checklist, ok := gate.Links["evidence_checklist"]; ok {
+		if checklist != "packaging/evidence/checklist-v2.json" {
+			return fmt.Errorf("evidence_checklist must be packaging/evidence/checklist-v2.json")
+		}
+	}
 	if gate.HomebrewCTAEnabled {
 		if strings.TrimSpace(gate.RequiredEvidenceDocument) == "" {
 			return fmt.Errorf("enabled CTA requires required_evidence_document")
@@ -85,7 +91,7 @@ func ValidateGate(gate Gate) error {
 	return nil
 }
 
-// ValidateEnabledCTA ensures an enabled CTA points at complete package evidence.
+// ValidateEnabledCTA ensures an enabled CTA points at complete v2 package evidence.
 func ValidateEnabledCTA(repositoryRoot string, gate Gate) error {
 	if err := ValidateGate(gate); err != nil {
 		return err
@@ -93,7 +99,7 @@ func ValidateEnabledCTA(repositoryRoot string, gate Gate) error {
 	if !gate.HomebrewCTAEnabled {
 		return nil
 	}
-	checklist, err := releaseevidence.LoadChecklist(releaseevidence.DefaultChecklistPath(repositoryRoot))
+	checklist, err := releaseevidence.LoadChecklistV2(releaseevidence.DefaultChecklistV2Path(repositoryRoot))
 	if err != nil {
 		return err
 	}
@@ -102,16 +108,17 @@ func ValidateEnabledCTA(repositoryRoot string, gate Gate) error {
 	if err != nil {
 		return fmt.Errorf("read required evidence document: %w", err)
 	}
-	var report releaseevidence.Report
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&report); err != nil {
-		return fmt.Errorf("decode required evidence document: %w", err)
-	}
-	if err := releaseevidence.ValidateReport(checklist, report); err != nil {
+	if err := strictjson.RejectDuplicateObjectNames(raw); err != nil {
 		return fmt.Errorf("invalid required evidence document: %w", err)
 	}
-	if !releaseevidence.Complete(report) {
+	var report releaseevidence.ReportV2
+	if err := decodeExactlyOneJSON(raw, &report); err != nil {
+		return fmt.Errorf("decode required evidence document: %w", err)
+	}
+	if err := releaseevidence.ValidateReportV2(checklist, report); err != nil {
+		return fmt.Errorf("invalid required evidence document: %w", err)
+	}
+	if !releaseevidence.CompleteV2(report) {
 		return fmt.Errorf("required evidence document is incomplete")
 	}
 	return nil
@@ -120,4 +127,21 @@ func ValidateEnabledCTA(repositoryRoot string, gate Gate) error {
 // DefaultGatePath returns the repository public-release gate path.
 func DefaultGatePath(repositoryRoot string) string {
 	return filepath.Join(repositoryRoot, "packaging", "evidence", "public-release.json")
+}
+
+func decodeExactlyOneJSON(raw []byte, destination any) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return err
+	}
+	var trailing json.RawMessage
+	err := decoder.Decode(&trailing)
+	if errors.Is(err, io.EOF) {
+		return nil
+	}
+	if err == nil {
+		return fmt.Errorf("trailing JSON values")
+	}
+	return fmt.Errorf("trailing JSON data: %w", err)
 }

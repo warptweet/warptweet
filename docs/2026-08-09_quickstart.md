@@ -175,4 +175,4 @@ The Ready event does not by itself prove target reachability, negotiated algorit
 
 ## Publication boundary
 
-`security@warptweet.com` remains a private-reporting placeholder. The repository owner must confirm that the mailbox is provisioned, monitored by authorized maintainers, and able to receive external mail before public publication. Until then, follow the fallback private-contact guidance in [`SECURITY.md`](../SECURITY.md).
+Report suspected vulnerabilities privately to `security@warptweet.com`. See [`SECURITY.md`](../SECURITY.md).

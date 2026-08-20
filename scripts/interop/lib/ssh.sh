@@ -78,21 +78,21 @@ interop_ssh_target() {
 }
 
 interop_ssh() {
-    # shellcheck disable=SC2086
+    # shellcheck disable=SC2046,SC2086
     ssh $(interop_ssh_base) "$(interop_ssh_target)" "$@"
 }
 
 interop_scp_from() {
     _remote_path=$1
     _local_path=$2
-    # shellcheck disable=SC2086
+    # shellcheck disable=SC2046,SC2086
     scp $(interop_scp_base) "$(interop_ssh_target):$_remote_path" "$_local_path"
 }
 
 interop_scp_to() {
     _local_path=$1
     _remote_path=$2
-    # shellcheck disable=SC2086
+    # shellcheck disable=SC2046,SC2086
     scp $(interop_scp_base) "$_local_path" "$(interop_ssh_target):$_remote_path"
 }
 

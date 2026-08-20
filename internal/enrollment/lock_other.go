@@ -17,7 +17,7 @@ import (
 // rules. PID values are not a stable lock identity (they can be reused), so a
 // closed lock file that still contains os.Getpid() is always treated as stale
 // and reclaimed by the next caller.
-func lockPathExclusive(directory, name, label string) (unlock func(), err error) {
+func lockPathExclusive(directory, name, label string, nonBlocking bool) (unlock func(), err error) {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return nil, err
 	}
@@ -70,7 +70,13 @@ func lockPathExclusive(directory, name, label string) (unlock func(), err error)
 			time.Sleep(10 * time.Millisecond)
 			continue
 		}
+		if nonBlocking {
+			return nil, fmt.Errorf("lock %s at %s: %w", label, lockPath, ErrBusy)
+		}
 		return nil, fmt.Errorf("lock %s: held by pid %d", label, holder)
+	}
+	if nonBlocking {
+		return nil, fmt.Errorf("lock %s at %s: %w", label, lockPath, ErrBusy)
 	}
 	return nil, fmt.Errorf("lock %s: busy", label)
 }

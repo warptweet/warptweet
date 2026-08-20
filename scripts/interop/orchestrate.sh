@@ -45,7 +45,7 @@ EOF
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --config)
-            WARPTWEET_INTEROP_CONFIG=$2
+            export WARPTWEET_INTEROP_CONFIG=$2
             shift 2
             ;;
         -h | --help)
@@ -218,6 +218,6 @@ if [ "$_ev" -eq 2 ]; then
     interop_log "invite=$WARPTWEET_INTEROP_INVITE work=$WARPTWEET_INTEROP_WORK"
     exit 1
 fi
-interop_log "Phase A complete: partial evidence written (expected not_run for remaining WP8 cases)"
-interop_log "invite=$WARPTWEET_INTEROP_INVITE evidence=$WARPTWEET_INTEROP_EVIDENCE_OUTPUT work=$WARPTWEET_INTEROP_WORK"
-exit 0
+interop_log "Phase A incomplete: partial evidence is fail"
+    interop_log "invite=$WARPTWEET_INTEROP_INVITE evidence=$WARPTWEET_INTEROP_EVIDENCE_OUTPUT work=$WARPTWEET_INTEROP_WORK"
+    exit 1

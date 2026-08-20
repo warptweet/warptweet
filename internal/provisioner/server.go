@@ -1,3 +1,5 @@
+//go:build darwin
+
 package provisioner
 
 import (
@@ -144,8 +146,6 @@ func executeRequest(ctx context.Context, request Request, serviceUID, serviceGID
 			return output, startErr
 		}
 		return started, nil
-	case ActionUp:
-		return startTunnel(ctx, request.TunnelID, request.Once, serviceUID, serviceGID)
 	case ActionStatus:
 		arguments := []string{"status", "--json"}
 		if request.TunnelID != "" {
@@ -160,6 +160,9 @@ func executeRequest(ctx context.Context, request Request, serviceUID, serviceGID
 		}
 		return executeController(ctx, request.Action, request.TunnelID)
 	default:
+		if isTunnelStartAction(request.Action) {
+			return startTunnel(ctx, request.TunnelID, request.Once, serviceUID, serviceGID)
+		}
 		return "", fmt.Errorf("unsupported provisioner action %q", request.Action)
 	}
 }
@@ -169,61 +172,16 @@ func executeEnroll(ctx context.Context, request Request) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	requestRoot := filepath.Join(installlayout.DarwinProvisionerRunRoot, "requests")
-	if err := os.MkdirAll(requestRoot, 0o700); err != nil {
-		return "", err
-	}
-	temporary, err := os.CreateTemp(requestRoot, ".invite-*")
+	requestRoot := enrollRequestRoot(installlayout.DarwinProvisionerRunRoot)
+	invitePath, proofPath, err := materializeEnrollInputs(requestRoot, request)
 	if err != nil {
 		return "", err
 	}
-	invitePath := temporary.Name()
 	defer os.Remove(invitePath)
-	if err := temporary.Chmod(0o600); err != nil {
-		_ = temporary.Close()
-		return "", err
-	}
-	if _, err := temporary.Write(append(bytes.TrimSpace(request.Invite), '\n')); err != nil {
-		_ = temporary.Close()
-		return "", err
-	}
-	if err := temporary.Sync(); err != nil {
-		_ = temporary.Close()
-		return "", err
-	}
-	if err := temporary.Close(); err != nil {
-		return "", err
-	}
-	arguments := []string{"enroll", "--yes"}
-	if request.PrepareOnly {
-		arguments = append(arguments, "--prepare-only")
-	}
-	if request.ListenPort != 0 {
-		arguments = append(arguments, "--listen-port", strconv.Itoa(int(request.ListenPort)))
-	}
-	if request.RestartPolicy != "" {
-		arguments = append(arguments, "--restart", request.RestartPolicy)
-	}
-	if len(request.Proof) != 0 {
-		proofFile, proofErr := os.CreateTemp(requestRoot, ".proof-*")
-		if proofErr != nil {
-			return "", proofErr
-		}
-		proofPath := proofFile.Name()
+	if proofPath != "" {
 		defer os.Remove(proofPath)
-		if proofErr = proofFile.Chmod(0o600); proofErr == nil {
-			_, proofErr = proofFile.Write(append(bytes.TrimSpace(request.Proof), '\n'))
-		}
-		if closeErr := proofFile.Close(); proofErr == nil {
-			proofErr = closeErr
-		}
-		if proofErr != nil {
-			return "", proofErr
-		}
-		arguments = append(arguments, "--proof", proofPath)
 	}
-	arguments = append(arguments, invitePath)
-	return executeController(ctx, arguments...)
+	return executeController(ctx, enrollControllerArgs(invitePath, proofPath, request)...)
 }
 
 func startTunnel(ctx context.Context, tunnelID string, once bool, serviceUID, serviceGID uint32) (string, error) {
@@ -529,8 +487,6 @@ func ensureTunnelRuntime(tunnelID string, uid, gid uint32) error {
 	return os.Chmod(path, 0o700)
 }
 
-var errProvisionerOutputTruncated = errors.New("provisioner child output exceeded limit")
-
 func executeController(ctx context.Context, arguments ...string) (string, error) {
 	command := exec.CommandContext(ctx, installlayout.DarwinControllerPath, arguments...)
 	command.Env = []string{"LANG=C", "LC_ALL=C"}
@@ -549,23 +505,6 @@ func executeController(ctx context.Context, arguments ...string) (string, error)
 		return "", errors.New(message)
 	}
 	return stdout.String(), nil
-}
-
-type limitedBuffer struct {
-	buffer *bytes.Buffer
-	limit  int
-}
-
-func (writer *limitedBuffer) Write(data []byte) (int, error) {
-	remaining := writer.limit - writer.buffer.Len()
-	if remaining <= 0 {
-		return 0, errProvisionerOutputTruncated
-	}
-	if len(data) > remaining {
-		written, _ := writer.buffer.Write(data[:remaining])
-		return written, errProvisionerOutputTruncated
-	}
-	return writer.buffer.Write(data)
 }
 
 func runLaunchctl(ctx context.Context, arguments ...string) error {

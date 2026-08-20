@@ -279,7 +279,8 @@ func RotateClientPublicKey(directory string, request ManagementRequest, newPubli
 	currentHash := HashManagementToken(request.ManagementToken)
 
 	if record.Status == ClientStatusActive && record.PublicKey == newPublicKey &&
-		record.ManagementTokenSHA256 == nextHash && record.PreviousManagementTokenSHA256 == currentHash {
+		constantTimeDigestEqual(record.ManagementTokenSHA256, nextHash) &&
+		constantTimeDigestEqual(record.PreviousManagementTokenSHA256, currentHash) {
 		if replaceAuthorization == nil {
 			return ClientRecord{}, fmt.Errorf("replace authorization callback is required")
 		}
@@ -308,7 +309,7 @@ func RotateClientPublicKey(directory string, request ManagementRequest, newPubli
 		if err := writeJSONAtomic(clientPath(directory, record.ClientID), record, 0o600); err != nil {
 			return ClientRecord{}, err
 		}
-	} else if record.PendingPublicKey != newPublicKey || record.PendingManagementTokenSHA256 != nextHash {
+	} else if record.PendingPublicKey != newPublicKey || !constantTimeDigestEqual(record.PendingManagementTokenSHA256, nextHash) {
 		return ClientRecord{}, fmt.Errorf("%w: rotation retry does not match pending state", ErrInvalidInvite)
 	}
 	if replaceAuthorization == nil {
@@ -404,6 +405,82 @@ func ExpireClient(directory string, clientID string, now time.Time, ops grant.Ex
 	return record, nil
 }
 
+// ReconcilePendingRevocations finishes every revocation_pending record.
+func ReconcilePendingRevocations(
+	directory string,
+	now time.Time,
+	removeAuthorization func(string) error,
+	enforcement SessionEnforcement,
+) error {
+	records, err := ListClients(directory)
+	if err != nil {
+		return err
+	}
+	var errs []error
+	for _, record := range records {
+		if record.Status != ClientStatusRevocationPending {
+			continue
+		}
+		if _, err := completePendingRevocation(directory, record, now, removeAuthorization, enforcement); err != nil {
+			errs = append(errs, fmt.Errorf("client %s: %w", record.ClientID, err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func completePendingRevocation(
+	directory string,
+	record ClientRecord,
+	now time.Time,
+	removeAuthorization func(string) error,
+	enforcement SessionEnforcement,
+) (ClientRecord, error) {
+	unlock, err := lockClient(directory, record.ClientID)
+	if err != nil {
+		return ClientRecord{}, err
+	}
+	defer unlock()
+	current, err := LoadClient(directory, record.ClientID)
+	if err != nil {
+		return ClientRecord{}, err
+	}
+	if current.Status == ClientStatusRevoked {
+		return current, nil
+	}
+	if current.Status != ClientStatusRevocationPending {
+		return current, fmt.Errorf("client status is %q", current.Status)
+	}
+	if removeAuthorization == nil {
+		return ClientRecord{}, fmt.Errorf("remove authorization callback is required")
+	}
+	if err := removeAuthorization(current.PublicKey); err != nil {
+		return ClientRecord{}, err
+	}
+	if enforcement.TerminateSession != nil {
+		if err := enforcement.TerminateSession(current.ClientID, "", ""); err != nil {
+			return ClientRecord{}, err
+		}
+	}
+	if enforcement.VerifySessionGone != nil {
+		if err := enforcement.VerifySessionGone(current.ClientID, "", ""); err != nil {
+			return ClientRecord{}, err
+		}
+	}
+	burned := make([]byte, ManagementTokenBytes)
+	if _, err := rand.Read(burned); err != nil {
+		return ClientRecord{}, fmt.Errorf("generate burned management token: %w", err)
+	}
+	current.PreviousManagementTokenSHA256 = current.ManagementTokenSHA256
+	current.ManagementTokenSHA256 = HashManagementToken(hex.EncodeToString(burned))
+	current.Status = ClientStatusRevoked
+	current.RevokedAt = now.UTC().Format(time.RFC3339Nano)
+	current.OperationStartedAt = ""
+	if err := writeJSONAtomic(clientPath(directory, current.ClientID), current, 0o600); err != nil {
+		return ClientRecord{}, err
+	}
+	return current, nil
+}
+
 // ReconcileExpiredClients expires every due grant before the host reports ready.
 func ReconcileExpiredClients(directory string, now time.Time, opsFor func(ClientRecord) grant.ExpireOps) error {
 	records, err := ListClients(directory)
@@ -476,8 +553,11 @@ func managementTokenMatches(wantHash, token string) bool {
 	if wantHash == "" || !isManagementToken(token) {
 		return false
 	}
-	got := HashManagementToken(token)
-	return subtle.ConstantTimeCompare([]byte(got), []byte(wantHash)) == 1
+	return constantTimeDigestEqual(wantHash, HashManagementToken(token))
+}
+
+func constantTimeDigestEqual(left, right string) bool {
+	return subtle.ConstantTimeCompare([]byte(left), []byte(right)) == 1
 }
 
 func isManagementToken(token string) bool {
@@ -518,5 +598,5 @@ func lockClient(directory, clientID string) (func(), error) {
 	if !isHexID(clientID) {
 		return nil, fmt.Errorf("%w: client_id is invalid", ErrInvalidInvite)
 	}
-	return lockPathExclusive(directory, "."+clientID+".lock", "client")
+	return lockPathExclusive(directory, "."+clientID+".lock", "client", false)
 }
