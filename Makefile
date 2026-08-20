@@ -1,4 +1,4 @@
-.PHONY: build check check-go fmt-check script-check gosec site-build site-check site-down site-preview site-up test test-enrollment-control-plane test-openssh-integration test-race vet interop interop-help
+.PHONY: build check check-go fmt-check script-check gosec site-build site-check site-down site-preview site-up test test-enrollment-control-plane test-openssh-integration test-race vet interop interop-help linux-rc
 
 GOCACHE ?= /private/tmp/warptweet-go-build
 SITE_DEV_HOST ?= 127.0.0.1
@@ -40,6 +40,12 @@ interop-help:
 # Complete local+remote round trip from .env (no make arguments).
 interop:
 	./scripts/interop/dev-run.sh
+
+# Signed Linux host RC on the persistent Ubuntu builder.
+# Host, SSH identity, and GPG key come from .env. VERSION must match command.Version.
+linux-rc:
+	@test -n "$(VERSION)" || { echo "usage: make linux-rc VERSION=0.1.0-rc.3" >&2; exit 64; }
+	WARPTWEET_VERSION=$(VERSION) ./scripts/build-linux-rc-remote.sh
 
 test-race:
 	GOCACHE=$(GOCACHE) go test -race ./...

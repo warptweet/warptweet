@@ -54,6 +54,7 @@ if ! uninstalling "${1:-}"; then
     list_tunnel_units | while read -r WT_UNIT; do
         [ -n "$WT_UNIT" ] || continue
         case "$WT_UNIT" in
+            warptweet-tunnel@.service) ;;
             warptweet-tunnel@*.service) try_restart "$WT_UNIT" ;;
         esac
     done
@@ -66,9 +67,10 @@ fi
 
 list_tunnel_units | while read -r WT_UNIT; do
     [ -n "$WT_UNIT" ] || continue
-    case "$WT_UNIT" in
-        warptweet-tunnel@*.service) stop_disable "$WT_UNIT" ;;
-    esac
+        case "$WT_UNIT" in
+            warptweet-tunnel@.service) ;;
+            warptweet-tunnel@*.service) stop_disable "$WT_UNIT" ;;
+        esac
 done
 stop_disable warptweet-provisioner.service
 stop_disable warptweet-reconcile.service

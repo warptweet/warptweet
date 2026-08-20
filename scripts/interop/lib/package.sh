@@ -133,15 +133,39 @@ interop_install_server_package() {
             _deb_ver=$(interop_deb_field "$_pkg" Version)
             [ -n "$_deb_name" ] && [ -n "$_deb_ver" ] || interop_die "could not read Package/Version from $_pkg"
             _have=$(interop_ssh "dpkg-query -W -f='\${Status} \${Package} \${Version}' '$_deb_name' 2>/dev/null" || true)
+            _ctrl=${WARPTWEET_INTEROP_SERVER_CTRL:-/opt/warptweet/bin/warptweet}
+            _host_ok=0
+            if interop_ssh "test -x '$_ctrl' && '$_ctrl' host --help >/dev/null 2>&1"; then
+                _host_ok=1
+            fi
             case "$_have" in
                 *"install ok installed $_deb_name $_deb_ver")
-                    interop_log "server package already installed $_deb_name=$_deb_ver"
-                    interop_ssh "rm -f '$_remote_tmp'" || true
-                    interop_log "server package installed"
-                    return 0
+                    if [ "$_host_ok" -eq 1 ]; then
+                        interop_log "server package already installed $_deb_name=$_deb_ver"
+                        interop_ssh "rm -f '$_remote_tmp'" || true
+                        interop_log "server package installed"
+                        return 0
+                    fi
+                    interop_log "server package $_deb_name=$_deb_ver is installed but lacks host; reinstalling"
                     ;;
             esac
-            interop_ssh "sudo dpkg -i '$_remote_tmp' || sudo apt-get install -f -y"
+            if interop_ssh "dpkg-query -W '$_deb_name' >/dev/null 2>&1"; then
+                interop_ssh "sudo dpkg --purge '$_deb_name'"
+            fi
+            interop_ssh "sudo sh -s" <<'PURGE'
+set -eu
+for WT_USER in warptweet warptweet-client warptweet-sshd; do
+    if getent passwd "$WT_USER" >/dev/null 2>&1; then
+        userdel "$WT_USER"
+    fi
+done
+for WT_GROUP in warptweet-operator warptweet-client warptweet-sshd warptweet; do
+    if getent group "$WT_GROUP" >/dev/null 2>&1; then
+        groupdel "$WT_GROUP"
+    fi
+done
+PURGE
+            interop_ssh "sudo dpkg -i '$_remote_tmp'"
             _status=$(interop_ssh "dpkg-query -W -f='\${Status} \${Package} \${Version}' '$_deb_name' 2>/dev/null" || true)
             case "$_status" in
                 *"install ok installed $_deb_name $_deb_ver")
@@ -342,8 +366,14 @@ interop_derive_provenance_fields() {
 }
 
 interop_phase_install_packages() {
-    _server_pkg="$WARPTWEET_INTEROP_ARTIFACTS/$WARPTWEET_INTEROP_SERVER_PACKAGE_FILE"
-    _client_pkg="$WARPTWEET_INTEROP_ARTIFACTS/$WARPTWEET_INTEROP_CLIENT_PACKAGE_FILE"
+    case "$WARPTWEET_INTEROP_SERVER_PACKAGE_FILE" in
+        /*) _server_pkg=$WARPTWEET_INTEROP_SERVER_PACKAGE_FILE ;;
+        *) _server_pkg=$WARPTWEET_INTEROP_ARTIFACTS/$WARPTWEET_INTEROP_SERVER_PACKAGE_FILE ;;
+    esac
+    case "$WARPTWEET_INTEROP_CLIENT_PACKAGE_FILE" in
+        /*) _client_pkg=$WARPTWEET_INTEROP_CLIENT_PACKAGE_FILE ;;
+        *) _client_pkg=$WARPTWEET_INTEROP_ARTIFACTS/$WARPTWEET_INTEROP_CLIENT_PACKAGE_FILE ;;
+    esac
     [ -d "$WARPTWEET_INTEROP_ARTIFACTS" ] || interop_die "artifacts dir missing: $WARPTWEET_INTEROP_ARTIFACTS"
 
     if ! interop_install_server_package "$_server_pkg"; then

@@ -102,7 +102,14 @@ case "$WARPTWEET_INTEROP_ARTIFACTS" in
     *) WARPTWEET_INTEROP_ARTIFACTS=$WT_REPO_ROOT/$WARPTWEET_INTEROP_ARTIFACTS ;;
 esac
 export WARPTWEET_INTEROP_ARTIFACTS
-: "${WARPTWEET_RELEASE_VERSION:=0.1.0-dev}"
+WT_TREE_VERSION=$(sed -n 's/^[[:space:]]*Version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
+    "$WT_REPO_ROOT/internal/command/command.go")
+WT_TREE_COUNT=$(printf '%s\n' "$WT_TREE_VERSION" | grep -c .)
+[ "$WT_TREE_COUNT" -eq 1 ] || interop_dev_die "expected exactly one command.Version"
+: "${WARPTWEET_RELEASE_VERSION:=$WT_TREE_VERSION}"
+if [ "$WARPTWEET_RELEASE_VERSION" != "$WT_TREE_VERSION" ]; then
+    interop_dev_die "WARPTWEET_RELEASE_VERSION=$WARPTWEET_RELEASE_VERSION does not match command.Version=$WT_TREE_VERSION"
+fi
 export WARPTWEET_RELEASE_VERSION
 export WT_REPO_ROOT
 export WARPTWEET_INTEROP_BUILD_SERVER="${WARPTWEET_INTEROP_BUILD_SERVER:-auto}"
@@ -123,26 +130,37 @@ fi
 [ -d "$WARPTWEET_INTEROP_ARTIFACTS" ] || interop_dev_die "artifacts dir missing: $WARPTWEET_INTEROP_ARTIFACTS"
 
 if [ -z "${WARPTWEET_INTEROP_SERVER_PACKAGE_FILE:-}" ]; then
-    WARPTWEET_INTEROP_SERVER_PACKAGE_FILE=$(
-        cd "$WARPTWEET_INTEROP_ARTIFACTS" && ls -1 *.deb 2>/dev/null | head -1
-    )
-    if [ -z "$WARPTWEET_INTEROP_SERVER_PACKAGE_FILE" ]; then
-        WARPTWEET_INTEROP_SERVER_PACKAGE_FILE=$(
-            cd "$WARPTWEET_INTEROP_ARTIFACTS" && ls -1 *.rpm 2>/dev/null | head -1
-        )
-    fi
+    for _dir in "$WARPTWEET_INTEROP_ARTIFACTS" "$WT_REPO_ROOT/dist"; do
+        [ -d "$_dir" ] || continue
+        _deb=$(cd "$_dir" && ls -1 "warptweet_${WARPTWEET_RELEASE_VERSION}_"*.deb 2>/dev/null | head -1 || true)
+        if [ -n "$_deb" ]; then
+            WARPTWEET_INTEROP_SERVER_PACKAGE_FILE=$_dir/$_deb
+            break
+        fi
+        _rpm=$(cd "$_dir" && ls -1 "warptweet_${WARPTWEET_RELEASE_VERSION}_"*.rpm 2>/dev/null | head -1 || true)
+        if [ -n "$_rpm" ]; then
+            WARPTWEET_INTEROP_SERVER_PACKAGE_FILE=$_dir/$_rpm
+            break
+        fi
+    done
 fi
 if [ -z "${WARPTWEET_INTEROP_CLIENT_PACKAGE_FILE:-}" ]; then
     WARPTWEET_INTEROP_CLIENT_PACKAGE_FILE=$(
         cd "$WARPTWEET_INTEROP_ARTIFACTS" && ls -1 *.pkg 2>/dev/null | head -1
     )
 fi
-[ -n "$WARPTWEET_INTEROP_SERVER_PACKAGE_FILE" ] || interop_dev_die "no server .deb/.rpm in $WARPTWEET_INTEROP_ARTIFACTS"
+[ -n "$WARPTWEET_INTEROP_SERVER_PACKAGE_FILE" ] || interop_dev_die "no warptweet_${WARPTWEET_RELEASE_VERSION} server .deb/.rpm in artifacts or dist"
 [ -n "$WARPTWEET_INTEROP_CLIENT_PACKAGE_FILE" ] || interop_dev_die "no client .pkg in $WARPTWEET_INTEROP_ARTIFACTS"
 export WARPTWEET_INTEROP_SERVER_PACKAGE_FILE WARPTWEET_INTEROP_CLIENT_PACKAGE_FILE
 
-_server_pkg=$WARPTWEET_INTEROP_ARTIFACTS/$WARPTWEET_INTEROP_SERVER_PACKAGE_FILE
-_client_pkg=$WARPTWEET_INTEROP_ARTIFACTS/$WARPTWEET_INTEROP_CLIENT_PACKAGE_FILE
+case "$WARPTWEET_INTEROP_SERVER_PACKAGE_FILE" in
+    /*) _server_pkg=$WARPTWEET_INTEROP_SERVER_PACKAGE_FILE ;;
+    *) _server_pkg=$WARPTWEET_INTEROP_ARTIFACTS/$WARPTWEET_INTEROP_SERVER_PACKAGE_FILE ;;
+esac
+case "$WARPTWEET_INTEROP_CLIENT_PACKAGE_FILE" in
+    /*) _client_pkg=$WARPTWEET_INTEROP_CLIENT_PACKAGE_FILE ;;
+    *) _client_pkg=$WARPTWEET_INTEROP_ARTIFACTS/$WARPTWEET_INTEROP_CLIENT_PACKAGE_FILE ;;
+esac
 [ -f "$_server_pkg" ] || interop_dev_die "missing $_server_pkg"
 [ -f "$_client_pkg" ] || interop_dev_die "missing $_client_pkg"
 

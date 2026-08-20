@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"warptweet.com/warptweet/internal/command"
 	"warptweet.com/warptweet/internal/config"
 	"warptweet.com/warptweet/internal/opensshsource"
 	"warptweet.com/warptweet/internal/opensslsource"
@@ -90,6 +91,40 @@ func TestStaticOpenSSLBuildCIExercisesSupportedArchitectures(t *testing.T) {
 		if !strings.Contains(workflow, required) {
 			t.Errorf("static OpenSSL CI gate omits %q", required)
 		}
+	}
+}
+
+func TestLinuxRCVersionMustMatchCommandConstant(t *testing.T) {
+	t.Parallel()
+
+	root := repositoryRoot(t)
+	source := string(readFile(t, filepath.Join(root, "internal/command/command.go")))
+	var extracted []string
+	for _, line := range strings.Split(source, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "Version") && strings.Contains(line, "=") {
+			_, value, ok := strings.Cut(line, "=")
+			if !ok {
+				continue
+			}
+			value = strings.TrimSpace(value)
+			value = strings.Trim(value, `"`)
+			extracted = append(extracted, value)
+		}
+	}
+	if len(extracted) != 1 {
+		t.Fatalf("command.Version bindings = %v", extracted)
+	}
+	if extracted[0] != command.Version {
+		t.Fatalf("parsed Version %q, constant %q", extracted[0], command.Version)
+	}
+	makefile := string(readFile(t, filepath.Join(root, "Makefile")))
+	if !strings.Contains(makefile, "linux-rc:") || !strings.Contains(makefile, "WARPTWEET_VERSION=$(VERSION)") {
+		t.Fatal("Makefile omits linux-rc VERSION passthrough")
+	}
+	script := string(readFile(t, filepath.Join(root, "scripts/build-linux-rc-remote.sh")))
+	if !strings.Contains(script, "does not match command.Version") {
+		t.Fatal("remote RC script omits command.Version fail-closed check")
 	}
 }
 

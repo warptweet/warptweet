@@ -172,6 +172,15 @@ WT_USER=${WARPTWEET_INTEROP_SERVER_USER:-ubuntu}
 WT_HOST=${WARPTWEET_INTEROP_SERVER_HOST:-}
 WT_PORT=${WARPTWEET_INTEROP_SSH_PORT:-22}
 require_chars WARPTWEET_VERSION "$WT_VERSION" version
+WT_TREE_VERSION=$(sed -n 's/^[[:space:]]*Version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' \
+    "$WT_REPOSITORY_ROOT/internal/command/command.go")
+WT_TREE_COUNT=$(printf '%s\n' "$WT_TREE_VERSION" | grep -c .)
+if [ "$WT_TREE_COUNT" -ne 1 ]; then
+    fail "expected exactly one command.Version in internal/command/command.go"
+fi
+if [ "$WT_VERSION" != "$WT_TREE_VERSION" ]; then
+    fail "WARPTWEET_VERSION=$WT_VERSION does not match command.Version=$WT_TREE_VERSION"
+fi
 require_chars WARPTWEET_INTEROP_GO_VERSION "$WT_GO_VERSION" goversion
 require_chars WARPTWEET_LINUX_GPG_KEY "${WARPTWEET_LINUX_GPG_KEY:-}" gpgkey
 require_chars WARPTWEET_INTEROP_SERVER_HOST "$WT_HOST" host
@@ -268,6 +277,7 @@ wt_stage_inputs() {
         "$WT_BUILD_HOME/warptweet-openssl-source/$OPENSSL_ARCHIVE" \
         ./scripts/build-openssh.sh \
         ./scripts/apply-openssh-grant-hook.sh \
+        ./scripts/apply-openssh-forward-only.sh \
         ./third_party/openssh/warptweet-grant.c \
         ./third_party/openssh/warptweet-grant.h \
         ./third_party/openssh/patches/0001-warptweet-grant-register.patch
@@ -299,9 +309,10 @@ ssh $WT_SSH_OPTS -p "$WT_PORT" "$WT_TARGET" \
 cd "$REMOTE_ROOT/src"
 WT_BUILD_HOME=/var/lib/warptweet-build
 test -d "$WT_BUILD_HOME/warptweet-openssh-stage/opt/warptweet/libexec/openssh"
-echo "build-linux-rc-remote: building controller"
+echo "build-linux-rc-remote: building controller and provisioner"
 go build -trimpath -o "$REMOTE_ROOT/warptweet" ./cmd/warptweet
-sudo chown warptweet-build:warptweet-build "$REMOTE_ROOT/warptweet"
+go build -trimpath -o "$REMOTE_ROOT/warptweet-provisioner" ./cmd/warptweet-provisioner
+sudo chown warptweet-build:warptweet-build "$REMOTE_ROOT/warptweet" "$REMOTE_ROOT/warptweet-provisioner"
 sudo chown -R warptweet-build:warptweet-build "$WT_BUILD_HOME/warptweet-openssh-stage"
 sudo rm -rf "$WT_BUILD_HOME/pkg-out"
 echo "build-linux-rc-remote: assembling .deb"

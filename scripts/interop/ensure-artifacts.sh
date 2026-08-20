@@ -284,8 +284,9 @@ if [ ! -d "$WT_BUILD_HOME/warptweet-openssh-stage/opt/warptweet/libexec/openssh"
   fi
 fi
 
-# Controller for linux/amd64 inside the container.
+# Controller and provisioner for linux/amd64 inside the container.
 go build -trimpath -o /tmp/warptweet ./cmd/warptweet
+go build -trimpath -o /tmp/warptweet-provisioner ./cmd/warptweet-provisioner
 
 rm -rf /tmp/wt-pkg-out
 ./scripts/build-linux-packages.sh \
@@ -442,9 +443,10 @@ else
     "$WT_BUILD_HOME/warptweet-openssh-stage"
 fi
 
-# Controller + package assembly must run as non-root (build-linux-packages refuses root).
+# Controller + provisioner + package assembly must run as non-root (build-linux-packages refuses root).
 go build -trimpath -o "$REMOTE_ROOT/warptweet" ./cmd/warptweet
-chown warptweet-build:warptweet-build "$REMOTE_ROOT/warptweet"
+go build -trimpath -o "$REMOTE_ROOT/warptweet-provisioner" ./cmd/warptweet-provisioner
+chown warptweet-build:warptweet-build "$REMOTE_ROOT/warptweet" "$REMOTE_ROOT/warptweet-provisioner"
 chown -R warptweet-build:warptweet-build "$WT_BUILD_HOME/warptweet-openssh-stage"
 rm -rf "$REMOTE_ROOT/pkg-out"
 sudo -u warptweet-build -H env HOME="$WT_BUILD_HOME" WARPTWEET_VERSION="${WARPTWEET_VERSION:-0.1.0-dev}" \

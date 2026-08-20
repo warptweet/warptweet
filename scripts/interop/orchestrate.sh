@@ -140,7 +140,7 @@ fi
 interop_assert_package_ctrl "$WARPTWEET_INTEROP_CLIENT_CTRL" "client"
 # Flags before positionals: Go flag.Parse stops at the first positional.
 if ! INTEROP_CLIENT_OUT=/tmp/wt-interop-connect.out INTEROP_CLIENT_ERR=/tmp/wt-interop-connect.err \
-    interop_client_cmd connect --yes "$WARPTWEET_INTEROP_INVITE" >/dev/null; then
+    interop_client_cmd connect --yes --listen-port "${WARPTWEET_INTEROP_CLIENT_LISTEN_PORT:-18433}" "$WARPTWEET_INTEROP_INVITE" >/dev/null; then
     interop_record_result invite-enroll-single-use positive fail "connect failed: $(tr '\n' ' ' </tmp/wt-interop-connect.err | cut -c1-200)"
     interop_emit_evidence || true
     interop_die "connect failed"
@@ -218,6 +218,11 @@ if [ "$_ev" -eq 2 ]; then
     interop_log "invite=$WARPTWEET_INTEROP_INVITE work=$WARPTWEET_INTEROP_WORK"
     exit 1
 fi
-interop_log "Phase A incomplete: partial evidence is fail"
+if [ "${WARPTWEET_INTEROP_LOCAL_DEV:-0}" = "1" ]; then
+    interop_log "Phase A happy path passed; remaining WP8 cases are not_run (CTA stays dark)"
     interop_log "invite=$WARPTWEET_INTEROP_INVITE evidence=$WARPTWEET_INTEROP_EVIDENCE_OUTPUT work=$WARPTWEET_INTEROP_WORK"
-    exit 1
+    exit 0
+fi
+interop_log "Phase A incomplete: partial evidence is fail"
+interop_log "invite=$WARPTWEET_INTEROP_INVITE evidence=$WARPTWEET_INTEROP_EVIDENCE_OUTPUT work=$WARPTWEET_INTEROP_WORK"
+exit 1

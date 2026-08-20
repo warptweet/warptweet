@@ -45,12 +45,12 @@ ssh -o StrictHostKeyChecking=yes -i "$HOME/.ssh/id_ed25519" ubuntu@203.0.113.10 
 
 ## Every Linux RC
 
-From the tagged WarpTweet tree on this Mac:
+From the tagged WarpTweet tree on this Mac. `VERSION` must match
+`command.Version` in `internal/command/command.go`. Host, SSH identity,
+and `WARPTWEET_LINUX_GPG_KEY` come from `.env`.
 
 ```sh
-export WARPTWEET_VERSION=0.1.0-rc.1
-export WARPTWEET_LINUX_GPG_KEY=7738DDB55DE99435
-./scripts/build-linux-rc-remote.sh
+make linux-rc VERSION=0.1.0-rc.3
 ```
 
 That script:

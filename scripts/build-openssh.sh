@@ -713,6 +713,7 @@ fi
 # the WarpTweet grant socket is absent, which is correct in production and
 # would reject OpenSSH's own pubkey-connect tests.
 "$WT_REPOSITORY_ROOT/scripts/apply-openssh-grant-hook.sh" "$WT_OPENSSH_SOURCE_DIRECTORY"
+"$WT_REPOSITORY_ROOT/scripts/apply-openssh-forward-only.sh" "$WT_OPENSSH_SOURCE_DIRECTORY"
 if [ -x "$WT_OPENSSH_SOURCE_DIRECTORY/config.status" ]; then
     (CDPATH= cd -- "$WT_OPENSSH_SOURCE_DIRECTORY" && LC_ALL=C ./config.status)
 fi
@@ -730,6 +731,19 @@ install -m 0755 ssh-keygen "$WT_INSTALL_PREFIX/bin/ssh-keygen"
 install -m 0755 sshd "$WT_INSTALL_PREFIX/sbin/sshd"
 install -m 0755 sshd-auth "$WT_INSTALL_PREFIX/libexec/sshd-auth"
 install -m 0755 sshd-session "$WT_INSTALL_PREFIX/libexec/sshd-session"
+
+for WT_FORBIDDEN in ssh-agent ssh-add sftp sftp-server ssh-keysign scp; do
+    if [ -e "$WT_INSTALL_PREFIX/bin/$WT_FORBIDDEN" ] ||
+        [ -e "$WT_INSTALL_PREFIX/sbin/$WT_FORBIDDEN" ] ||
+        [ -e "$WT_INSTALL_PREFIX/libexec/$WT_FORBIDDEN" ]; then
+        echo "Linux stage unexpectedly contains unused helper $WT_FORBIDDEN" >&2
+        exit 65
+    fi
+done
+if ! grep -F -q 'WarpTweet allows only direct-tcpip channels' "$WT_OPENSSH_SOURCE_DIRECTORY/serverloop.c"; then
+    echo "sshd-session source is not forward-only" >&2
+    exit 65
+fi
 
 WT_READELF_DYNAMIC="$WT_BUILD_ROOT/readelf-dynamic.txt"
 for WT_EXECUTABLE in \
