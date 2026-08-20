@@ -44,7 +44,7 @@ func SubmitEnrollment(ctx context.Context, invite Invite, request EnrollmentRequ
 
 // SubmitRevoke asks the pinned host to revoke one enrolled client.
 func SubmitRevoke(ctx context.Context, serverAddress string, enrollPort uint16, enrollmentTLSSPKISHA256 string, request ManagementRequest) error {
-	url, err := managementURL(serverAddress, enrollPort, "revoke")
+	url, err := managementURL(serverAddress, enrollPort, "revoke", enrollmentTLSSPKISHA256)
 	if err != nil {
 		return err
 	}
@@ -58,7 +58,7 @@ func SubmitRevoke(ctx context.Context, serverAddress string, enrollPort uint16, 
 
 // SubmitRotate asks the pinned host to install a new client public key.
 func SubmitRotate(ctx context.Context, serverAddress string, enrollPort uint16, enrollmentTLSSPKISHA256 string, request ManagementRequest) (EnrollmentProof, error) {
-	url, err := managementURL(serverAddress, enrollPort, "rotate")
+	url, err := managementURL(serverAddress, enrollPort, "rotate", enrollmentTLSSPKISHA256)
 	if err != nil {
 		return EnrollmentProof{}, err
 	}
@@ -77,24 +77,22 @@ func SubmitRotate(ctx context.Context, serverAddress string, enrollPort uint16, 
 	if proof.ClientID == "" || proof.PublicKey == "" || proof.PublicKey != strings.TrimSpace(request.NewPublicKey) {
 		return EnrollmentProof{}, fmt.Errorf("%w: rotate proof incomplete", ErrInvalidInvite)
 	}
-	if proof.EnrollPort == 0 {
-		proof.EnrollPort = enrollPort
-	}
-	if proof.EnrollPort == 0 {
-		proof.EnrollPort = DefaultEnrollmentPort
-	}
 	return proof, nil
 }
 
-func managementURL(serverAddress string, enrollPort uint16, action string) (string, error) {
+func managementURL(serverAddress string, enrollPort uint16, action, enrollmentTLSSPKISHA256 string) (string, error) {
 	if enrollPort == 0 {
-		enrollPort = DefaultEnrollmentPort
+		enrollPort = DefaultManagementPort
 	}
 	addr, err := parseHostForURL(serverAddress)
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("https://%s/v1/%s", joinHostPort(addr, enrollPort), action), nil
+	scheme := "https"
+	if enrollmentTLSSPKISHA256 == "" {
+		scheme = "http"
+	}
+	return fmt.Sprintf("%s://%s/v1/%s", scheme, joinHostPort(addr, enrollPort), action), nil
 }
 
 func postJSON(ctx context.Context, url string, body []byte, enrollmentTLSSPKISHA256 string) ([]byte, error) {
@@ -109,16 +107,17 @@ func postJSON(ctx context.Context, url string, body []byte, enrollmentTLSSPKISHA
 	req.Header.Set("Accept", "application/json")
 	req.ContentLength = int64(len(body))
 
-	tlsConfig, err := PinnedClientTLSConfig(enrollmentTLSSPKISHA256, time.Now)
-	if err != nil {
-		return nil, err
+	transport := &http.Transport{Proxy: nil}
+	if !strings.HasPrefix(url, "http://") {
+		tlsConfig, err := PinnedClientTLSConfig(enrollmentTLSSPKISHA256, time.Now)
+		if err != nil {
+			return nil, err
+		}
+		transport.TLSClientConfig = tlsConfig
 	}
 	client := &http.Client{
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{
-			Proxy:           nil,
-			TLSClientConfig: tlsConfig,
-		},
+		Timeout:   30 * time.Second,
+		Transport: transport,
 		CheckRedirect: func(*http.Request, []*http.Request) error {
 			return http.ErrUseLastResponse
 		},

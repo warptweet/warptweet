@@ -220,7 +220,7 @@ func managedAuthorizedKeyPrefixForTarget(algorithm string, target netip.AddrPort
 		return "", invalidAuthorizedKey("authorization expiry: %v", err)
 	}
 	return fmt.Sprintf(
-		"restrict,port-forwarding,permitopen=\"%s\",expiry-time=\"%s\" %s ",
+		"restrict,port-forwarding,permitopen=\"%s\",permitopen=\"127.0.0.1:29723\",expiry-time=\"%s\" %s ",
 		target.String(),
 		expiry,
 		algorithm,
@@ -244,19 +244,28 @@ func parseManagedAuthorizedKey(config Config, algorithm, text string) (time.Time
 		canonicalAddress(config.Target.Address),
 		uint16(config.Target.Port),
 	).String()
+	wantManagement := "127.0.0.1:29723"
 	blob := fields[2]
 	if len(fields) > 3 && strings.Join(fields[3:], " ") != ManagedClientMarker {
 		return time.Time{}, "", fmt.Errorf("does not match the canonical managed format")
 	}
-	targetEnd := strings.Index(remainder, "\",expiry-time=\"")
+	targetEnd := strings.Index(remainder, "\",permitopen=\"")
 	if targetEnd < 0 {
-		return time.Time{}, "", fmt.Errorf("authorization expiry-time is required")
+		return time.Time{}, "", fmt.Errorf("management permitopen is required")
 	}
 	target := remainder[:targetEnd]
 	if target != wantTarget {
 		return time.Time{}, "", fmt.Errorf("permitopen target does not match the server policy")
 	}
-	expiryAndRest := remainder[targetEnd+len("\",expiry-time=\""):]
+	remainder = remainder[targetEnd+len("\",permitopen=\""):]
+	mgmtEnd := strings.Index(remainder, "\",expiry-time=\"")
+	if mgmtEnd < 0 {
+		return time.Time{}, "", fmt.Errorf("authorization expiry-time is required")
+	}
+	if remainder[:mgmtEnd] != wantManagement {
+		return time.Time{}, "", fmt.Errorf("permitopen management target does not match the server policy")
+	}
+	expiryAndRest := remainder[mgmtEnd+len("\",expiry-time=\""):]
 	if !strings.HasSuffix(expiryAndRest, "\"") {
 		return time.Time{}, "", fmt.Errorf("expiry-time is not quoted")
 	}

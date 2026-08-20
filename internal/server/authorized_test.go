@@ -35,7 +35,7 @@ func TestRenderAuthorizedKeyAddsExactManagedRestrictions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RenderAuthorizedKey: %v", err)
 	}
-	want := "restrict,port-forwarding,permitopen=\"198.51.100.7:5432\",expiry-time=\"20260915120000Z\" " +
+	want := "restrict,port-forwarding,permitopen=\"198.51.100.7:5432\",permitopen=\"127.0.0.1:29723\",expiry-time=\"20260915120000Z\" " +
 		selectedProfile.AuthenticationKeyType + " " + blob + " " + ManagedClientMarker + "\n"
 	if string(got) != want {
 		t.Fatalf("unexpected authorized key:\n--- got ---\n%s--- want ---\n%s", got, want)
@@ -89,7 +89,7 @@ func TestRenderAuthorizedKeyFormatsIPv6PermitOpen(t *testing.T) {
 	}
 	if !strings.HasPrefix(
 		string(got),
-		"restrict,port-forwarding,permitopen=\"[2001:db8::20]:443\",expiry-time=\"20260915120000Z\" ",
+		"restrict,port-forwarding,permitopen=\"[2001:db8::20]:443\",permitopen=\"127.0.0.1:29723\",expiry-time=\"20260915120000Z\" ",
 	) {
 		t.Fatalf("authorized key has wrong IPv6 restriction: %s", got)
 	}

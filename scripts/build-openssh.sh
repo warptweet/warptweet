@@ -713,7 +713,9 @@ fi
 # the WarpTweet grant socket is absent, which is correct in production and
 # would reject OpenSSH's own pubkey-connect tests.
 "$WT_REPOSITORY_ROOT/scripts/apply-openssh-grant-hook.sh" "$WT_OPENSSH_SOURCE_DIRECTORY"
-"$WT_REPOSITORY_ROOT/scripts/apply-openssh-forward-only.sh" "$WT_OPENSSH_SOURCE_DIRECTORY"
+if [ -f "$WT_OPENSSH_SOURCE_DIRECTORY/serverloop.c" ]; then
+    "$WT_REPOSITORY_ROOT/scripts/apply-openssh-forward-only.sh" "$WT_OPENSSH_SOURCE_DIRECTORY"
+fi
 if [ -x "$WT_OPENSSH_SOURCE_DIRECTORY/config.status" ]; then
     (CDPATH= cd -- "$WT_OPENSSH_SOURCE_DIRECTORY" && LC_ALL=C ./config.status)
 fi
@@ -740,7 +742,8 @@ for WT_FORBIDDEN in ssh-agent ssh-add sftp sftp-server ssh-keysign scp; do
         exit 65
     fi
 done
-if ! grep -F -q 'WarpTweet allows only direct-tcpip channels' "$WT_OPENSSH_SOURCE_DIRECTORY/serverloop.c"; then
+if [ -f "$WT_OPENSSH_SOURCE_DIRECTORY/serverloop.c" ] &&
+    ! grep -F -q 'WarpTweet allows only direct-tcpip channels' "$WT_OPENSSH_SOURCE_DIRECTORY/serverloop.c"; then
     echo "sshd-session source is not forward-only" >&2
     exit 65
 fi

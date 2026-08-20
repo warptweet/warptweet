@@ -93,6 +93,8 @@ install -m 0644 "$WT_REPOSITORY_ROOT/packaging/systemd/warptweet-sshd.service" \
     "$WT_ROOT/lib/systemd/system/warptweet-sshd.service"
 install -m 0644 "$WT_REPOSITORY_ROOT/packaging/systemd/warptweet-enroll.service" \
     "$WT_ROOT/lib/systemd/system/warptweet-enroll.service"
+install -m 0644 "$WT_REPOSITORY_ROOT/packaging/systemd/warptweet-mgmt.service" \
+    "$WT_ROOT/lib/systemd/system/warptweet-mgmt.service"
 install -m 0644 "$WT_REPOSITORY_ROOT/packaging/systemd/warptweet-tunnel@.service" \
     "$WT_ROOT/lib/systemd/system/warptweet-tunnel@.service"
 install -m 0644 "$WT_REPOSITORY_ROOT/packaging/systemd/warptweet-reconcile.service" \
@@ -154,6 +156,7 @@ cp -a $WT_ROOT/. %{buildroot}/
 /etc/warptweet
 /lib/systemd/system/warptweet-sshd.service
 /lib/systemd/system/warptweet-enroll.service
+/lib/systemd/system/warptweet-mgmt.service
 /lib/systemd/system/warptweet-tunnel@.service
 /lib/systemd/system/warptweet-reconcile.service
 /lib/systemd/system/warptweet-provisioner.service

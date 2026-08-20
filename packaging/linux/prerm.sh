@@ -60,6 +60,7 @@ if ! uninstalling "${1:-}"; then
     done
     try_restart warptweet-provisioner.service
     try_restart warptweet-reconcile.service
+    try_restart warptweet-mgmt.service
     try_restart warptweet-enroll.service
     try_restart warptweet-sshd.service
     exit 0
@@ -74,6 +75,7 @@ list_tunnel_units | while read -r WT_UNIT; do
 done
 stop_disable warptweet-provisioner.service
 stop_disable warptweet-reconcile.service
+stop_disable warptweet-mgmt.service
 stop_disable warptweet-enroll.service
 stop_disable warptweet-sshd.service
 

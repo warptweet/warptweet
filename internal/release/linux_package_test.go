@@ -86,6 +86,7 @@ func TestLinuxPackageScriptsForbidNetwork(t *testing.T) {
 		`warptweet-operator`,
 		`--uid "$WT_UID"`,
 		`systemctl enable warptweet-provisioner.service`,
+		`systemctl enable --now warptweet-mgmt.service`,
 	} {
 		if !strings.Contains(postinst, required) {
 			t.Errorf("postinst omits %q", required)

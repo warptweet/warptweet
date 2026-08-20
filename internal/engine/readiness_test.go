@@ -36,6 +36,7 @@ func TestManagedClientPolicyUsesFixedPrivateControlPath(t *testing.T) {
 		`ForkAfterAuthentication=no`,
 		`SessionType=none`,
 		`LocalForward=[127.0.0.1]:15432 [10.0.0.10]:5432`,
+		`LocalForward=[127.0.0.1]:15433 127.0.0.1:29723`,
 	} {
 		if !strings.Contains(joined, required) {
 			t.Errorf("managed arguments do not contain %q: %q", required, arguments)

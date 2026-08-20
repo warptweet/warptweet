@@ -247,8 +247,9 @@ tcpkeepalive no
 rekeylimit 536870912 3600
 loglevel VERBOSE
 escapechar none
-localforward %s
-tunnel false
+		localforward %s
+		localforward %s
+		tunnel false
 tunneldevice any:any
 `,
 		spec.ServerAddress,
@@ -263,6 +264,7 @@ tunneldevice any:any
 		spec.KnownHostsFile,
 		spec.GlobalKnownHostsFile,
 		effectiveLocalForward(spec),
+		effectiveManagementForward(spec),
 	)
 }
 

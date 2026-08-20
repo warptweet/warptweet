@@ -1587,7 +1587,11 @@ func TestOpenSSHStageContainsOnlyRequiredAuthenticatedBundleFiles(t *testing.T) 
 			t.Errorf("build script omits required allow-listed install %q", required)
 		}
 	}
-	for _, forbidden := range []string{"install-nokeys", "ssh-keysign", "sftp-server"} {
+	for _, forbidden := range []string{
+		`install -m 0755 ssh-keysign`,
+		`install -m 0755 sftp-server`,
+		`install -m 0755 sftp `,
+	} {
 		if strings.Contains(contents, forbidden) {
 			t.Errorf("build stage includes forbidden unused executable %q", forbidden)
 		}

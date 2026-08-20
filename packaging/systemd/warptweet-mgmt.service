@@ -1,14 +1,10 @@
 [Unit]
-Description=WarpTweet enrollment control plane
+Description=WarpTweet localhost management RPC
 Documentation=https://warptweet.com/
 After=network-online.target
 Wants=network-online.target
 AssertFileIsExecutable=/opt/warptweet/bin/warptweet
 AssertPathExists=/etc/warptweet/server.wt
-AssertPathExists=/var/lib/warptweet/ssh/ssh_host_mldsa44_ed25519_key
-AssertPathExists=/etc/warptweet/invite.mac-key
-AssertPathExists=/etc/warptweet/enrollment/tls.crt
-AssertPathExists=/etc/warptweet/enrollment/tls.key
 StartLimitIntervalSec=60
 StartLimitBurst=5
 
@@ -17,16 +13,14 @@ Type=simple
 User=root
 Group=root
 ExecStartPre=/opt/warptweet/bin/warptweet doctor-server --config /etc/warptweet/server.wt
-ExecStart=/opt/warptweet/bin/warptweet server enroll-listen
+ExecStart=/opt/warptweet/bin/warptweet server mgmt-listen --listen 127.0.0.1:29723
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=15s
 KillMode=control-group
 UMask=0077
 UnsetEnvironment=LD_AUDIT LD_LIBRARY_PATH LD_PRELOAD OPENSSL_CONF OPENSSL_CONF_INCLUDE OPENSSL_MODULES
-
-# Enrollment mutates grant state under /var/lib/warptweet. /opt stays immutable.
-CapabilityBoundingSet=CAP_KILL CAP_NET_BIND_SERVICE CAP_SYS_PTRACE
+CapabilityBoundingSet=CAP_KILL CAP_SYS_PTRACE
 AmbientCapabilities=
 NoNewPrivileges=yes
 KeyringMode=private
@@ -47,7 +41,7 @@ RuntimeDirectory=warptweet/server
 RuntimeDirectoryMode=0750
 RuntimeDirectoryPreserve=yes
 ReadOnlyPaths=/opt/warptweet /etc/warptweet
-ReadWritePaths=/var/lib/warptweet /etc/warptweet/enrollment /run/warptweet/server
+ReadWritePaths=/var/lib/warptweet /run/warptweet/server
 RemoveIPC=yes
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 RestrictNamespaces=yes
@@ -56,4 +50,5 @@ RestrictSUIDSGID=yes
 SystemCallArchitectures=native
 TasksMax=64
 
-
+[Install]
+WantedBy=multi-user.target

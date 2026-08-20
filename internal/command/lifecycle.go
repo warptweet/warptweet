@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"os/exec"
 	"os/user"
@@ -566,10 +567,6 @@ func runRotate(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	}
 	defer lifecycle.Unlock(lock)
 
-	if err := stopTunnelProcess(ctx, store, tunnelID); err != nil {
-		return err
-	}
-
 	receipt, err := loadEnrollmentReceipt(layout.ClientManifestPath, tunnelID)
 	if err != nil {
 		return err
@@ -588,7 +585,11 @@ func runRotate(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	if receipt.EnrollmentTLSSPKISHA256 == "" {
 		return errors.New("enrollment receipt missing TLS SPKI pin; re-enroll before rotate")
 	}
-	proof, err := enrollment.SubmitRotate(ctx, receipt.ServerAddress, receipt.enrollPortOrDefault(), receipt.EnrollmentTLSSPKISHA256, enrollment.ManagementRequest{
+	mgmtPort, err := managementLocalPort(store, tunnelID)
+	if err != nil {
+		return err
+	}
+	proof, err := enrollment.SubmitRotate(ctx, "127.0.0.1", mgmtPort, "", enrollment.ManagementRequest{
 		ClientID:            receipt.ClientID,
 		ManagementToken:     pending.CurrentManagementToken,
 		TunnelID:            tunnelID,
@@ -598,9 +599,10 @@ func runRotate(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	if err != nil {
 		return fmt.Errorf("host rotate: %w", err)
 	}
+	failCleanup := func(err error) error {
+		return persistCleanupRequired(store, tunnelID, generationID, "rotate", err)
+	}
 
-	// Persist host-accepted credentials before activation so a failed
-	// activate still retains the new management token and public key.
 	receipt.ManagementToken = pending.NextManagementToken
 	receipt.PublicKey = publicKey
 	receipt.AcceptedAt = proof.AcceptedAt
@@ -608,22 +610,21 @@ func runRotate(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		receipt.EnrollPort = proof.EnrollPort
 	}
 	if err := writeEnrollmentReceipt(layout.ClientManifestPath, receipt); err != nil {
-		return err
+		return failCleanup(err)
 	}
 	if err := syncRouteReceipt(tunnelID, receipt); err != nil {
 		slog.Error("route receipt sync failed after rotate", "route_id", tunnelID, "err", err)
 	}
 
-	// Keep existing manifest and known_hosts; only identity changes.
 	emptyTrust := filepath.Join(stageRoot, "known_hosts.empty")
 	if err := os.WriteFile(emptyTrust, nil, 0o600); err != nil {
-		return err
+		return failCleanup(err)
 	}
 	if err := copyFile(layout.ClientManifestPath, filepath.Join(stageRoot, "client.wt"), 0o600); err != nil {
-		return err
+		return failCleanup(err)
 	}
 	if err := copyFile(layout.ClientKnownHostsPath, filepath.Join(stageRoot, "known_hosts"), 0o600); err != nil {
-		return err
+		return failCleanup(err)
 	}
 	if err := activateGeneration(
 		layout.ClientManifestPath,
@@ -635,18 +636,21 @@ func runRotate(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		filepath.Join(stageRoot, "known_hosts"),
 		emptyTrust,
 	); err != nil {
-		return err
+		return failCleanup(err)
 	}
 
 	receipt.Generation = generationID
 	if err := writeEnrollmentReceipt(layout.ClientManifestPath, receipt); err != nil {
-		return err
+		return failCleanup(err)
 	}
 	if err := syncRouteReceipt(tunnelID, receipt); err != nil {
 		slog.Error("route receipt sync failed after rotate", "route_id", tunnelID, "err", err)
 	}
 	if err := os.RemoveAll(stageRoot); err != nil {
-		return fmt.Errorf("remove completed pending rotation: %w", err)
+		return failCleanup(fmt.Errorf("remove completed pending rotation: %w", err))
+	}
+	if err := stopTunnelProcess(ctx, store, tunnelID); err != nil {
+		return failCleanup(err)
 	}
 	_ = store.Write(lifecycle.State{
 		TunnelID:     tunnelID,
@@ -692,10 +696,6 @@ func runRevokeTunnel(ctx context.Context, arguments []string, stdout, stderr io.
 	}
 	defer lifecycle.Unlock(lock)
 
-	if err := stopTunnelProcess(ctx, store, tunnelID); err != nil {
-		return err
-	}
-
 	receipt, err := loadEnrollmentReceipt(layout.ClientManifestPath, tunnelID)
 	if err != nil {
 		return err
@@ -706,21 +706,31 @@ func runRevokeTunnel(ctx context.Context, arguments []string, stdout, stderr io.
 	if receipt.EnrollmentTLSSPKISHA256 == "" {
 		return errors.New("enrollment receipt missing TLS SPKI pin; use server revoke on the host")
 	}
-	if err := enrollment.SubmitRevoke(ctx, receipt.ServerAddress, receipt.enrollPortOrDefault(), receipt.EnrollmentTLSSPKISHA256, enrollment.ManagementRequest{
+	mgmtPort, err := managementLocalPort(store, tunnelID)
+	if err != nil {
+		return err
+	}
+	if err := enrollment.SubmitRevoke(ctx, "127.0.0.1", mgmtPort, "", enrollment.ManagementRequest{
 		ClientID:        receipt.ClientID,
 		ManagementToken: receipt.ManagementToken,
 		TunnelID:        tunnelID,
 	}); err != nil {
 		return fmt.Errorf("host revoke: %w", err)
 	}
+	failCleanup := func(err error) error {
+		return persistCleanupRequired(store, tunnelID, receipt.Generation, "revoke", err)
+	}
 
 	receipt.ManagementToken = ""
 	receipt.RevokedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	if err := writeEnrollmentReceipt(layout.ClientManifestPath, receipt); err != nil {
-		return err
+		return failCleanup(err)
 	}
 	if err := syncRouteReceipt(tunnelID, receipt); err != nil {
 		slog.Error("route receipt sync failed after revoke", "route_id", tunnelID, "err", err)
+	}
+	if err := stopTunnelProcess(ctx, store, tunnelID); err != nil {
+		return failCleanup(err)
 	}
 	_ = store.Write(lifecycle.State{
 		TunnelID:     tunnelID,
@@ -942,6 +952,37 @@ func writePendingJSONState(statePath string, value any) error {
 		return err
 	}
 	return writeFileAtomic(statePath, append(raw, '\n'), 0o600)
+}
+
+func persistCleanupRequired(store lifecycle.Store, tunnelID, generation, operation string, cleanupErr error) error {
+	message := fmt.Sprintf("host %s completed; tunnel cleanup still required: %v", operation, cleanupErr)
+	_ = store.Write(lifecycle.State{
+		TunnelID:     tunnelID,
+		Phase:        lifecycle.PhaseCleanupRequired,
+		TargetHealth: lifecycle.TargetHealthNotChecked,
+		Generation:   generation,
+		Error:        message,
+	})
+	return errors.New(message)
+}
+
+func managementLocalPort(store lifecycle.Store, tunnelID string) (uint16, error) {
+	state, err := store.Read(tunnelID)
+	if err != nil {
+		return 0, err
+	}
+	if state.ListenEndpoint == "" {
+		return 0, fmt.Errorf("route %s has no listen endpoint; start the tunnel before rotate or revoke", tunnelID)
+	}
+	_, portText, err := net.SplitHostPort(state.ListenEndpoint)
+	if err != nil {
+		return 0, fmt.Errorf("route %s listen endpoint %q is invalid: %w", tunnelID, state.ListenEndpoint, err)
+	}
+	port, err := strconv.ParseUint(portText, 10, 16)
+	if err != nil || port == 0 || port == 65535 {
+		return 0, fmt.Errorf("route %s listen port %q cannot host a management forward", tunnelID, portText)
+	}
+	return uint16(port) + 1, nil
 }
 
 func (receipt enrollmentReceipt) enrollPortOrDefault() uint16 {

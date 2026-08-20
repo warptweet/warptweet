@@ -1643,7 +1643,7 @@ func validateEffectiveServerConfig(output []byte, config server.Config, selected
 		"maxstartups":                  {"10:30:60"},
 		"maxsessions":                  {"0"},
 		"allowtcpforwarding":           {"local"},
-		"permitopen":                   {target},
+		"permitopen":                   {target, "127.0.0.1:29723"},
 		"permitlisten":                 {"none"},
 		"allowstreamlocalforwarding":   {"no"},
 		"allowagentforwarding":         {"no"},

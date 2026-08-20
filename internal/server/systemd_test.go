@@ -73,10 +73,27 @@ func TestEnrollUnitUsesControllerEnrollmentListener(t *testing.T) {
 		"ProtectSystem=false",
 		"ExecStart=/usr/bin/",
 		"ConditionFileIsExecutable=",
+		"WantedBy=multi-user.target",
 	} {
 		if strings.Contains(unit, forbidden) {
 			t.Fatalf("enroll unit contains forbidden text %q", forbidden)
 		}
+	}
+}
+
+func TestMgmtUnitListensOnLocalhostOnly(t *testing.T) {
+	t.Parallel()
+
+	unit := readUnit(t, "warptweet-mgmt.service")
+	requireUnitLines(t, unit,
+		"Description=WarpTweet localhost management RPC",
+		"ExecStart=/opt/warptweet/bin/warptweet server mgmt-listen --listen 127.0.0.1:29723",
+		"WantedBy=multi-user.target",
+		"NoNewPrivileges=yes",
+		"ProtectSystem=strict",
+	)
+	if strings.Contains(unit, "CAP_NET_BIND_SERVICE") {
+		t.Fatal("mgmt unit must not bind privileged ports")
 	}
 }
 

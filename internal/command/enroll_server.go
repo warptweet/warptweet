@@ -110,13 +110,12 @@ func runServerEnrollListen(ctx context.Context, arguments []string, stdout, stde
 		errCh <- httpServer.Serve(listener)
 	}()
 
-	fmt.Fprintf(stdout, "enrollment TLS listening\nlisten   %s\npath     POST /v1/enroll\npath     POST /v1/revoke\npath     POST /v1/rotate\n", listenEndpoint)
+	fmt.Fprintf(stdout, "enrollment TLS listening\nlisten   %s\npath     POST /v1/enroll\n", listenEndpoint)
 	if abs, err := enrollment.EnrollmentURL(listenEndpoint.Addr().String(), listenEndpoint.Port()); err == nil {
 		fmt.Fprintf(stdout, "url      %s\n", abs)
 	}
 
-	go reconcileGrantsUntil(ctx, manifest)
-	go serveGrantSessions(ctx)
+	go idleEnrollWhenInvitesGone(ctx, httpServer)
 
 	select {
 	case <-ctx.Done():
@@ -190,6 +189,12 @@ func newEnrollmentHandler(manifest server.Config, hostPublicKey string, enrollPo
 			return acceptAndAuthorize(manifest, hostPublicKey, enrollRequest, time.Now().UTC())
 		})
 	})
+	return mux
+}
+
+func newManagementHandler(manifest server.Config, hostPublicKey string) http.Handler {
+	limiter := newEnrollmentRateLimiter(enrollmentRateLimitWindow, enrollmentRateLimitMax)
+	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/revoke", func(writer http.ResponseWriter, request *http.Request) {
 		writeEnrollmentJSON(writer, request, "revoke", limiter, func(body []byte) (any, error) {
 			var manage enrollment.ManagementRequest
@@ -266,7 +271,7 @@ func newEnrollmentHandler(manifest server.Config, hostPublicKey string, enrollPo
 				AuthorizationNotAfter:        record.AuthorizationNotAfter,
 				AuthorizationDurationSeconds: record.AuthorizationDurationSeconds,
 				ServerAddress:                record.ServerAddress,
-				EnrollPort:                   enrollPort,
+				EnrollPort:                   enrollment.DefaultEnrollmentPort,
 			}, nil
 		})
 	})
@@ -887,6 +892,124 @@ func removeAuthorizedKeyForPublicKey(path, publicKey string) error {
 }
 
 const enrollmentAcceptLimit = 64
+
+func idleEnrollWhenInvitesGone(ctx context.Context, httpServer *http.Server) {
+	ticker := time.NewTicker(15 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if hasUnexpiredIssuedInvite() {
+				continue
+			}
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_ = httpServer.Shutdown(shutdownCtx)
+			cancel()
+			return
+		}
+	}
+}
+
+func hasUnexpiredIssuedInvite() bool {
+	records, err := enrollment.List(inviteDirectory)
+	if err != nil {
+		return true
+	}
+	now := time.Now().UTC()
+	for _, record := range records {
+		if record.Status != enrollment.StatusIssued {
+			continue
+		}
+		expires, err := time.Parse(time.RFC3339Nano, record.ExpiresAt)
+		if err != nil {
+			expires, err = time.Parse(time.RFC3339, record.ExpiresAt)
+		}
+		if err != nil || expires.After(now) {
+			return true
+		}
+	}
+	return false
+}
+
+func runServerMgmtListen(ctx context.Context, arguments []string, stdout, stderr io.Writer) error {
+	flags := newFlagSet("server mgmt-listen", stderr)
+	listen := onceStringFlag{name: "--listen"}
+	flags.Var(&listen, "listen", "localhost management listen address:port")
+	if err := parseFlags(flags, arguments); err != nil {
+		return err
+	}
+	manifest, err := server.Load(installlayout.ServerManifestPath)
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	if grant.ClockIsBlocked(installlayout.HostClockBlockedPath) {
+		return fmt.Errorf("host clock: blocked until warptweet server clock-recover")
+	}
+	if _, err := grant.ObserveClock(installlayout.HostClockObservationPath, now); err != nil {
+		if closeErr := enterBlockedClock(manifest, err); closeErr != nil {
+			return closeErr
+		}
+		return fmt.Errorf("host clock: %w", err)
+	}
+	if err := reconcileExpiredGrants(manifest, now); err != nil {
+		return fmt.Errorf("reconcile expired grants: %w", err)
+	}
+	if err := reconcileManagedAuthorizations(manifest); err != nil {
+		return fmt.Errorf("reconcile managed authorizations: %w", err)
+	}
+	hostPublicKey, err := deriveHostPublicKey(ctx, manifest.HostKeyPath)
+	if err != nil {
+		return err
+	}
+	endpoint := netip.MustParseAddrPort(fmt.Sprintf("127.0.0.1:%d", enrollment.DefaultManagementPort))
+	if listen.value != "" {
+		parsed, err := parseEndpoint(listen.value)
+		if err != nil {
+			return err
+		}
+		if parsed != endpoint {
+			return fmt.Errorf("management RPC must listen on %s", endpoint)
+		}
+	}
+	httpServer := &http.Server{
+		Addr:              endpoint.String(),
+		Handler:           newManagementHandler(manifest, hostPublicKey),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       30 * time.Second,
+		MaxHeaderBytes:    4 << 10,
+	}
+	listener, err := net.Listen("tcp", endpoint.String())
+	if err != nil {
+		return fmt.Errorf("listen for management RPC: %w", err)
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- httpServer.Serve(listener)
+	}()
+	fmt.Fprintf(stdout, "management RPC listening\nlisten   %s\npath     POST /v1/revoke\npath     POST /v1/rotate\n", endpoint)
+	go reconcileGrantsUntil(ctx, manifest)
+	go serveGrantSessions(ctx)
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = httpServer.Shutdown(shutdownCtx)
+		if errors.Is(ctx.Err(), context.Canceled) {
+			return nil
+		}
+		return ctx.Err()
+	case err := <-errCh:
+		if errors.Is(err, http.ErrServerClosed) {
+			return nil
+		}
+		return err
+	}
+}
 
 type limitedListener struct {
 	net.Listener

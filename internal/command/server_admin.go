@@ -31,11 +31,13 @@ const (
 
 func runServer(ctx context.Context, arguments []string, stdout, stderr io.Writer) error {
 	if len(arguments) == 0 {
-		return errors.New("server requires an internal subcommand: enroll-listen, accept-enrollment, revoke, status, clock-recover")
+		return errors.New("server requires an internal subcommand: enroll-listen, mgmt-listen, accept-enrollment, revoke, status, clock-recover")
 	}
 	switch arguments[0] {
 	case "enroll-listen":
 		return runServerEnrollListen(ctx, arguments[1:], stdout, stderr)
+	case "mgmt-listen":
+		return runServerMgmtListen(ctx, arguments[1:], stdout, stderr)
 	case "accept-enrollment":
 		return runServerAcceptEnrollment(ctx, arguments[1:], stdout, stderr)
 	case "revoke":

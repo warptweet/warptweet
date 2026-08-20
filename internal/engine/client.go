@@ -17,6 +17,7 @@ import (
 
 	"warptweet.com/warptweet/internal/artifactprofile"
 	"warptweet.com/warptweet/internal/config"
+	"warptweet.com/warptweet/internal/enrollment"
 	"warptweet.com/warptweet/internal/profile"
 )
 
@@ -448,6 +449,15 @@ func newClientPolicy(spec ClientSpec, controlPath string) (clientPolicy, error) 
 			effectiveValues: []string{effectiveLocalForward(spec)},
 			expectEffective: true,
 		},
+		{
+			name: "LocalForward",
+			values: []string{
+				fmt.Sprintf("[%s]:%d", spec.ListenAddress.Unmap(), managementListenPort(spec.ListenPort)),
+				fmt.Sprintf("127.0.0.1:%d", enrollment.DefaultManagementPort),
+			},
+			effectiveValues: []string{effectiveManagementForward(spec)},
+			expectEffective: true,
+		},
 		expectedClientOption("Tunnel", "no", "false"),
 		expectedClientOption("TunnelDevice", "any:any", "any:any"),
 	}
@@ -527,7 +537,7 @@ func validateClientSpec(spec ClientSpec) error {
 	if spec.ListenAddress.String() != "127.0.0.1" {
 		return errors.New("listener must bind exactly to 127.0.0.1")
 	}
-	if spec.ServerPort == 0 || spec.ListenPort == 0 || spec.TargetPort == 0 {
+	if spec.ServerPort == 0 || spec.ListenPort == 0 || spec.TargetPort == 0 || managementListenPort(spec.ListenPort) == 0 {
 		return errors.New("server, listener, and target ports must be non-zero")
 	}
 	for field, value := range map[string]string{

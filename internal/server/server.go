@@ -105,7 +105,7 @@ func Render(config Config) ([]byte, error) {
 		"MaxStartups 10:30:60",
 		"MaxSessions 0",
 		"AllowTcpForwarding local",
-		"PermitOpen " + target,
+		"PermitOpen " + target + " 127.0.0.1:29723",
 		"PermitListen none",
 		"AllowStreamLocalForwarding no",
 		"AllowAgentForwarding no",

@@ -158,7 +158,7 @@ func TestKeyBlobDigestMatchesWireBlob(t *testing.T) {
 	if _, err := KeyBlobDigest(`restrict,from="unterminated ssh-ed25519 AAAA`); err == nil {
 		t.Fatal("accepted unterminated quote")
 	}
-	managed := `restrict,port-forwarding,permitopen="127.0.0.1:5432" ssh-ed25519 ` + base64.StdEncoding.EncodeToString(blob) + " comment"
+	managed := `restrict,port-forwarding,permitopen="127.0.0.1:5432",permitopen="127.0.0.1:29723" ssh-ed25519 ` + base64.StdEncoding.EncodeToString(blob) + " comment"
 	got, err = KeyBlobDigest(managed)
 	if err != nil {
 		t.Fatal(err)

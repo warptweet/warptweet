@@ -186,6 +186,9 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 	hostFingerprint := hex.EncodeToString(fingerprint[:])
 	result["host_public_key_sha256"] = hostFingerprint
 
+	if err := ensureMgmtListenStarted(); err != nil {
+		return err
+	}
 	enrollStatus, err := applyEnrollListenStatus(result, listenEndpoint.Addr(), enrollmentPin)
 	if err != nil {
 		return err
@@ -399,6 +402,160 @@ func tryStartEnrollUnit(endpoint netip.AddrPort, enrollmentPin string) (bool, er
 		time.Sleep(50 * time.Millisecond)
 	}
 	return true, errors.New("warptweet-enroll.service started but its pinned TLS endpoint did not become ready")
+}
+
+const mgmtListenLockName = ".mgmt-listen.lock"
+
+func ensureMgmtListenStarted() error {
+	return enrollment.WithExclusiveLock(serverStateDirectory, mgmtListenLockName, startMgmtListenLocked)
+}
+
+func startMgmtListenLocked() error {
+	endpoint := netip.MustParseAddrPort(fmt.Sprintf("127.0.0.1:%d", enrollment.DefaultManagementPort))
+	if pid, err := packagedMgmtMainPID(); err == nil && processOwnsTCPListen(pid, endpoint) {
+		return nil
+	}
+	if pid, err := readPIDFile(filepath.Join(serverStateDirectory, "mgmt-listen.pid")); err == nil && processOwnsTCPListen(pid, endpoint) {
+		return nil
+	}
+	if packagedMgmtUnitPresent() {
+		if err := startPackagedMgmtUnit(); err != nil {
+			return err
+		}
+		return waitForOwnedMgmtListen(endpoint, packagedMgmtMainPID)
+	}
+	cmd, err := startDirectMgmtProcess(endpoint)
+	if err != nil {
+		return err
+	}
+	return waitForOwnedMgmtListen(endpoint, func() (int, error) {
+		if cmd.Process == nil {
+			return 0, errors.New("management process has no pid")
+		}
+		if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
+			return 0, err
+		}
+		return cmd.Process.Pid, nil
+	})
+}
+
+func packagedMgmtUnitPresent() bool {
+	for _, unitPath := range []string{
+		"/lib/systemd/system/warptweet-mgmt.service",
+		"/usr/lib/systemd/system/warptweet-mgmt.service",
+	} {
+		if _, err := os.Stat(unitPath); err == nil {
+			_, lookErr := exec.LookPath("systemctl")
+			return lookErr == nil
+		}
+	}
+	return false
+}
+
+func startPackagedMgmtUnit() error {
+	cmd := exec.Command("systemctl", "start", "warptweet-mgmt.service")
+	cmd.Env = []string{"LANG=C", "LC_ALL=C"}
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("start warptweet-mgmt.service: %w", err)
+	}
+	return nil
+}
+
+func packagedMgmtMainPID() (int, error) {
+	cmd := exec.Command("systemctl", "show", "warptweet-mgmt.service", "--property=ActiveState", "--property=MainPID")
+	cmd.Env = []string{"LANG=C", "LC_ALL=C"}
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, err
+	}
+	active := false
+	pid := 0
+	for _, line := range strings.Split(string(output), "\n") {
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		switch key {
+		case "ActiveState":
+			active = value == "active"
+		case "MainPID":
+			pid, _ = strconv.Atoi(value)
+		}
+	}
+	if !active || pid <= 0 {
+		return 0, errors.New("warptweet-mgmt.service is not active")
+	}
+	return pid, nil
+}
+
+func startDirectMgmtProcess(endpoint netip.AddrPort) (*exec.Cmd, error) {
+	self, err := os.Executable()
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(serverStateDirectory, 0o700); err != nil {
+		return nil, err
+	}
+	logPath := filepath.Join(serverStateDirectory, "mgmt-listen.log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.Command(self, "server", "mgmt-listen", "--listen", endpoint.String())
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.Env = []string{"LANG=C", "LC_ALL=C"}
+	cmd.SysProcAttr = enrollListenSysProcAttr()
+	if err := cmd.Start(); err != nil {
+		_ = logFile.Close()
+		return nil, err
+	}
+	pidPath := filepath.Join(serverStateDirectory, "mgmt-listen.pid")
+	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o600); err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		_ = logFile.Close()
+		return nil, err
+	}
+	go func() {
+		_ = cmd.Wait()
+		_ = logFile.Close()
+	}()
+	return cmd, nil
+}
+
+func waitForOwnedMgmtListen(endpoint netip.AddrPort, pidFn func() (int, error)) error {
+	deadline := time.Now().Add(3 * time.Second)
+	var last error
+	for time.Now().Before(deadline) {
+		pid, err := pidFn()
+		if err != nil {
+			last = err
+			time.Sleep(50 * time.Millisecond)
+			continue
+		}
+		if processOwnsTCPListen(pid, endpoint) {
+			return nil
+		}
+		last = fmt.Errorf("pid %d does not own %s", pid, endpoint)
+		time.Sleep(50 * time.Millisecond)
+	}
+	if last == nil {
+		last = errors.New("management RPC did not become ready on " + endpoint.String())
+	}
+	return last
+}
+
+func readPIDFile(path string) (int, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return 0, err
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil || pid <= 0 {
+		return 0, errors.New("invalid pid file")
+	}
+	return pid, nil
 }
 
 func enrollListenAlreadyRunning(endpoint netip.AddrPort, enrollmentPin string) bool {

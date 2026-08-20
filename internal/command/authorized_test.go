@@ -35,7 +35,7 @@ func TestRenderAuthorizedKeyCommandWritesDeterministicManagedLine(t *testing.T) 
 		t.Fatalf("unexpected stderr: %s", stderr.String())
 	}
 
-	want := "restrict,port-forwarding,permitopen=\"198.51.100.7:5432\",expiry-time=\"20260915120000Z\" " +
+	want := "restrict,port-forwarding,permitopen=\"198.51.100.7:5432\",permitopen=\"127.0.0.1:29723\",expiry-time=\"20260915120000Z\" " +
 		"ssh-mldsa44-ed25519@openssh.com " + blob + " warptweet-managed-client\n"
 	if stdout.String() != want {
 		t.Fatalf("unexpected stdout:\n--- got ---\n%s--- want ---\n%s", stdout.String(), want)

@@ -16,6 +16,10 @@ import (
 // SSH remains on the invite server_port; enrollment is a separate control path.
 const DefaultEnrollmentPort uint16 = 29722
 
+// DefaultManagementPort is the host-local rotate/revoke RPC port.
+// It is reached through the authenticated tunnel, never as a public listener.
+const DefaultManagementPort uint16 = 29723
+
 // MaxEnrollmentRequestBytes bounds enrollment request JSON on the wire.
 const MaxEnrollmentRequestBytes = 16 << 10
 

@@ -35,6 +35,7 @@ func TestRenderClientConfigIsFailClosed(t *testing.T) {
 		`ProxyJump "none"`,
 		`RekeyLimit "512M" "1h"`,
 		`LocalForward "[127.0.0.1]:15432" "[10.0.0.10]:5432"`,
+		`LocalForward "[127.0.0.1]:15433" "127.0.0.1:29723"`,
 	}
 	for _, option := range required {
 		if !strings.Contains(config, option) {
@@ -61,6 +62,7 @@ func TestArgumentsExposeOnlyLocalForward(t *testing.T) {
 		`SessionType=none`,
 		`RequestTTY=no`,
 		`LocalForward=[127.0.0.1]:15432 [10.0.0.10]:5432`,
+		`LocalForward=[127.0.0.1]:15433 127.0.0.1:29723`,
 		`ControlMaster=no`,
 		`ControlPersist=no`,
 	} {

@@ -26,6 +26,7 @@ const (
 	PhaseStopping          Phase = "Stopping"
 	PhaseStopped           Phase = "Stopped"
 	PhaseFailed            Phase = "Failed"
+	PhaseCleanupRequired   Phase = "CleanupRequired"
 )
 
 // TargetHealthNotChecked is the only default target-health value.

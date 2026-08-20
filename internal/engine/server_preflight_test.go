@@ -1205,6 +1205,7 @@ func serverTestEffectiveOutput(config server.Config, selected profile.Profile) [
 		"maxsessions 0",
 		"allowtcpforwarding local",
 		"permitopen " + target,
+		"permitopen 127.0.0.1:29723",
 		"permitlisten none",
 		"allowstreamlocalforwarding no",
 		"allowagentforwarding no",

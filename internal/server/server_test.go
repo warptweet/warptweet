@@ -45,7 +45,7 @@ LoginGraceTime 30
 MaxStartups 10:30:60
 MaxSessions 0
 AllowTcpForwarding local
-PermitOpen 198.51.100.7:5432
+PermitOpen 198.51.100.7:5432 127.0.0.1:29723
 PermitListen none
 AllowStreamLocalForwarding no
 AllowAgentForwarding no
@@ -115,7 +115,7 @@ func TestRenderFormatsIPv6WithoutBroadeningPermitOpen(t *testing.T) {
 	if !strings.Contains(text, "ListenAddress 2001:db8::10\n") {
 		t.Fatalf("missing IPv6 listen address:\n%s", text)
 	}
-	if !strings.Contains(text, "PermitOpen [2001:db8::20]:443\n") {
+	if !strings.Contains(text, "PermitOpen [2001:db8::20]:443 127.0.0.1:29723\n") {
 		t.Fatalf("PermitOpen did not render a single bracketed IPv6 target:\n%s", text)
 	}
 }
@@ -134,7 +134,7 @@ func TestRenderCanonicalizesIPv4MappedAddresses(t *testing.T) {
 	text := string(got)
 	if !strings.Contains(text, "AddressFamily inet\n") ||
 		!strings.Contains(text, "ListenAddress 192.0.2.10\n") ||
-		!strings.Contains(text, "PermitOpen 198.51.100.7:5432\n") {
+		!strings.Contains(text, "PermitOpen 198.51.100.7:5432 127.0.0.1:29723\n") {
 		t.Fatalf("mapped addresses were not rendered canonically:\n%s", text)
 	}
 }
