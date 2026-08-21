@@ -11,6 +11,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"warptweet.com/warptweet/internal/installlayout"
 )
 
 const (
@@ -39,7 +41,10 @@ func inspectProcess(pid int) (ProcessIdentity, error) {
 }
 
 func currentBootID() (string, error) {
-	contents, err := os.ReadFile("/proc/sys/kernel/random/boot_id")
+	contents, err := os.ReadFile(installlayout.DataPlaneBootIDPath)
+	if err != nil {
+		contents, err = os.ReadFile("/proc/sys/kernel/random/boot_id")
+	}
 	if err != nil {
 		return "", err
 	}

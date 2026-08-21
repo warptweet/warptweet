@@ -43,6 +43,7 @@ func TestFixedInstallLayoutIsAbsoluteAndContained(t *testing.T) {
 		GrantSessionsDirectory,
 		GrantSessionSocket,
 		GrantAuthorityLockPath,
+		DataPlaneBootIDPath,
 		DataPlaneControlSocket,
 	} {
 		if !filepath.IsAbs(path) || filepath.Clean(path) != path {

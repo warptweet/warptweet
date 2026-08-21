@@ -96,7 +96,7 @@ usermod -L warptweet-sshd
 
 command -v systemctl >/dev/null 2>&1 || fail "systemctl is required"
 systemctl daemon-reload
-systemctl enable --now warptweet-mgmt.service
+systemctl enable warptweet-mgmt.service
 systemctl enable warptweet-provisioner.service
 systemctl enable warptweet-reconcile.service
 

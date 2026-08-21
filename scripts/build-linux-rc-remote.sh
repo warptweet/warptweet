@@ -296,7 +296,7 @@ if [ "$WT_STAGE_OK" -ne 1 ]; then
         "$WT_BUILD_HOME/warptweet-openssh-source/$OPENSSH_ARCHIVE" \
         "$WT_BUILD_HOME/warptweet-openssl-source/$OPENSSL_ARCHIVE" \
         "$WT_BUILD_HOME/warptweet-openssh-stage"
-    wt_stage_inputs >"$WT_STAGE_MANIFEST"
+    wt_stage_inputs | sudo -u warptweet-build tee "$WT_STAGE_MANIFEST" >/dev/null
 fi
 uname -m >"$REMOTE_ROOT/arch"
 echo "build-linux-rc-remote: OpenSSH stage ready"
@@ -323,12 +323,14 @@ sudo -u warptweet-build -H env HOME="$WT_BUILD_HOME" WARPTWEET_VERSION="$WARPTWE
     "$WT_BUILD_HOME/pkg-out"
 cp -a "$WT_BUILD_HOME/pkg-out"/*.deb "$REMOTE_ROOT/server.deb"
 test -f "$REMOTE_ROOT/server.deb"
+uname -m >"$REMOTE_ROOT/arch"
 echo "build-linux-rc-remote: wrote $REMOTE_ROOT/server.deb"
 PACKAGE
 
-if ! WT_REMOTE_ARCH=$(ssh $WT_SSH_OPTS -p "$WT_PORT" "$WT_TARGET" "cat '$WT_REMOTE_ROOT/arch'"); then
-    fail "remote build did not write $WT_REMOTE_ROOT/arch; the compile SSH session likely dropped"
+if ! WT_REMOTE_ARCH=$(ssh $WT_SSH_OPTS -p "$WT_PORT" "$WT_TARGET" "cat '$WT_REMOTE_ROOT/arch' 2>/dev/null || uname -m"); then
+    fail "could not read remote architecture from $WT_TARGET"
 fi
+WT_REMOTE_ARCH=$(printf '%s' "$WT_REMOTE_ARCH" | tr -d '\r' | tail -n 1)
 case "$WT_REMOTE_ARCH" in
     x86_64 | amd64) WT_DEB_ARCH=amd64 ;;
     aarch64 | arm64) WT_DEB_ARCH=arm64 ;;
