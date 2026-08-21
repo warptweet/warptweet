@@ -31,14 +31,14 @@ func ValidatePublicKeyBlob(encoded, algorithm string, rawKeyBytes int) error {
 	if base64.StdEncoding.EncodeToString(blob) != encoded {
 		return errors.New("public key is not canonical base64")
 	}
-	remaining, name, err := consumeString(blob)
+	remaining, name, err := ConsumeString(blob)
 	if err != nil {
 		return fmt.Errorf("read public-key algorithm: %w", err)
 	}
 	if string(name) != algorithm {
 		return fmt.Errorf("public-key blob type %q does not match %q", name, algorithm)
 	}
-	remaining, rawKey, err := consumeString(remaining)
+	remaining, rawKey, err := ConsumeString(remaining)
 	if err != nil {
 		return fmt.Errorf("read raw public key: %w", err)
 	}
@@ -51,7 +51,14 @@ func ValidatePublicKeyBlob(encoded, algorithm string, rawKeyBytes int) error {
 	return nil
 }
 
-func consumeString(input []byte) ([]byte, []byte, error) {
+// AppendString appends an SSH string to dst.
+func AppendString(dst, value []byte) []byte {
+	dst = binary.BigEndian.AppendUint32(dst, uint32(len(value)))
+	return append(dst, value...)
+}
+
+// ConsumeString reads one SSH string. It returns the remainder, then the value.
+func ConsumeString(input []byte) (rest, value []byte, err error) {
 	if len(input) < 4 {
 		return nil, nil, errors.New("truncated SSH string length")
 	}
