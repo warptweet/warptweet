@@ -198,7 +198,7 @@ func (c *connection) handleKEX(payload []byte) error {
 		return err
 	}
 	hostBlob := hostKeyBlob(hostPub)
-	secret := sshString(shared)
+	secret := sshMpint(shared)
 	hash := exchangeHash(c.clientID, c.serverID, c.clientKex, c.serverKex, hostBlob, clientPub, serverPub, secret)
 	c.sessionID = append([]byte(nil), hash...)
 	sigRaw, err := c.hostKey.Sign(hash)
