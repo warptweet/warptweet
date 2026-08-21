@@ -19,9 +19,8 @@ func (policy Policy) marshalKexInit() ([]byte, error) {
 	payload = append(payload, cookie...)
 	payload = appendNameList(payload, policy.Profile.KeyExchangeAlgorithm)
 	payload = appendNameList(payload, policy.Profile.AuthenticationKeyType)
-	ciphers := joinNames(policy.Profile.Ciphers)
-	payload = appendNameList(payload, ciphers)
-	payload = appendNameList(payload, ciphers)
+	payload = appendNameList(payload, "aes256-gcm@openssh.com")
+	payload = appendNameList(payload, "aes256-gcm@openssh.com")
 	payload = appendNameList(payload, "none")
 	payload = appendNameList(payload, "none")
 	payload = appendNameList(payload, "none")
@@ -36,17 +35,6 @@ func (policy Policy) marshalKexInit() ([]byte, error) {
 func appendNameList(dst []byte, names string) []byte {
 	dst = binary.BigEndian.AppendUint32(dst, uint32(len(names)))
 	return append(dst, names...)
-}
-
-func joinNames(names []string) string {
-	out := ""
-	for i, name := range names {
-		if i > 0 {
-			out += ","
-		}
-		out += name
-	}
-	return out
 }
 
 func marshalDisconnect(description string) []byte {

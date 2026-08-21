@@ -30,6 +30,7 @@ const (
 	sshMsgUserauthRequest      = 50
 	sshMsgUserauthFailure      = 51
 	sshMsgUserauthSuccess      = 52
+	sshMsgUserauthPKOK         = 60
 	sshMsgGlobalRequest        = 80
 	sshMsgRequestSuccess       = 81
 	sshMsgRequestFailure       = 82
@@ -198,7 +199,7 @@ func (c *connection) handleKEX(payload []byte) error {
 		return err
 	}
 	hostBlob := hostKeyBlob(hostPub)
-	secret := sshMpint(shared)
+	secret := sshString(shared)
 	hash := exchangeHash(c.clientID, c.serverID, c.clientKex, c.serverKex, hostBlob, clientPub, serverPub, secret)
 	c.sessionID = append([]byte(nil), hash...)
 	sigRaw, err := c.hostKey.Sign(hash)
@@ -269,7 +270,7 @@ func (c *connection) handleUserauth(payload []byte) error {
 	if err != nil {
 		return err
 	}
-	if string(alg) != composite.Algorithm || !hasSig {
+	if string(alg) != composite.Algorithm {
 		return c.write(userauthFailure())
 	}
 	alg2, restBlob, err := consumeSSHString(pubBlob)
@@ -280,11 +281,20 @@ func (c *connection) handleUserauth(payload []byte) error {
 	if err != nil || len(restBlob) != 0 {
 		return c.write(userauthFailure())
 	}
-	sigWire, rest, err := consumeSSHString(rest)
-	if err != nil || len(rest) != 0 {
+	if !c.knownClient(rawPub) {
 		return c.write(userauthFailure())
 	}
-	if !c.knownClient(rawPub) {
+	if !hasSig {
+		if len(rest) != 0 {
+			return c.write(userauthFailure())
+		}
+		ok := []byte{sshMsgUserauthPKOK}
+		ok = append(ok, sshString([]byte(composite.Algorithm))...)
+		ok = append(ok, sshString(pubBlob)...)
+		return c.write(ok)
+	}
+	sigWire, rest, err := consumeSSHString(rest)
+	if err != nil || len(rest) != 0 {
 		return c.write(userauthFailure())
 	}
 	alg3, sigRest, err := consumeSSHString(sigWire)

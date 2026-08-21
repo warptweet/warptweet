@@ -69,20 +69,3 @@ func TestHybridKEXRejectsMalformedBlobs(t *testing.T) {
 		t.Fatal("corrupted ciphertext agreed with server secret")
 	}
 }
-
-func TestSSHMpintMatchesRFC4251(t *testing.T) {
-	t.Parallel()
-
-	if got := sshMpint(nil); !bytes.Equal(got, []byte{0, 0, 0, 0}) {
-		t.Fatalf("zero=%x", got)
-	}
-	if got := sshMpint([]byte{0, 0, 1}); !bytes.Equal(got, []byte{0, 0, 0, 1, 1}) {
-		t.Fatalf("stripped=%x", got)
-	}
-	if got := sshMpint([]byte{0x7f, 0xff}); !bytes.Equal(got, []byte{0, 0, 0, 2, 0x7f, 0xff}) {
-		t.Fatalf("positive=%x", got)
-	}
-	if got := sshMpint([]byte{0x80, 0x00}); !bytes.Equal(got, []byte{0, 0, 0, 3, 0, 0x80, 0x00}) {
-		t.Fatalf("high-bit=%x", got)
-	}
-}

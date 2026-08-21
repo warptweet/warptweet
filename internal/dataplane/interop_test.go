@@ -206,7 +206,7 @@ func (c *loopbackClient) handshake() error {
 	if err != nil {
 		return err
 	}
-	secret := sshMpint(shared)
+	secret := sshString(shared)
 	hash := exchangeHash(c.clientID, c.serverID, c.clientKex, c.serverKex, hostBlob, clientPub, serverPub, secret)
 	c.sessionID = append([]byte(nil), hash...)
 	alg, sigRest, err := consumeSSHString(sigBlob)
