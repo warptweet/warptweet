@@ -2,17 +2,21 @@ package dataplane
 
 import (
 	"bufio"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"warptweet.com/warptweet/internal/composite"
+	"warptweet.com/warptweet/internal/grantsession"
 	"warptweet.com/warptweet/internal/server"
 )
 
@@ -66,6 +70,10 @@ type connection struct {
 	win                  *sync.Cond
 	channels             map[uint32]*sshChannel
 	nextLocal            uint32
+	grant                *grantsession.Authority
+	sessions             *sessionTable
+	connectionID         string
+	keyDigest            string
 }
 
 type sshChannel struct {
@@ -78,7 +86,7 @@ type sshChannel struct {
 	backend  net.Conn
 }
 
-func serveConnection(raw net.Conn, policy Policy, hostKey composite.PrivateKey, clients [][]byte) error {
+func serveConnection(raw net.Conn, policy Policy, hostKey composite.PrivateKey, clients [][]byte, sessions *sessionTable) error {
 	c := &connection{
 		conn:     raw,
 		reader:   bufio.NewReader(raw),
@@ -88,9 +96,12 @@ func serveConnection(raw net.Conn, policy Policy, hostKey composite.PrivateKey, 
 		clearIn:  true,
 		clearOut: true,
 		channels: map[uint32]*sshChannel{},
+		grant:    policy.Grant,
+		sessions: sessions,
 	}
 	c.win = sync.NewCond(&c.mu)
 	defer raw.Close()
+	defer c.releaseGrant()
 	defer c.teardownChannels()
 	return c.serve()
 }
@@ -317,8 +328,40 @@ func (c *connection) handleUserauth(payload []byte) error {
 		return c.write(userauthFailure())
 	}
 	c.authed = true
+	sum := sha256.Sum256(hostKeyBlob(rawPub))
+	c.keyDigest = hex.EncodeToString(sum[:])
+	connID, err := newConnectionID()
+	if err != nil {
+		return err
+	}
+	c.connectionID = connID
+	if c.grant != nil {
+		if _, err := c.grant.Register(os.Getpid(), c.keyDigest, c.connectionID); err != nil {
+			return c.disconnect("grant session registration failed")
+		}
+		if c.sessions != nil {
+			c.sessions.track(c)
+		}
+	}
 	_ = c.conn.SetDeadline(time.Now().Add(sessionIdleTimeout))
 	return c.write([]byte{sshMsgUserauthSuccess})
+}
+
+func (c *connection) releaseGrant() {
+	if c.sessions != nil {
+		c.sessions.untrack(c.connectionID)
+	}
+	if c.grant != nil && c.connectionID != "" {
+		_ = c.grant.UnregisterConnection(os.Getpid(), c.connectionID)
+	}
+}
+
+func newConnectionID() (string, error) {
+	var raw [16]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(raw[:]), nil
 }
 
 func (c *connection) knownClient(rawPub []byte) bool {

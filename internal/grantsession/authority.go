@@ -85,13 +85,23 @@ func (authority *Authority) Register(pid int, keyBlobSHA256, connectionID string
 
 // Unregister removes sessions for the calling process.
 func (authority *Authority) Unregister(pid int) error {
+	return authority.UnregisterConnection(pid, "")
+}
+
+// UnregisterConnection removes one connection, or every session for pid when connectionID is empty.
+func (authority *Authority) UnregisterConnection(pid int, connectionID string) error {
 	authority.mu.Lock()
 	defer authority.mu.Unlock()
 	if err := authority.lock(); err != nil {
 		return err
 	}
 	defer authority.unlock()
-	return authority.clearPID(pid)
+	if connectionID == "" {
+		return authority.clearPID(pid)
+	}
+	return authority.clearMatching(func(record Record) bool {
+		return record.PID == pid && record.ConnectionID == connectionID
+	})
 }
 
 // Lookup returns durable records for one grant generation.
@@ -195,10 +205,12 @@ func (authority *Authority) listMatching(keep func(Record) bool) ([]Record, erro
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
-		record, err := readRecord(filepath.Join(authority.Root, entry.Name()))
+		path := filepath.Join(authority.Root, entry.Name())
+		record, err := readRecord(path)
 		if err != nil {
 			return nil, err
 		}
+		record.path = path
 		if keep(record) {
 			records = append(records, record)
 		}
@@ -207,12 +219,16 @@ func (authority *Authority) listMatching(keep func(Record) bool) ([]Record, erro
 }
 
 func (authority *Authority) clearPID(pid int) error {
-	records, err := authority.listMatching(func(record Record) bool { return record.PID == pid })
+	return authority.clearMatching(func(record Record) bool { return record.PID == pid })
+}
+
+func (authority *Authority) clearMatching(keep func(Record) bool) error {
+	records, err := authority.listMatching(keep)
 	if err != nil {
 		return err
 	}
 	for _, record := range records {
-		if err := os.Remove(recordPath(authority.Root, record)); err != nil && !os.IsNotExist(err) {
+		if err := os.Remove(recordFile(authority.Root, record)); err != nil && !os.IsNotExist(err) {
 			return err
 		}
 	}

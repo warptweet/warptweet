@@ -20,6 +20,18 @@ func (authority *Authority) Terminate(clientID, generation, publicKeySHA256 stri
 	}
 	var first error
 	for _, record := range records {
+		if isDataPlaneExe(record.Exe) {
+			if err := dropDataPlaneSessions(record.KeyBlobSHA256); err != nil {
+				if first == nil {
+					first = err
+				}
+				continue
+			}
+			if err := osRemove(recordFile(authority.Root, record)); err != nil && first == nil {
+				first = err
+			}
+			continue
+		}
 		identity := ProcessIdentity{BootID: record.BootID, PID: record.PID, StartTime: record.StartTime, Exe: record.Exe}
 		if err := signalIdentity(identity, syscall.SIGTERM); err != nil && first == nil {
 			first = err
@@ -46,11 +58,14 @@ func (authority *Authority) VerifyGone(clientID, generation, publicKeySHA256 str
 		return err
 	}
 	for _, record := range records {
+		if isDataPlaneExe(record.Exe) {
+			return fmt.Errorf("data-plane session %s for client %s is still registered", record.ConnectionID, clientID)
+		}
 		identity := ProcessIdentity{BootID: record.BootID, PID: record.PID, StartTime: record.StartTime, Exe: record.Exe}
 		if identityAlive(identity) {
 			return fmt.Errorf("session pid %d for client %s generation %s is still running", record.PID, clientID, generation)
 		}
-		if err := osRemove(recordPath(authority.Root, record)); err != nil {
+		if err := osRemove(recordFile(authority.Root, record)); err != nil {
 			return err
 		}
 	}
@@ -71,6 +86,18 @@ func (authority *Authority) TerminateAll() error {
 	}
 	var first error
 	for _, record := range records {
+		if isDataPlaneExe(record.Exe) {
+			if err := dropDataPlaneSessions(record.KeyBlobSHA256); err != nil {
+				if first == nil {
+					first = err
+				}
+				continue
+			}
+			if err := osRemove(recordFile(authority.Root, record)); err != nil && first == nil {
+				first = err
+			}
+			continue
+		}
 		identity := ProcessIdentity{BootID: record.BootID, PID: record.PID, StartTime: record.StartTime, Exe: record.Exe}
 		if err := signalIdentity(identity, syscall.SIGTERM); err != nil && first == nil {
 			first = err

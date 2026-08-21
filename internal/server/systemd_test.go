@@ -27,6 +27,7 @@ func TestWarpTweetSSHDUnitUsesBundledValidatedConfiguration(t *testing.T) {
 		"PrivateDevices=yes",
 		"RestrictNamespaces=yes",
 		"RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK",
+		"ReadWritePaths=/run/warptweet/sshd /run/warptweet/server /var/lib/warptweet/sessions /var/lib/warptweet/grant.lock -/run/utmp -/var/log/btmp -/var/log/lastlog",
 	)
 
 	for _, forbidden := range []string{

@@ -22,6 +22,8 @@ const (
 	ActionRegister = "register"
 	// ActionUnregister is sent on normal disconnect cleanup.
 	ActionUnregister = "unregister"
+	// ActionDrop closes matching data-plane connections without killing the daemon.
+	ActionDrop       = "drop"
 	MaxRequestBytes  = 4 << 10
 	MaxResponseBytes = 2 << 10
 	// MaxRecordBytes bounds one persisted session document. It is independent of
@@ -56,7 +58,7 @@ func ValidateRequest(request Request) error {
 		return fmt.Errorf("%w: unsupported protocol version %d", ErrRejected, request.Version)
 	}
 	switch request.Action {
-	case ActionRegister:
+	case ActionRegister, ActionDrop:
 		if len(request.KeySHA256) != 64 || !isLowerHex(request.KeySHA256) {
 			return fmt.Errorf("%w: key_sha256 must be 64 lowercase hex characters", ErrRejected)
 		}
@@ -110,6 +112,16 @@ func encodeResponse(response Response) []byte {
 		return []byte(`{"ok":false,"error":"encode"}` + "\n")
 	}
 	return append(raw, '\n')
+}
+
+// EncodeOK is a successful control-socket reply.
+func EncodeOK() []byte {
+	return encodeResponse(Response{OK: true})
+}
+
+// EncodeError is a failed control-socket reply.
+func EncodeError(message string) []byte {
+	return encodeResponse(Response{OK: false, Error: message})
 }
 
 func readBounded(reader io.Reader, maximum int) ([]byte, error) {

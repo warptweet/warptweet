@@ -5,6 +5,7 @@ import (
 	"net/netip"
 
 	"warptweet.com/warptweet/internal/enrollment"
+	"warptweet.com/warptweet/internal/grantsession"
 	"warptweet.com/warptweet/internal/profile"
 	"warptweet.com/warptweet/internal/server"
 )
@@ -25,6 +26,8 @@ type Policy struct {
 	Management         netip.AddrPort
 	HostKeyPath        string
 	AuthorizedKeysPath string
+	Grant              *grantsession.Authority
+	ControlSocket      string
 }
 
 // NewPolicy derives the data-plane policy from a validated server manifest.

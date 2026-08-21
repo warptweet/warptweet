@@ -14,8 +14,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -601,7 +599,7 @@ func productionGrantAuthority() *grantsession.Authority {
 		Root:        installlayout.GrantSessionsDirectory,
 		Clients:     installlayout.ClientsDirectory,
 		LockPath:    installlayout.GrantAuthorityLockPath,
-		ExpectedExe: installlayout.SSHDSessionPath,
+		ExpectedExe: installlayout.ControllerPath,
 	}
 }
 
@@ -669,55 +667,21 @@ func processAlivePID(pid int) bool {
 }
 
 func liveDataPlaneSessionCount() (int, error) {
-	if runtime.GOOS != "linux" {
-		return 0, fmt.Errorf("data-plane session inspection requires Linux")
-	}
-	entries, err := os.ReadDir("/proc")
+	entries, err := os.ReadDir(installlayout.GrantSessionsDirectory)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil
+		}
 		return 0, err
 	}
-	sshdPIDs := make(map[int]int)
+	count := 0
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".json" {
 			continue
 		}
-		pid, err := strconv.Atoi(entry.Name())
-		if err != nil || pid <= 0 {
-			continue
-		}
-		exe, err := os.Readlink(filepath.Join("/proc", entry.Name(), "exe"))
-		if err != nil || exe != installlayout.SSHDPath {
-			continue
-		}
-		ppid, err := linuxPPID(pid)
-		if err != nil {
-			return 0, err
-		}
-		sshdPIDs[pid] = ppid
+		count++
 	}
-	sessions := 0
-	for _, ppid := range sshdPIDs {
-		if _, parentIsSSHD := sshdPIDs[ppid]; parentIsSSHD {
-			sessions++
-		}
-	}
-	return sessions, nil
-}
-
-func linuxPPID(pid int) (int, error) {
-	contents, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
-	if err != nil {
-		return 0, err
-	}
-	closeParen := strings.LastIndexByte(string(contents), ')')
-	if closeParen < 0 || closeParen+1 >= len(contents) {
-		return 0, fmt.Errorf("parse /proc/%d/stat", pid)
-	}
-	fields := strings.Fields(string(contents[closeParen+1:]))
-	if len(fields) < 2 {
-		return 0, fmt.Errorf("parse /proc/%d/stat ppid", pid)
-	}
-	return strconv.Atoi(fields[1])
+	return count, nil
 }
 
 func reconcileManagedAuthorizations(manifest server.Config) error {

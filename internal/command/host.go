@@ -19,7 +19,6 @@ import (
 	"time"
 
 	"warptweet.com/warptweet/internal/artifactprofile"
-	"warptweet.com/warptweet/internal/engine"
 	"warptweet.com/warptweet/internal/enrollment"
 	"warptweet.com/warptweet/internal/grant"
 	"warptweet.com/warptweet/internal/installlayout"
@@ -907,18 +906,15 @@ func ensureSSHDStarted(ctx context.Context, manifest server.Config) (string, err
 	if probeTCPListener(endpoint) {
 		return "", fmt.Errorf("listener %s is already occupied outside the packaged WarpTweet service", endpoint)
 	}
-	if _, err := engine.PreflightServer(ctx, manifest); err != nil {
-		return "", err
-	}
 	if err := os.MkdirAll(serverStateDirectory, 0o700); err != nil {
 		return "", err
 	}
-	logPath := filepath.Join(serverStateDirectory, "sshd.log")
+	logPath := filepath.Join(serverStateDirectory, "dataplane.log")
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return "", err
 	}
-	cmd := exec.Command(installlayout.SSHDPath, "-D", "-e", "-f", installlayout.ServerConfigPath)
+	cmd := exec.Command(installlayout.ControllerPath, "server", "data-plane")
 	cmd.Stdout = logFile
 	cmd.Stderr = logFile
 	cmd.Env = []string{"LANG=C", "LC_ALL=C"}
@@ -927,7 +923,7 @@ func ensureSSHDStarted(ctx context.Context, manifest server.Config) (string, err
 		_ = logFile.Close()
 		return "", err
 	}
-	pidPath := filepath.Join(serverStateDirectory, "sshd.pid")
+	pidPath := filepath.Join(serverStateDirectory, "dataplane.pid")
 	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o600); err != nil {
 		_ = cmd.Process.Kill()
 		_ = logFile.Close()
@@ -940,7 +936,7 @@ func ensureSSHDStarted(ctx context.Context, manifest server.Config) (string, err
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if err := cmd.Process.Signal(syscall.Signal(0)); err != nil {
-			return "", fmt.Errorf("sshd exited before listening: %w", err)
+			return "", fmt.Errorf("data plane exited before listening: %w", err)
 		}
 		if probeTCPListener(endpoint) {
 			return "direct_ready", nil
@@ -948,7 +944,7 @@ func ensureSSHDStarted(ctx context.Context, manifest server.Config) (string, err
 		time.Sleep(50 * time.Millisecond)
 	}
 	_ = cmd.Process.Signal(syscall.SIGTERM)
-	return "", errors.New("sshd did not begin listening before the readiness deadline")
+	return "", errors.New("data plane did not begin listening before the readiness deadline")
 }
 
 func probeTCPListener(endpoint netip.AddrPort) bool {

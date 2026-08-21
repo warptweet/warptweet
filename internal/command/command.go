@@ -32,7 +32,7 @@ import (
 )
 
 const (
-	Version      = "0.1.0-rc.4"
+	Version      = "0.1.0-rc.5"
 	manifestSize = 1 << 20
 )
 

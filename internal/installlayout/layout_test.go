@@ -40,6 +40,10 @@ func TestFixedInstallLayoutIsAbsoluteAndContained(t *testing.T) {
 		LinuxProvisionerPath,
 		LinuxProvisionerRunRoot,
 		LinuxProvisionerSocket,
+		GrantSessionsDirectory,
+		GrantSessionSocket,
+		GrantAuthorityLockPath,
+		DataPlaneControlSocket,
 	} {
 		if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 			t.Errorf("fixed path %q is not clean and absolute", path)

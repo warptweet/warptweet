@@ -221,12 +221,54 @@ func TestRegisterAndUnregisterRemovesRecord(t *testing.T) {
 	if err != nil || len(records) != 1 {
 		t.Fatalf("lookup after register records=%d err=%v", len(records), err)
 	}
+	if _, err := authority.Register(4242, keyDigest, "conn-b"); err != nil {
+		t.Fatalf("second register: %v", err)
+	}
+	if err := authority.UnregisterConnection(4242, "20260816T120000Z-4242"); err != nil {
+		t.Fatalf("unregister connection: %v", err)
+	}
+	records, err = authority.Lookup("aaaaaaaaaaaaaaaa", "20260816T120000Z", enrollment.PublicKeyDigest(publicKey))
+	if err != nil || len(records) != 1 {
+		t.Fatalf("lookup after one unregister records=%d err=%v", len(records), err)
+	}
 	if err := authority.Unregister(4242); err != nil {
 		t.Fatalf("unregister: %v", err)
 	}
 	records, err = authority.Lookup("aaaaaaaaaaaaaaaa", "20260816T120000Z", enrollment.PublicKeyDigest(publicKey))
 	if err != nil || len(records) != 0 {
 		t.Fatalf("lookup after unregister records=%d err=%v", len(records), err)
+	}
+}
+
+func TestClearMatchingRemovesLegacyPIDNamedRecords(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	record := Record{
+		Kind:            Kind,
+		SchemaVersion:   SchemaVersion,
+		GrantID:         "bbbbbbbbbbbbbbbb",
+		ClientID:        "aaaaaaaaaaaaaaaa",
+		Generation:      "20260816T120000Z",
+		PublicKeySHA256: strings.Repeat("a", 64),
+		KeyBlobSHA256:   strings.Repeat("b", 64),
+		BootID:          "boot-1",
+		PID:             4242,
+		StartTime:       "99",
+		Exe:             "/opt/warptweet/bin/warptweet",
+		ConnectionID:    "conn-legacy",
+		RegisteredAt:    "2026-08-16T12:00:00Z",
+	}
+	legacy := filepath.Join(root, "aaaaaaaaaaaaaaaa-20260816T120000Z-4242.json")
+	if err := writeRecord(legacy, record); err != nil {
+		t.Fatal(err)
+	}
+	authority := &Authority{Root: root}
+	if err := authority.Unregister(4242); err != nil {
+		t.Fatalf("unregister: %v", err)
+	}
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Fatal("legacy PID-named record remained")
 	}
 }
 

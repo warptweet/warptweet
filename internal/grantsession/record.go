@@ -27,6 +27,7 @@ type Record struct {
 	Exe             string `json:"exe"`
 	ConnectionID    string `json:"connection_id"`
 	RegisteredAt    string `json:"registered_at"`
+	path            string
 }
 
 // ProcessIdentity cannot be confused by PID reuse.
@@ -61,8 +62,19 @@ func validateRecord(record Record) error {
 }
 
 func recordPath(root string, record Record) string {
-	name := record.ClientID + "-" + record.Generation + "-" + strconv.Itoa(record.PID) + ".json"
+	id := record.ConnectionID
+	if id == "" {
+		id = strconv.Itoa(record.PID)
+	}
+	name := record.ClientID + "-" + record.Generation + "-" + id + ".json"
 	return filepath.Join(root, name)
+}
+
+func recordFile(root string, record Record) string {
+	if record.path != "" {
+		return record.path
+	}
+	return recordPath(root, record)
 }
 
 func writeRecord(path string, record Record) error {

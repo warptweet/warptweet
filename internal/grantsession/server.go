@@ -81,10 +81,13 @@ func (server *Server) handle(connection net.Conn) {
 			return
 		}
 	case ActionUnregister:
-		if err := server.Authority.Unregister(pid); err != nil {
+		if err := server.Authority.UnregisterConnection(pid, request.Connection); err != nil {
 			_, _ = connection.Write(encodeResponse(Response{OK: false, Error: err.Error()}))
 			return
 		}
+	default:
+		_, _ = connection.Write(encodeResponse(Response{OK: false, Error: "unsupported action"}))
+		return
 	}
 	_, _ = connection.Write(encodeResponse(Response{OK: true}))
 }

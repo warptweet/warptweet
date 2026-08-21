@@ -57,13 +57,39 @@ func Serve(ctx context.Context, policy Policy, stdout io.Writer) error {
 	if stdout != nil {
 		_, _ = fmt.Fprintf(stdout, "data plane listening\nlisten   %s\ntarget   %s\n", policy.Listen, policy.Target)
 	}
+	sessions := &sessionTable{}
+	controlErr := make(chan error, 1)
+	if policy.ControlSocket != "" {
+		control, err := listenControl(policy.ControlSocket)
+		if err != nil {
+			_ = listener.Close()
+			return fmt.Errorf("control socket: %w", err)
+		}
+		done := ctx.Done()
+		go func() {
+			err := serveControl(done, control, sessions)
+			if ctx.Err() != nil {
+				controlErr <- nil
+				return
+			}
+			controlErr <- err
+			_ = listener.Close()
+		}()
+	}
 	slots := make(chan struct{}, 64)
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
+			closeTracked()
 			if ctx.Err() != nil {
-				closeTracked()
 				return nil
+			}
+			select {
+			case cerr := <-controlErr:
+				if cerr != nil {
+					return cerr
+				}
+			default:
 			}
 			return err
 		}
@@ -91,7 +117,7 @@ func Serve(ctx context.Context, policy Policy, stdout io.Writer) error {
 				<-slots
 			}()
 			_ = conn.SetDeadline(time.Now().Add(handshakeTimeout))
-			_ = serveConnection(conn, policy, hostKey, clients)
+			_ = serveConnection(conn, policy, hostKey, clients, sessions)
 		}(conn)
 	}
 }
