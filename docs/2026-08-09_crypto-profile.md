@@ -12,7 +12,7 @@ The current immutable profile is:
 
 | Field | Exact value |
 | --- | --- |
-| Profile ID | `warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519` |
+| Profile ID | `warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519-chacha20` |
 | Engine version | `OpenSSH_10.4p1` |
 | OpenSSL version | `3.5.7` |
 | Exact OpenSSL version text | `OpenSSL 3.5.7 9 Jun 2026` |
@@ -20,8 +20,7 @@ The current immutable profile is:
 | Executable format | `ELF` |
 | Key exchange | `mlkem768x25519-sha256` |
 | Authentication key type | `ssh-mldsa44-ed25519@openssh.com` |
-| Cipher preference 1 | `chacha20-poly1305@openssh.com` |
-| Cipher preference 2 | `aes256-gcm@openssh.com` |
+| Cipher | `chacha20-poly1305@openssh.com` |
 | Authentication binding status | `openssh-vendor-qualified` |
 | Support status | `published-matrix` |
 
@@ -84,14 +83,11 @@ The product uses the raw key type only. The OpenSSH certificate variant, classic
 
 ## Transport encryption
 
-Both permitted ciphers are authenticated-encryption constructions. A separately selected SSH MAC is not part of the data protection when either is negotiated.
+The only permitted cipher is `chacha20-poly1305@openssh.com`. It is an authenticated-encryption construction. A separately selected SSH MAC is not part of the data protection. Negotiation of `aes256-gcm@openssh.com` or any other encryption algorithm is a profile violation.
 
 | SSH name | Construction | Standards position |
 | --- | --- | --- |
 | `chacha20-poly1305@openssh.com` | OpenSSH ChaCha20-Poly1305 with encrypted packet length | Widely deployed vendor-qualified name; the equivalent unqualified binding is an SSHM working-group draft in last call: [draft-ietf-sshm-chacha20-poly1305-04](https://datatracker.ietf.org/doc/html/draft-ietf-sshm-chacha20-poly1305-04) |
-| `aes256-gcm@openssh.com` | AES-256-GCM for SSH | OpenSSH name for the AES-256-GCM construction in [RFC 5647](https://www.rfc-editor.org/rfc/rfc5647.html); [RFC 9212](https://www.rfc-editor.org/rfc/rfc9212.html) explicitly identifies the OpenSSH name and adds counter guidance |
-
-The listed order is the product preference order. Negotiation of either is acceptable. Negotiation of any other encryption algorithm is a profile violation.
 
 ## Authentication binding and support status
 
@@ -123,7 +119,7 @@ Both managed endpoints MUST replace OpenSSH algorithm defaults with exact lists 
 KexAlgorithms mlkem768x25519-sha256
 HostKeyAlgorithms ssh-mldsa44-ed25519@openssh.com
 PubkeyAcceptedAlgorithms ssh-mldsa44-ed25519@openssh.com
-Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com
+Ciphers chacha20-poly1305@openssh.com
 Compression no
 ```
 

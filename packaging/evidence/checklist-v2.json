@@ -1,7 +1,7 @@
 {
   "kind": "warptweet.release-evidence-checklist",
   "schema_version": 2,
-  "profile_id": "warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519",
+  "profile_id": "warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519-chacha20",
   "requires_package_to_package": true,
   "forbids_source_tree_substitution": true,
   "positive": [

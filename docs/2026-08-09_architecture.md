@@ -114,7 +114,7 @@ These invariants apply to initial key exchange and every rekey:
 - Host authentication MUST use `ssh-mldsa44-ed25519@openssh.com` and a preprovisioned exact host key. Trust on first use is forbidden.
 - Client authentication MUST use public-key authentication with `ssh-mldsa44-ed25519@openssh.com`. Password, keyboard-interactive, GSSAPI, host-based, and classical-only public keys are forbidden.
 - Both ML-DSA-44 and Ed25519 verification operations MUST succeed for a composite signature to succeed.
-- The negotiated cipher MUST be one of `chacha20-poly1305@openssh.com` or `aes256-gcm@openssh.com`. No `none`, CBC, or CTR cipher is accepted. A protocol-level MAC selection is not used by these AEAD ciphers and cannot expand the profile.
+- The negotiated cipher MUST be `chacha20-poly1305@openssh.com`. No `none`, CBC, CTR, or AES-GCM cipher is accepted. A protocol-level MAC selection is not used by this AEAD cipher and cannot expand the profile.
 - Compression MUST be disabled for the MVP.
 - The effective algorithm lists MUST be exact replacements, not additions to OpenSSH defaults.
 - A peer with no mutually supported required algorithm is incompatible. Compatibility fallback is forbidden.

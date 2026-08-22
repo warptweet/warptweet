@@ -28,12 +28,51 @@ func TestKexInitAdvertisesOnlyThePinnedProfile(t *testing.T) {
 	if hostKey != policy.Profile.AuthenticationKeyType {
 		t.Fatalf("hostkey=%q", hostKey)
 	}
-	if c2s != s2c || !strings.Contains(c2s, "aes256-gcm@openssh.com") {
+	if c2s != s2c || !strings.Contains(c2s, "chacha20-poly1305@openssh.com") || strings.Contains(c2s, "aes256-gcm@openssh.com") {
 		t.Fatalf("ciphers c2s=%q s2c=%q", c2s, s2c)
 	}
 	if strings.Contains(kex, ",") || strings.Contains(hostKey, ",") {
 		t.Fatal("KEXINIT advertised more than one KEX or host key algorithm")
 	}
+}
+
+func TestClientOffersPinnedAlgorithmsRejectsAESOnly(t *testing.T) {
+	t.Parallel()
+
+	policy := mustPolicy(t)
+	kex := fakeClientKexInit(t, policy.Profile.KeyExchangeAlgorithm, policy.Profile.AuthenticationKeyType, "aes256-gcm@openssh.com")
+	if err := clientOffersPinnedAlgorithms(kex, policy); err == nil {
+		t.Fatal("accepted AES-GCM-only client KEXINIT")
+	}
+}
+
+func TestClientOffersPinnedAlgorithmsAcceptsChaCha20(t *testing.T) {
+	t.Parallel()
+
+	policy := mustPolicy(t)
+	kex := fakeClientKexInit(t, policy.Profile.KeyExchangeAlgorithm, policy.Profile.AuthenticationKeyType, "chacha20-poly1305@openssh.com")
+	if err := clientOffersPinnedAlgorithms(kex, policy); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func fakeClientKexInit(t *testing.T, kex, hostKey, cipher string) []byte {
+	t.Helper()
+	payload := []byte{sshMsgKexInit}
+	payload = append(payload, make([]byte, 16)...)
+	payload = appendNameList(payload, kex)
+	payload = appendNameList(payload, hostKey)
+	payload = appendNameList(payload, cipher)
+	payload = appendNameList(payload, cipher)
+	payload = appendNameList(payload, "none")
+	payload = appendNameList(payload, "none")
+	payload = appendNameList(payload, "none")
+	payload = appendNameList(payload, "none")
+	payload = appendNameList(payload, "")
+	payload = appendNameList(payload, "")
+	payload = append(payload, 0)
+	payload = binary.BigEndian.AppendUint32(payload, 0)
+	return payload
 }
 
 func mustNameList(t *testing.T, input []byte) (string, []byte) {

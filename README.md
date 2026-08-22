@@ -24,13 +24,13 @@ The only current profile is Profile v1. It is immutable and fail closed:
 
 | Field | Exact value |
 | --- | --- |
-| Profile ID | `warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519` |
+| Profile ID | `warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519-chacha20` |
 | Engine | `OpenSSH_10.4p1` |
 | OpenSSL | `3.5.7`; exact version text `OpenSSL 3.5.7 9 Jun 2026` |
 | Executable contract | Linux ELF with static OpenSSL linkage, no RPATH or RUNPATH |
 | Key exchange | `mlkem768x25519-sha256` |
 | Host and client authentication key | `ssh-mldsa44-ed25519@openssh.com` |
-| Cipher preference | `chacha20-poly1305@openssh.com`, then `aes256-gcm@openssh.com` |
+| Cipher | `chacha20-poly1305@openssh.com` |
 | Authentication binding status | `openssh-vendor-qualified` |
 | Support status | `published-matrix` |
 

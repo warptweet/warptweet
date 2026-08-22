@@ -52,6 +52,7 @@ const (
 	handshakeTimeout           = 15 * time.Second
 	sessionIdleTimeout         = 5 * time.Minute
 	windowAdjustThreshold      = 1 << 20
+	maxSSHSeq                  = uint64(^uint32(0))
 )
 
 type connection struct {
@@ -61,7 +62,8 @@ type connection struct {
 	hostKey              composite.PrivateKey
 	clients              [][]byte
 	clearIn, clearOut    bool
-	in, out              *gcmDirection
+	in, out              packetCodec
+	inSeq, outSeq        uint64
 	clientID, serverID   string
 	clientKex, serverKex []byte
 	sessionID            []byte
@@ -224,12 +226,12 @@ func (c *connection) handleKEX(payload []byte) error {
 	if err := c.write(reply); err != nil {
 		return err
 	}
-	ivA, ivB, keyC, keyD := deriveKeys(secret, hash)
-	c.out, err = newGCMDirection(keyD, ivB)
+	keyC, keyD := deriveKeys(secret, hash)
+	c.out, err = newChaChaDirection(keyD)
 	if err != nil {
 		return err
 	}
-	c.in, err = newGCMDirection(keyC, ivA)
+	c.in, err = newChaChaDirection(keyC)
 	if err != nil {
 		return err
 	}
@@ -416,31 +418,61 @@ func (c *connection) readIdentification() (string, error) {
 	return line, nil
 }
 
+func checkSSHSeq(seq uint64) error {
+	if seq > maxSSHSeq {
+		return fmt.Errorf("SSH packet sequence exhausted")
+	}
+	return nil
+}
+
 func (c *connection) write(payload []byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.authed {
 		_ = c.conn.SetDeadline(time.Now().Add(sessionIdleTimeout))
 	}
-	if c.clearOut {
-		return writePacket(c.conn, payload)
+	if err := checkSSHSeq(c.outSeq); err != nil {
+		return err
 	}
-	frame, err := c.out.seal(payload)
+	if c.clearOut {
+		if err := writePacket(c.conn, payload); err != nil {
+			return err
+		}
+		c.outSeq++
+		return nil
+	}
+	frame, err := c.out.seal(c.outSeq, payload)
 	if err != nil {
 		return err
 	}
-	_, err = c.conn.Write(frame)
-	return err
+	if _, err := c.conn.Write(frame); err != nil {
+		return err
+	}
+	c.outSeq++
+	return nil
 }
 
 func (c *connection) read() ([]byte, error) {
 	if c.authed {
 		_ = c.conn.SetDeadline(time.Now().Add(sessionIdleTimeout))
 	}
-	if c.clearIn {
-		return readClearPacket(c.reader)
+	if err := checkSSHSeq(c.inSeq); err != nil {
+		return nil, err
 	}
-	return c.in.open(c.reader)
+	if c.clearIn {
+		payload, err := readClearPacket(c.reader)
+		if err != nil {
+			return nil, err
+		}
+		c.inSeq++
+		return payload, nil
+	}
+	payload, err := c.in.open(c.inSeq, c.reader)
+	if err != nil {
+		return nil, err
+	}
+	c.inSeq++
+	return payload, nil
 }
 
 func (c *connection) teardownChannels() {
@@ -536,12 +568,9 @@ func appendKexInitHash(dst, kex []byte) []byte {
 	return append(dst, body...)
 }
 
-func deriveKeys(secret, hash []byte) (ivA, ivB, keyC, keyD []byte) {
-	const need = 32
-	return deriveOne(secret, hash, hash, 'A', need),
-		deriveOne(secret, hash, hash, 'B', need),
-		deriveOne(secret, hash, hash, 'C', need),
-		deriveOne(secret, hash, hash, 'D', need)
+func deriveKeys(secret, hash []byte) (keyC, keyD []byte) {
+	return deriveOne(secret, hash, hash, 'C', chachaKeyTotal),
+		deriveOne(secret, hash, hash, 'D', chachaKeyTotal)
 }
 
 func clientOffersPinnedAlgorithms(kex []byte, policy Policy) error {
@@ -575,8 +604,9 @@ func clientOffersPinnedAlgorithms(kex []byte, policy Policy) error {
 	if !nameListContains(string(hostList), policy.Profile.AuthenticationKeyType) {
 		return fmt.Errorf("client KEXINIT missing %s", policy.Profile.AuthenticationKeyType)
 	}
-	if !nameListContains(string(c2s), "aes256-gcm@openssh.com") || !nameListContains(string(s2c), "aes256-gcm@openssh.com") {
-		return fmt.Errorf("client KEXINIT missing aes256-gcm@openssh.com")
+	cipherName := policy.Profile.Ciphers[0]
+	if !nameListContains(string(c2s), cipherName) || !nameListContains(string(s2c), cipherName) {
+		return fmt.Errorf("client KEXINIT missing %s", cipherName)
 	}
 	return nil
 }

@@ -27,7 +27,7 @@ HostKey /var/lib/warptweet/ssh/ssh_host_mldsa44_ed25519_key
 HostKeyAlgorithms ssh-mldsa44-ed25519@openssh.com
 KexAlgorithms mlkem768x25519-sha256
 PubkeyAcceptedAlgorithms ssh-mldsa44-ed25519@openssh.com
-Ciphers chacha20-poly1305@openssh.com,aes256-gcm@openssh.com
+Ciphers chacha20-poly1305@openssh.com
 RekeyLimit 512M 1h
 Compression no
 AuthenticationMethods publickey

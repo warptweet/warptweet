@@ -139,7 +139,8 @@ type loopbackClient struct {
 	conn                 net.Conn
 	reader               *bufio.Reader
 	clearIn, clearOut    bool
-	in, out              *gcmDirection
+	in, out              packetCodec
+	inSeq, outSeq        uint64
 	clientID, serverID   string
 	clientKex, serverKex []byte
 	sessionID            []byte
@@ -228,12 +229,12 @@ func (c *loopbackClient) handshake() error {
 	if err := composite.Verify(rawHost, hash, rawSig); err != nil {
 		return err
 	}
-	ivA, ivB, keyC, keyD := deriveKeys(secret, hash)
-	c.out, err = newGCMDirection(keyC, ivA)
+	keyC, keyD := deriveKeys(secret, hash)
+	c.out, err = newChaChaDirection(keyC)
 	if err != nil {
 		return err
 	}
-	c.in, err = newGCMDirection(keyD, ivB)
+	c.in, err = newChaChaDirection(keyD)
 	if err != nil {
 		return err
 	}
@@ -373,21 +374,38 @@ func (c *loopbackClient) recvData(localID uint32) ([]byte, error) {
 
 func (c *loopbackClient) write(payload []byte) error {
 	if c.clearOut {
-		return writePacket(c.conn, payload)
+		if err := writePacket(c.conn, payload); err != nil {
+			return err
+		}
+		c.outSeq++
+		return nil
 	}
-	frame, err := c.out.seal(payload)
+	frame, err := c.out.seal(c.outSeq, payload)
 	if err != nil {
 		return err
 	}
-	_, err = c.conn.Write(frame)
-	return err
+	if _, err := c.conn.Write(frame); err != nil {
+		return err
+	}
+	c.outSeq++
+	return nil
 }
 
 func (c *loopbackClient) read() ([]byte, error) {
 	if c.clearIn {
-		return readClearPacket(c.reader)
+		payload, err := readClearPacket(c.reader)
+		if err != nil {
+			return nil, err
+		}
+		c.inSeq++
+		return payload, nil
 	}
-	return c.in.open(c.reader)
+	payload, err := c.in.open(c.inSeq, c.reader)
+	if err != nil {
+		return nil, err
+	}
+	c.inSeq++
+	return payload, nil
 }
 
 func startEchoBackend(t *testing.T) (net.Listener, netip.AddrPort) {

@@ -12,7 +12,7 @@ make build
 ./bin/warptweet profile
 ```
 
-The profile command must report `authentication_binding_status: "openssh-vendor-qualified"`, `support_status: "published-matrix"`, the exact profile ID `warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519`, OpenSSL version `3.5.7`, exact version text `OpenSSL 3.5.7 9 Jun 2026`, static linkage, and ELF executable format.
+The profile command must report `authentication_binding_status: "openssh-vendor-qualified"`, `support_status: "published-matrix"`, the exact profile ID `warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519-chacha20`, OpenSSL version `3.5.7`, exact version text `OpenSSL 3.5.7 9 Jun 2026`, static linkage, and ELF executable format.
 
 ## Authenticated Linux engine build
 
@@ -70,7 +70,7 @@ On 2026-08-10, OpenSSH 10.4p1 configured and compiled in this macOS workspace ag
 
 - distinct composite host and client key generation with `ssh-keygen -t mldsa44-ed25519`;
 - composite SSHSIG signing and verification, including rejection of a modified payload;
-- OpenSSH algorithm queries for `mlkem768x25519-sha256`, `ssh-mldsa44-ed25519@openssh.com`, `chacha20-poly1305@openssh.com`, and `aes256-gcm@openssh.com`;
+- OpenSSH algorithm queries for `mlkem768x25519-sha256`, `ssh-mldsa44-ed25519@openssh.com`, and `chacha20-poly1305@openssh.com`;
 - managed host-pin and authorized-client rendering from the real composite public keys;
 - the then-current WarpTweet client integration in [`tests/integration/openssh_test.go`](../tests/integration/openssh_test.go), including real executable hashing, version and capability checks, effective client configuration, and `doctor` output with `"status":"preflight_ready"`.
 

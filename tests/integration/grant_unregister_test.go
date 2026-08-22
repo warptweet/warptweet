@@ -40,7 +40,7 @@ func TestKeyAuthenticatedSessionRemovesRegistrarRecord(t *testing.T) {
 		PublicKeySHA256:              enrollment.PublicKeyDigest(publicKey),
 		ManagementTokenSHA256:        "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
 		Principal:                    "warptweet",
-		ProfileID:                    "warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519",
+		ProfileID:                    "warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519-chacha20",
 		Status:                       enrollment.ClientStatusActive,
 		AcceptedAt:                   "2026-08-16T12:00:00Z",
 		AuthorizationNotAfter:        notAfter,

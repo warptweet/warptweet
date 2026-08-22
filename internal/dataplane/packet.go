@@ -1,88 +1,136 @@
 package dataplane
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/binary"
 	"fmt"
 	"io"
+
+	"golang.org/x/crypto/chacha20"
+	"golang.org/x/crypto/poly1305"
 )
 
 const (
-	maxPacket     = 256 << 10
-	gcmTagSize    = 16
-	gcmNonceSize  = 12
-	aesGCMKeySize = 32
+	maxPacket       = 256 << 10
+	chachaKeySize   = 32
+	chachaKeyTotal  = 64
+	chachaNonceSize = 12
+	poly1305TagSize = 16
+	chachaBlock     = 8
 )
 
-type gcmDirection struct {
-	aead cipher.AEAD
-	iv   [gcmNonceSize]byte
-	seq  uint32
+type packetCodec interface {
+	seal(seq uint64, payload []byte) ([]byte, error)
+	open(seq uint64, r io.Reader) ([]byte, error)
 }
 
-func newGCMDirection(key, iv []byte) (*gcmDirection, error) {
-	if len(key) < aesGCMKeySize || len(iv) < gcmNonceSize {
-		return nil, fmt.Errorf("AES-256-GCM key/iv too short")
+type chachaDirection struct {
+	payloadKey [chachaKeySize]byte
+	lengthKey  [chachaKeySize]byte
+}
+
+func newChaChaDirection(key []byte) (*chachaDirection, error) {
+	if len(key) < chachaKeyTotal {
+		return nil, fmt.Errorf("chacha20-poly1305 key is %d bytes, want %d", len(key), chachaKeyTotal)
 	}
-	block, err := aes.NewCipher(key[:aesGCMKeySize])
-	if err != nil {
-		return nil, err
-	}
-	aead, err := cipher.NewGCM(block)
-	if err != nil {
-		return nil, err
-	}
-	d := &gcmDirection{aead: aead}
-	copy(d.iv[:], iv[:gcmNonceSize])
+	d := &chachaDirection{}
+	copy(d.payloadKey[:], key[:chachaKeySize])
+	copy(d.lengthKey[:], key[chachaKeySize:chachaKeyTotal])
 	return d, nil
 }
 
-func (d *gcmDirection) seal(payload []byte) ([]byte, error) {
-	body, err := padPayload(payload, 16)
+func seqNonce(seq uint64) [chachaNonceSize]byte {
+	var n [chachaNonceSize]byte
+	binary.BigEndian.PutUint64(n[4:], seq)
+	return n
+}
+
+func (d *chachaDirection) seal(seq uint64, payload []byte) ([]byte, error) {
+	if len(payload) == 0 {
+		return nil, fmt.Errorf("empty SSH payload")
+	}
+	body, err := padPayload(payload, chachaBlock)
 	if err != nil {
 		return nil, err
 	}
-	aad := binary.BigEndian.AppendUint32(nil, uint32(len(body)))
-	nonce := d.iv
-	ct := d.aead.Seal(nil, nonce[:], body, aad)
-	incrementIV(&d.iv)
-	d.seq++
-	out := append(aad, ct...)
-	return out, nil
-}
-
-func (d *gcmDirection) open(r io.Reader) ([]byte, error) {
-	var lenBuf [4]byte
-	if _, err := io.ReadFull(r, lenBuf[:]); err != nil {
+	nonce := seqNonce(seq)
+	encLen := make([]byte, 4)
+	binary.BigEndian.PutUint32(encLen, uint32(len(body)))
+	lengthStream, err := chacha20.NewUnauthenticatedCipher(d.lengthKey[:], nonce[:])
+	if err != nil {
 		return nil, err
 	}
-	n := binary.BigEndian.Uint32(lenBuf[:])
+	lengthStream.XORKeyStream(encLen, encLen)
+	encBody := make([]byte, len(body))
+	payloadStream, err := chacha20.NewUnauthenticatedCipher(d.payloadKey[:], nonce[:])
+	if err != nil {
+		return nil, err
+	}
+	payloadStream.SetCounter(1)
+	payloadStream.XORKeyStream(encBody, body)
+	tag, err := poly1305Tag(d.payloadKey, nonce, encLen, encBody)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]byte, 0, 4+len(encBody)+poly1305TagSize)
+	out = append(out, encLen...)
+	out = append(out, encBody...)
+	return append(out, tag[:]...), nil
+}
+
+func (d *chachaDirection) open(seq uint64, r io.Reader) ([]byte, error) {
+	encLen := make([]byte, 4)
+	if _, err := io.ReadFull(r, encLen); err != nil {
+		return nil, err
+	}
+	nonce := seqNonce(seq)
+	plainLen := append([]byte(nil), encLen...)
+	lengthStream, err := chacha20.NewUnauthenticatedCipher(d.lengthKey[:], nonce[:])
+	if err != nil {
+		return nil, err
+	}
+	lengthStream.XORKeyStream(plainLen, plainLen)
+	n := binary.BigEndian.Uint32(plainLen)
 	if n < 5 || n > maxPacket {
 		return nil, fmt.Errorf("invalid packet length %d", n)
 	}
-	ct := make([]byte, n+gcmTagSize)
-	if _, err := io.ReadFull(r, ct); err != nil {
+	rest := make([]byte, int(n)+poly1305TagSize)
+	if _, err := io.ReadFull(r, rest); err != nil {
 		return nil, err
 	}
-	nonce := d.iv
-	body, err := d.aead.Open(nil, nonce[:], ct, lenBuf[:])
+	encBody := rest[:n]
+	got := rest[n:]
+	want, err := poly1305Tag(d.payloadKey, nonce, encLen, encBody)
 	if err != nil {
 		return nil, err
 	}
-	incrementIV(&d.iv)
-	d.seq++
+	if subtle.ConstantTimeCompare(got, want[:]) != 1 {
+		return nil, fmt.Errorf("chacha20-poly1305 tag mismatch")
+	}
+	body := make([]byte, len(encBody))
+	payloadStream, err := chacha20.NewUnauthenticatedCipher(d.payloadKey[:], nonce[:])
+	if err != nil {
+		return nil, err
+	}
+	payloadStream.SetCounter(1)
+	payloadStream.XORKeyStream(body, encBody)
 	return unpadPayload(body)
 }
 
-func incrementIV(iv *[12]byte) {
-	for i := 11; i >= 4; i-- {
-		iv[i]++
-		if iv[i] != 0 {
-			return
-		}
+func poly1305Tag(payloadKey [chachaKeySize]byte, nonce [chachaNonceSize]byte, encLen, encBody []byte) ([poly1305TagSize]byte, error) {
+	var tag [poly1305TagSize]byte
+	stream, err := chacha20.NewUnauthenticatedCipher(payloadKey[:], nonce[:])
+	if err != nil {
+		return tag, err
 	}
+	var polyKey [32]byte
+	stream.XORKeyStream(polyKey[:], polyKey[:])
+	msg := make([]byte, 0, len(encLen)+len(encBody))
+	msg = append(msg, encLen...)
+	msg = append(msg, encBody...)
+	poly1305.Sum(&tag, msg, &polyKey)
+	return tag, nil
 }
 
 func padPayload(payload []byte, block int) ([]byte, error) {
@@ -104,7 +152,7 @@ func unpadPayload(body []byte) ([]byte, error) {
 		return nil, fmt.Errorf("short packet body")
 	}
 	pad := int(body[0])
-	if pad < 4 || 1+pad > len(body) {
+	if pad < 4 || 1+pad >= len(body) {
 		return nil, fmt.Errorf("invalid padding %d", pad)
 	}
 	return body[1 : len(body)-pad], nil

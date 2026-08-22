@@ -26,7 +26,7 @@
       "const": 1
     },
     "profile_id": {
-      "const": "warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519"
+      "const": "warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519-chacha20"
     },
     "sshd_binary_sha256": {
       "$ref": "#/$defs/sha256"

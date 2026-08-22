@@ -683,7 +683,7 @@ func TestFixedLayoutServerPreflightScriptIsCIOnlyAndNonListening(t *testing.T) {
 		`opt/warptweet/share/licenses/openssh/LICENCE`,
 		`opt/warptweet/share/licenses/openssl/LICENSE.txt`,
 		`"schema_version": 1`,
-		`warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519`,
+		`warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519-chacha20`,
 		`--password '*NP*'`,
 		`-t mldsa44-ed25519`,
 		`render-server`,

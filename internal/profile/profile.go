@@ -8,7 +8,7 @@ import (
 )
 
 const (
-	CurrentID = "warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519"
+	CurrentID = "warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519-chacha20"
 
 	OpenSSLVersion     = "3.5.7"
 	OpenSSLVersionText = "OpenSSL 3.5.7 9 Jun 2026"
@@ -63,7 +63,6 @@ var current = Profile{
 	RawSignatureBytes:     2484,
 	Ciphers: []string{
 		"chacha20-poly1305@openssh.com",
-		"aes256-gcm@openssh.com",
 	},
 	AuthenticationBindingStatus: AuthenticationBindingOpenSSHVendor,
 	SupportStatus:               SupportStatusPublishedMatrix,

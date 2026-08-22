@@ -45,6 +45,28 @@ func TestRenderClientConfigIsFailClosed(t *testing.T) {
 	if strings.Contains(config, "+mlkem") || strings.Contains(config, "^mlkem") {
 		t.Fatal("configuration appends or prepends algorithms instead of replacing the list")
 	}
+	if !strings.Contains(config, `Ciphers "chacha20-poly1305@openssh.com"`) {
+		t.Fatal("configuration does not pin chacha20-poly1305@openssh.com")
+	}
+	if strings.Contains(config, "aes256-gcm@openssh.com") {
+		t.Fatal("configuration still offers aes256-gcm@openssh.com")
+	}
+}
+
+func TestArgumentsPinOnlyChaCha20(t *testing.T) {
+	t.Parallel()
+
+	arguments, err := Arguments(validClientSpec(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(arguments, " ")
+	if !strings.Contains(joined, "Ciphers=chacha20-poly1305@openssh.com") {
+		t.Fatalf("argv missing ChaCha20 pin: %s", joined)
+	}
+	if strings.Contains(joined, "aes256-gcm@openssh.com") {
+		t.Fatalf("argv still offers AES-GCM: %s", joined)
+	}
 }
 
 func TestArgumentsExposeOnlyLocalForward(t *testing.T) {

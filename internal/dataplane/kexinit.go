@@ -19,8 +19,9 @@ func (policy Policy) marshalKexInit() ([]byte, error) {
 	payload = append(payload, cookie...)
 	payload = appendNameList(payload, policy.Profile.KeyExchangeAlgorithm)
 	payload = appendNameList(payload, policy.Profile.AuthenticationKeyType)
-	payload = appendNameList(payload, "aes256-gcm@openssh.com")
-	payload = appendNameList(payload, "aes256-gcm@openssh.com")
+	cipher := policy.Profile.Ciphers[0]
+	payload = appendNameList(payload, cipher)
+	payload = appendNameList(payload, cipher)
 	payload = appendNameList(payload, "none")
 	payload = appendNameList(payload, "none")
 	payload = appendNameList(payload, "none")

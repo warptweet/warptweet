@@ -3,9 +3,8 @@
 Hardening sequence step 4, first increment.
 
 `internal/dataplane` is the WarpTweet-owned host data plane. It advertises only
-the pinned profile (mlkem768x25519-sha256, ssh-mldsa44-ed25519@openssh.com)
-and `aes256-gcm@openssh.com`. It does not advertise
-`chacha20-poly1305@openssh.com` until that cipher is implemented. It allows
+the pinned profile (mlkem768x25519-sha256, ssh-mldsa44-ed25519@openssh.com,
+chacha20-poly1305@openssh.com). It allows
 only `direct-tcpip` to the manifest target and `127.0.0.1:29723`. Session,
 tun, streamlocal, and `tcpip-forward` are protocol errors.
 
