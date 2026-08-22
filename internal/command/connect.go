@@ -61,6 +61,9 @@ func runConnect(ctx context.Context, arguments []string, stdout, stderr io.Write
 	if err != nil {
 		return err
 	}
+	if useInstalledProvisioner() {
+		return finishInstalledConnect(ctx, tunnelID, listenEndpoint, serviceEndpoint, stdout, stderr, dependencies)
+	}
 	store, err := openRouteStore(dependencies)
 	if err != nil {
 		return err
@@ -98,6 +101,25 @@ func runConnect(ctx context.Context, arguments []string, stdout, stderr io.Write
 	} else {
 		_, err = fmt.Fprintf(stdout, "connected\nopen     %s\ntunnel   %s\n", listenEndpoint, tunnelID)
 	}
+	return err
+}
+
+func finishInstalledConnect(
+	ctx context.Context,
+	tunnelID, listenEndpoint, serviceEndpoint string,
+	stdout, stderr io.Writer,
+	dependencies commandDependencies,
+) error {
+	var upOut strings.Builder
+	if err := invokeUp(ctx, []string{tunnelID}, &upOut, stderr, dependencies); err != nil {
+		fmt.Fprintf(stdout, "enrolled_not_ready\nopen     %s\ntunnel   %s\nerror    %v\n", listenEndpoint, tunnelID, err)
+		return outcome.New(outcome.CodeEnrolledNotReady, "enrolled as "+tunnelID+" but not ready", "Run warptweet repair "+tunnelID, 1)
+	}
+	if serviceEndpoint != "" {
+		_, err := fmt.Fprintf(stdout, "connected\nopen     %s\nservice  %s\ntunnel   %s\n", listenEndpoint, serviceEndpoint, tunnelID)
+		return err
+	}
+	_, err := fmt.Fprintf(stdout, "connected\nopen     %s\ntunnel   %s\n", listenEndpoint, tunnelID)
 	return err
 }
 
