@@ -156,7 +156,7 @@ func managementListenPort(listenPort uint16) uint16 {
 
 func effectiveManagementForward(spec ClientSpec) string {
 	listen := fmt.Sprintf("[%s]:%d", spec.ListenAddress.Unmap(), managementListenPort(spec.ListenPort))
-	return listen + " " + fmt.Sprintf("127.0.0.1:%d", enrollment.DefaultManagementPort)
+	return listen + " " + fmt.Sprintf("[127.0.0.1]:%d", enrollment.DefaultManagementPort)
 }
 
 func parseEffectiveOptions(output []byte) (map[string][]string, error) {

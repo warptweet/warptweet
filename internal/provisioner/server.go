@@ -231,10 +231,18 @@ func startTunnel(ctx context.Context, tunnelID string, once bool, serviceUID, se
 			_ = runLaunchctl(ctx, "bootout", "system/"+label)
 		}
 	}()
+	startedAt := time.Now().UTC().Add(-time.Second)
+	if err := store.Write(lifecycle.State{
+		TunnelID:     tunnelID,
+		Phase:        lifecycle.PhaseStarting,
+		TargetHealth: lifecycle.TargetHealthNotChecked,
+	}); err != nil {
+		return "", err
+	}
 	if err := runLaunchctl(ctx, "kickstart", "-k", "system/"+label); err != nil {
 		return "", err
 	}
-	output, err := waitForTunnelReadiness(ctx, store, label, tunnelID)
+	output, err := waitForTunnelReadiness(ctx, store, label, tunnelID, startedAt)
 	if err != nil {
 		return "", err
 	}
@@ -242,7 +250,7 @@ func startTunnel(ctx context.Context, tunnelID string, once bool, serviceUID, se
 	return output, nil
 }
 
-func waitForTunnelReadiness(ctx context.Context, store lifecycle.Store, label, tunnelID string) (string, error) {
+func waitForTunnelReadiness(ctx context.Context, store lifecycle.Store, label, tunnelID string, startedAt time.Time) (string, error) {
 	deadline := time.Now().Add(45 * time.Second)
 	for time.Now().Before(deadline) {
 		state, readErr := store.Read(tunnelID)
@@ -261,7 +269,7 @@ func waitForTunnelReadiness(ctx context.Context, store lifecycle.Store, label, t
 				"target_health": lifecycle.TargetHealthNotChecked,
 			})
 		}
-		if readErr == nil && state.Phase == lifecycle.PhaseFailed {
+		if readErr == nil && state.Phase == lifecycle.PhaseFailed && lifecycleFailureIsCurrent(state, startedAt) {
 			return "", fmt.Errorf("tunnel failed before readiness: %s", state.Error)
 		}
 		select {
@@ -271,6 +279,20 @@ func waitForTunnelReadiness(ctx context.Context, store lifecycle.Store, label, t
 		}
 	}
 	return "", errors.New("timed out waiting for authenticated tunnel readiness")
+}
+
+func lifecycleFailureIsCurrent(state lifecycle.State, startedAt time.Time) bool {
+	if state.UpdatedAt == "" {
+		return false
+	}
+	updated, err := time.Parse(time.RFC3339Nano, state.UpdatedAt)
+	if err != nil {
+		updated, err = time.Parse(time.RFC3339, state.UpdatedAt)
+	}
+	if err != nil {
+		return false
+	}
+	return !updated.Before(startedAt)
 }
 
 func stopTunnel(ctx context.Context, tunnelID string) (string, error) {

@@ -1671,6 +1671,7 @@ func validateEffectiveServerConfig(output []byte, config server.Config, selected
 		"trustedusercakeys":            {"none"},
 		"hostkeyagent":                 {"none"},
 	}
+	options["permitopen"] = flattenOptionValues(options["permitopen"])
 	for key, want := range expected {
 		got := options[key]
 		if len(got) != len(want) {
@@ -1731,6 +1732,14 @@ func parseEffectiveServerOptions(output []byte) (map[string][]string, error) {
 		options[key] = append(options[key], value)
 	}
 	return options, nil
+}
+
+func flattenOptionValues(values []string) []string {
+	var out []string
+	for _, value := range values {
+		out = append(out, strings.Fields(value)...)
+	}
+	return out
 }
 
 func isLowerHexSHA256(value string) bool {

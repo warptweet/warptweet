@@ -434,7 +434,25 @@ func acceptAndAuthorize(
 		proof = accepted
 		return nil
 	})
-	return proof, err
+	if err != nil {
+		return proof, err
+	}
+	if err := reloadDataPlane(); err != nil {
+		return proof, fmt.Errorf("reload data plane: %w", err)
+	}
+	return proof, nil
+}
+
+func reloadDataPlane() error {
+	if _, err := exec.LookPath("systemctl"); err != nil {
+		return nil
+	}
+	cmd := exec.Command("systemctl", "restart", "warptweet-sshd.service")
+	cmd.Env = []string{"LANG=C", "LC_ALL=C"}
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("systemctl restart warptweet-sshd.service: %w", err)
+	}
+	return nil
 }
 
 func acceptAndAuthorizeLocked(

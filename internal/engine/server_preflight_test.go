@@ -773,6 +773,42 @@ func TestValidateServerVersionOutputRequiresExactStreams(t *testing.T) {
 	}
 }
 
+func TestValidateEffectiveServerConfigAcceptsCombinedPermitOpen(t *testing.T) {
+	t.Parallel()
+
+	config := server.Config{
+		Listen: server.Endpoint{
+			Address: netip.MustParseAddr("192.0.2.10"),
+			Port:    2222,
+		},
+		Target: server.Endpoint{
+			Address: netip.MustParseAddr("198.51.100.7"),
+			Port:    5432,
+		},
+		DedicatedUser:      server.DefaultDedicatedUser,
+		HostKeyPath:        installlayout.ServerHostKeyPath,
+		AuthorizedKeysPath: installlayout.AuthorizedKeysDirectory + "/" + server.DefaultDedicatedUser,
+	}
+	selected, err := profile.Lookup(profile.CurrentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	output := serverTestEffectiveOutput(config, selected)
+	target := "198.51.100.7:5432"
+	combined := bytes.Replace(
+		output,
+		[]byte("permitopen "+target+"\npermitopen 127.0.0.1:29723\n"),
+		[]byte("permitopen "+target+" 127.0.0.1:29723\n"),
+		1,
+	)
+	if bytes.Equal(combined, output) {
+		t.Fatal("did not rewrite combined permitopen")
+	}
+	if err := validateEffectiveServerConfig(combined, config, selected); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestParseEffectiveServerOptionsNormalizesPinnedOpenSSHCasing(t *testing.T) {
 	t.Parallel()
 

@@ -838,11 +838,7 @@ func clientSpec(manifest config.Config, tunnelID, manifestPath string) (engine.C
 	identityFile := layout.ClientIdentityPath
 	knownHostsFile := layout.ClientKnownHostsPath
 	emptyTrust := layout.ClientGlobalKnownHostsPath
-	if productionClientManifest(manifestPath, layout.ClientManifestPath) {
-		store, storeErr := productionRouteStore()
-		if storeErr != nil {
-			return engine.ClientSpec{}, storeErr
-		}
+	if store, storeErr := productionRouteStore(); storeErr == nil {
 		activeManifest, manifestErr := store.ManifestPath(selectedTunnel.ID)
 		if manifestErr != nil {
 			if !os.IsNotExist(manifestErr) {
