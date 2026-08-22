@@ -50,7 +50,7 @@ From the tagged WarpTweet tree on this Mac. `VERSION` must match
 and `WARPTWEET_LINUX_GPG_KEY` come from `.env`.
 
 ```sh
-make linux-rc VERSION=0.1.0-rc.6
+make linux-rc VERSION=0.1.0-rc.7
 ```
 
 That script:

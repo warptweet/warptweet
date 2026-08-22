@@ -44,7 +44,7 @@ interop:
 # Signed Linux host RC on the persistent Ubuntu builder.
 # Host, SSH identity, and GPG key come from .env. VERSION must match command.Version.
 linux-rc:
-	@test -n "$(VERSION)" || { echo "usage: make linux-rc VERSION=0.1.0-rc.6" >&2; exit 64; }
+	@test -n "$(VERSION)" || { echo "usage: make linux-rc VERSION=0.1.0-rc.7" >&2; exit 64; }
 	WARPTWEET_VERSION=$(VERSION) ./scripts/build-linux-rc-remote.sh
 
 test-race:
