@@ -5,7 +5,7 @@ check. This is a lab procedure, not WP8 evidence.
 
 You already have:
 
-- Linux host `.deb`: `dist/warptweet_0.1.0-rc.5_amd64.deb`
+- Linux host `.deb`: `dist/warptweet_0.1.0-rc.6_amd64.deb`
 - Builder SSH from `.env` (`WARPTWEET_INTEROP_SERVER_HOST`)
 
 You also need a Darwin client `.pkg` installed on this Mac. `connect` talks to
@@ -24,8 +24,8 @@ From this Mac:
 
 ```sh
 HOST="$WARPTWEET_INTEROP_SERVER_HOST"
-scp dist/warptweet_0.1.0-rc.5_amd64.deb ubuntu@"$HOST":/tmp/
-ssh ubuntu@"$HOST" 'sudo dpkg -i /tmp/warptweet_0.1.0-rc.5_amd64.deb'
+scp dist/warptweet_0.1.0-rc.6_amd64.deb ubuntu@"$HOST":/tmp/
+ssh ubuntu@"$HOST" 'sudo dpkg -i /tmp/warptweet_0.1.0-rc.6_amd64.deb'
 ```
 
 Open the two WarpTweet ports (SSH data plane 2222, enroll TLS 29722):
