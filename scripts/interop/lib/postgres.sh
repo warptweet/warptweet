@@ -6,26 +6,108 @@ interop_postgres_compose_dir() {
 }
 
 interop_ensure_remote_docker() {
+    # Fresh Ubuntu VPS: wait out cloud-init/apt, install Engine + Compose,
+    # start the daemon. Safe to re-run after the box is destroyed and replaced.
     interop_ssh "sudo sh -s" <<'REMOTE'
 set -eu
 LC_ALL=C
 export LC_ALL
-if command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1; then
-    echo "docker already usable"
-    exit 0
-fi
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get install -y -qq ca-certificates curl gnupg
-if ! command -v docker >/dev/null 2>&1; then
-    apt-get install -y -qq docker.io
+
+wait_for_apt() {
+    _i=0
+    while [ "$_i" -lt 60 ]; do
+        if apt-get update -qq; then
+            return 0
+        fi
+        _i=$((_i + 1))
+        sleep 2
+    done
+    echo "apt-get update still locked after 2 minutes" >&2
+    return 1
+}
+
+apt_install() {
+    _i=0
+    while [ "$_i" -lt 15 ]; do
+        if apt-get install -y -qq "$@"; then
+            return 0
+        fi
+        _i=$((_i + 1))
+        sleep 2
+    done
+    echo "apt-get install failed: $*" >&2
+    return 1
+}
+
+docker_candidate() {
+    apt-cache policy docker.io 2>/dev/null | awk '/Candidate:/ {print $2; exit}'
+}
+
+if command -v cloud-init >/dev/null 2>&1; then
+    cloud-init status --wait >/dev/null 2>&1 || true
 fi
+
+wait_for_apt
+apt_install ca-certificates curl gnupg python3 iproute2 iptables
+
+if ! command -v docker >/dev/null 2>&1; then
+    _cand=$(docker_candidate)
+    # Distro Engine first (reproducible on a stock Ubuntu image).
+    if [ -n "$_cand" ] && [ "$_cand" != "(none)" ] && apt_install docker.io; then
+        :
+    else
+        echo "docker.io unavailable (candidate=${_cand:-none}); installing Docker CE from download.docker.com" >&2
+        install -m 0755 -d /etc/apt/keyrings
+        curl --proto '=https' --tlsv1.2 --fail --location \
+            https://download.docker.com/linux/ubuntu/gpg \
+            -o /etc/apt/keyrings/docker.asc
+        chmod a+r /etc/apt/keyrings/docker.asc
+        . /etc/os-release
+        printf 'deb [arch=%s signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu %s stable\n' \
+            "$(dpkg --print-architecture)" "$VERSION_CODENAME" \
+            >/etc/apt/sources.list.d/docker.list
+        wait_for_apt
+        apt_install docker-ce docker-ce-cli containerd.io docker-compose-plugin
+    fi
+fi
+apt-get install -y -qq docker-compose-v2 >/dev/null 2>&1 || \
+    apt-get install -y -qq docker-compose-plugin >/dev/null 2>&1 || true
+
 if ! getent group docker >/dev/null 2>&1; then
     groupadd --system docker
 fi
-systemctl enable --now docker
-docker info >/dev/null
-echo "docker ready"
+if [ -n "${SUDO_USER:-}" ] && id "$SUDO_USER" >/dev/null 2>&1; then
+    usermod -aG docker "$SUDO_USER" >/dev/null 2>&1 || true
+fi
+
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl enable docker >/dev/null 2>&1 || true
+    systemctl enable containerd >/dev/null 2>&1 || true
+    systemctl start containerd >/dev/null 2>&1 || true
+    systemctl start docker
+fi
+
+_i=0
+while [ "$_i" -lt 60 ]; do
+    if docker info >/dev/null 2>&1; then
+        echo "docker ready"
+        docker version --format '{{.Server.Version}}' 2>/dev/null || true
+        if docker compose version >/dev/null 2>&1; then
+            echo "docker compose plugin ready"
+        elif command -v docker-compose >/dev/null 2>&1; then
+            echo "docker-compose v1 ready"
+        else
+            echo "docker compose plugin missing; interop will use docker run"
+        fi
+        exit 0
+    fi
+    _i=$((_i + 1))
+    sleep 1
+done
+echo "docker daemon did not become ready" >&2
+journalctl -u docker.service -n 40 --no-pager >&2 || true
+exit 1
 REMOTE
 }
 
@@ -43,15 +125,17 @@ interop_ensure_loopback_postgres() {
     interop_ssh "sudo sh -s" <<REMOTE
 set -eu
 cd '$_remote_dir'
-if command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
-    sudo docker compose -f compose.yaml up -d
+if docker inspect -f '{{.State.Running}}' warptweet-interop-postgres 2>/dev/null | grep -qx true; then
+    echo "postgres container already running"
+elif docker inspect warptweet-interop-postgres >/dev/null 2>&1; then
+    docker start warptweet-interop-postgres
+elif command -v docker >/dev/null 2>&1 && docker compose version >/dev/null 2>&1; then
+    docker compose -f compose.yaml up -d
 elif command -v docker-compose >/dev/null 2>&1; then
-    sudo docker-compose -f compose.yaml up -d
+    docker-compose -f compose.yaml up -d
 else
-    # docker.io on Ubuntu may lack the compose plugin. Recreate the pinned container.
-    sudo docker rm -f warptweet-interop-postgres >/dev/null 2>&1 || true
-    sudo docker pull postgres:16.10-alpine
-    sudo docker run -d --name warptweet-interop-postgres --restart unless-stopped \
+    docker pull postgres:16.10-alpine
+    docker run -d --name warptweet-interop-postgres --restart unless-stopped \
         -e POSTGRES_USER=warptweet \
         -e POSTGRES_PASSWORD=warptweet-interop \
         -e POSTGRES_DB=warptweet \

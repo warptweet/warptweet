@@ -188,6 +188,19 @@ func (store Store) releaseReservationLocked(routeID string) error {
 	return os.RemoveAll(filepath.Join(store.Root, routeID))
 }
 
+// Remove deletes one reserved route tree and releases its listen port.
+func (store Store) Remove(routeID string) error {
+	if err := ValidateRouteID(routeID); err != nil {
+		return err
+	}
+	unlock, err := store.lockRoot()
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	return store.releaseReservationLocked(routeID)
+}
+
 func (store Store) lockRoot() (func(), error) {
 	if err := os.MkdirAll(store.Root, 0o755); err != nil {
 		return nil, err

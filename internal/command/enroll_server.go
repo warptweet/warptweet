@@ -31,6 +31,9 @@ const (
 	enrollmentRateLimitWindow     = time.Minute
 	enrollmentRateLimitMax        = 30
 	enrollmentRateLimitMaxSources = 4096
+	// sessionEvictAfterHTTP lets the client finish reading a rotate/revoke
+	// JSON body before Terminate drops the SSH channel that carries it.
+	sessionEvictAfterHTTP = 2 * time.Second
 )
 
 func runServerEnrollListen(ctx context.Context, arguments []string, stdout, stderr io.Writer) error {
@@ -348,7 +351,8 @@ func writeEnrollmentJSON(
 		flusher.Flush()
 	}
 	if afterSuccess != nil {
-		afterSuccess()
+		callback := afterSuccess
+		time.AfterFunc(sessionEvictAfterHTTP, callback)
 	}
 }
 
@@ -573,17 +577,17 @@ func reconcileGrantsUntil(ctx context.Context, manifest server.Config) {
 			return
 		case <-ticker.C:
 			now := time.Now().UTC()
+			if _, err := grant.ObserveClock(installlayout.HostClockObservationPath, now); err != nil {
+				if closeErr := enterBlockedClock(manifest, err); closeErr != nil {
+					slog.Error("host clock fail-close incomplete", "err", closeErr)
+				}
+				continue
+			}
 			records, listErr := enrollment.ListClients(installlayout.ClientsDirectory)
 			if listErr != nil {
 				records = nil
 			}
 			if nextGrantReconcileDelay(now, records) > time.Second {
-				continue
-			}
-			if _, err := grant.ObserveClock(installlayout.HostClockObservationPath, now); err != nil {
-				if closeErr := enterBlockedClock(manifest, err); closeErr != nil {
-					slog.Error("host clock fail-close incomplete", "err", closeErr)
-				}
 				continue
 			}
 			if err := reconcileExpiredGrants(manifest, now); err != nil {

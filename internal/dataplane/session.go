@@ -62,7 +62,9 @@ func listenControl(path string) (net.Listener, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := os.Chmod(path, 0o600); err != nil {
+	// Group-readable so warptweet-mgmt (Group=warptweet-sshd, no CAP_DAC_OVERRIDE)
+	// can drop live sessions on expiry and revoke.
+	if err := os.Chmod(path, 0o660); err != nil {
 		_ = listener.Close()
 		return nil, err
 	}

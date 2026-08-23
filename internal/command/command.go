@@ -170,6 +170,8 @@ func runWithDependencies(
 		err = runRotate(ctx, arguments[1:], stdout, stderr)
 	case "revoke":
 		err = runRevokeTunnel(ctx, arguments[1:], stdout, stderr)
+	case "forget":
+		err = runForget(ctx, arguments[1:], stdout, stderr)
 	case "uninstall":
 		err = runUninstall(arguments[1:], stdout, stderr)
 	case "help", "-h", "--help":
@@ -1105,6 +1107,7 @@ var publicCommands = []publicCommand{
 	{Name: "reconcile", Usage: "warptweet reconcile"},
 	{Name: "rotate", Usage: "warptweet rotate <tunnel-id>"},
 	{Name: "revoke", Usage: "warptweet revoke <tunnel-id>"},
+	{Name: "forget", Usage: "warptweet forget <route-id>"},
 	{Name: "uninstall", Usage: "warptweet uninstall --preserve-identity"},
 	{Name: "version", Usage: "warptweet version"},
 }

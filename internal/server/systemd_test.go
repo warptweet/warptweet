@@ -68,7 +68,7 @@ func TestEnrollUnitUsesControllerEnrollmentListener(t *testing.T) {
 		"RuntimeDirectory=warptweet/server",
 		"RuntimeDirectoryMode=0750",
 		"RuntimeDirectoryPreserve=yes",
-		"ReadWritePaths=/var/lib/warptweet /etc/warptweet/enrollment /run/warptweet/server",
+		"ReadWritePaths=/var/lib/warptweet /etc/warptweet/enrollment /run/warptweet/server /run/warptweet/sshd",
 		"NoNewPrivileges=yes",
 		"ProtectSystem=strict",
 		"ProtectHome=yes",

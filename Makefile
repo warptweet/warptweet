@@ -1,4 +1,4 @@
-.PHONY: bench build check check-go fmt-check script-check gosec site-build site-check site-down site-preview site-up test test-enrollment-control-plane test-openssh-integration test-race vet interop interop-help linux-rc
+.PHONY: bench build check check-go fmt-check script-check gosec site-build site-check site-down site-preview site-up test test-enrollment-control-plane test-openssh-integration test-race vet interop interop-help interop-matrix lab-host linux-rc
 
 GOCACHE ?= /private/tmp/warptweet-go-build
 SITE_DEV_HOST ?= 127.0.0.1
@@ -42,12 +42,22 @@ interop-help:
 	@printf 'make interop  — zero-arg dual-host happy path (loads .env)\n'
 	@printf '  copy .env.example → .env and set SERVER_HOST + SSH_IDENTITY\n'
 	@printf '  missing packages are built automatically (client local, server Docker)\n'
-	@printf '  unlock key: ssh-add $$WARPTWEET_INTEROP_SSH_IDENTITY\n\n'
+	@printf '  unlock key: ssh-add $$WARPTWEET_INTEROP_SSH_IDENTITY\n'
+	@printf 'make lab-host — SSH-install Docker Engine + loopback Postgres on a fresh Ubuntu VPS\n'
+	@printf 'make interop-matrix — build darwin-amd64 and linux-arm64 packages\n\n'
 	./scripts/interop/orchestrate.sh --help
 
 # Complete local+remote round trip from .env (no make arguments).
 interop:
 	./scripts/interop/dev-run.sh
+
+# Fresh lab VPS: install Docker Engine + loopback Postgres over the interop SSH config.
+lab-host:
+	./scripts/interop/provision-lab-host.sh
+
+# Build the remaining CTA matrix packages (darwin-amd64, linux-arm64).
+interop-matrix:
+	./scripts/interop/ensure-matrix-artifacts.sh
 
 # Signed Linux host RC on the persistent Ubuntu builder.
 # Host, SSH identity, and GPG key come from .env. VERSION must match command.Version.

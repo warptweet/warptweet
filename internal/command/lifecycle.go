@@ -611,22 +611,16 @@ func runRotate(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		slog.Error("route receipt sync failed after rotate", "route_id", tunnelID, "err", err)
 	}
 
-	emptyTrust := filepath.Join(stageRoot, "known_hosts.empty")
-	if err := os.WriteFile(emptyTrust, nil, 0o600); err != nil {
-		return failCleanup(err)
-	}
-	if err := copyFile(layout.ClientManifestPath, filepath.Join(stageRoot, "client.wt"), 0o600); err != nil {
-		return failCleanup(err)
-	}
-	if err := copyFile(layout.ClientKnownHostsPath, filepath.Join(stageRoot, "known_hosts"), 0o600); err != nil {
+	stagedManifest, stagedKnownHosts, emptyTrust, err := stageActiveGenerationPolicy(tunnelID, stageRoot)
+	if err != nil {
 		return failCleanup(err)
 	}
 	if err := persistActivatedGeneration(
 		tunnelID,
 		generationID,
 		identityPath,
-		filepath.Join(stageRoot, "client.wt"),
-		filepath.Join(stageRoot, "known_hosts"),
+		stagedManifest,
+		stagedKnownHosts,
 		emptyTrust,
 	); err != nil {
 		return failCleanup(err)
@@ -1063,6 +1057,45 @@ func loadEnrollmentReceipt(clientManifestPath, tunnelID string) (enrollmentRecei
 	return receipt, nil
 }
 
+// copyGenerationPolicy copies the immutable per-route client.wt and host pin
+// into a staging directory. Rotate must use these files, not the global layout
+// client.wt, which is overwritten by later enrollments of other routes.
+func copyGenerationPolicy(generationDir, stageRoot string) (manifestPath, knownHostsPath, emptyPath string, err error) {
+	if err := os.MkdirAll(stageRoot, 0o700); err != nil {
+		return "", "", "", err
+	}
+	manifestPath = filepath.Join(stageRoot, "client.wt")
+	knownHostsPath = filepath.Join(stageRoot, "known_hosts")
+	emptyPath = filepath.Join(stageRoot, "known_hosts.empty")
+	if err := copyFile(filepath.Join(generationDir, "client.wt"), manifestPath, 0o600); err != nil {
+		return "", "", "", err
+	}
+	if err := copyFile(filepath.Join(generationDir, "known_hosts"), knownHostsPath, 0o600); err != nil {
+		return "", "", "", err
+	}
+	emptySrc := filepath.Join(generationDir, "known_hosts.empty")
+	if _, statErr := os.Stat(emptySrc); statErr == nil {
+		if err := copyFile(emptySrc, emptyPath, 0o600); err != nil {
+			return "", "", "", err
+		}
+	} else if err := os.WriteFile(emptyPath, nil, 0o600); err != nil {
+		return "", "", "", err
+	}
+	return manifestPath, knownHostsPath, emptyPath, nil
+}
+
+func stageActiveGenerationPolicy(routeID, stageRoot string) (string, string, string, error) {
+	store, err := productionRouteStore()
+	if err != nil {
+		return "", "", "", err
+	}
+	currentManifest, err := store.ManifestPath(routeID)
+	if err != nil {
+		return "", "", "", fmt.Errorf("active generation for %s: %w", routeID, err)
+	}
+	return copyGenerationPolicy(filepath.Dir(currentManifest), stageRoot)
+}
+
 func persistActivatedGeneration(routeID, generationID, identityPath, manifestPath, knownHostsPath, emptyTrustPath string) error {
 	routeStore, err := productionRouteStore()
 	if err != nil {
@@ -1384,11 +1417,45 @@ func authorizationState(receipt routestate.Receipt, state lifecycle.State) strin
 	return "valid"
 }
 
+func runForget(ctx context.Context, arguments []string, stdout, stderr io.Writer) error {
+	flags := newFlagSet("forget", stderr)
+	positionals, err := parseFlagsAllowArgs(flags, arguments)
+	if err != nil {
+		return err
+	}
+	if len(positionals) != 1 {
+		return errors.New("forget requires exactly one route id")
+	}
+	tunnelID := positionals[0]
+	_ = stderr
+	if handled, err := callInstalledProvisioner(ctx, provisioner.Request{
+		Version: provisioner.ProtocolVersion, Action: provisioner.ActionForget, TunnelID: tunnelID,
+	}, stdout); handled {
+		return err
+	}
+	if err := projectManagedTunnel(ctx, tunnelID, false); err != nil {
+		slog.Error("forget stop", "route_id", tunnelID, "err", err)
+	}
+	store, err := productionRouteStore()
+	if err != nil {
+		return err
+	}
+	if err := store.Remove(tunnelID); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return writeJSON(stdout, map[string]any{"status": "forgotten", "tunnel_id": tunnelID})
+}
+
 func runRoutes(arguments []string, stdout, stderr io.Writer) error {
 	flags := newFlagSet("routes", stderr)
 	asJSON := onceBoolFlag{name: "--json"}
 	flags.Var(&asJSON, "json", "emit JSON")
 	if err := parseFlags(flags, arguments); err != nil {
+		return err
+	}
+	if handled, err := callInstalledProvisioner(context.Background(), provisioner.Request{
+		Version: provisioner.ProtocolVersion, Action: provisioner.ActionRoutes,
+	}, stdout); handled {
 		return err
 	}
 	store, err := productionRouteStore()

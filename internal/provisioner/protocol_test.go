@@ -27,6 +27,9 @@ func TestValidateRequestAcceptsOnlyActionSpecificFields(t *testing.T) {
 		{name: "repair", request: Request{Version: 1, Action: ActionRepair, TunnelID: "db-1"}},
 		{name: "up proof", request: Request{Version: 1, Action: ActionUp, TunnelID: "db-1", Proof: json.RawMessage(`{}`)}, wantErr: "another action"},
 		{name: "status all", request: Request{Version: 1, Action: ActionStatus}},
+		{name: "routes", request: Request{Version: 1, Action: ActionRoutes}},
+		{name: "routes with id", request: Request{Version: 1, Action: ActionRoutes, TunnelID: "db-1"}, wantErr: "tunnel_id"},
+		{name: "forget", request: Request{Version: 1, Action: ActionForget, TunnelID: "db-1"}},
 		{name: "uninstall", request: Request{Version: 1, Action: ActionUninstall}},
 		{name: "uninstall invite", request: Request{Version: 1, Action: ActionUninstall, Invite: invite}, wantErr: "another action"},
 		{name: "status once", request: Request{Version: 1, Action: ActionStatus, Once: true}, wantErr: "another action"},
@@ -86,7 +89,7 @@ func TestTunnelStartActionsIncludeRepair(t *testing.T) {
 	if !isTunnelStartAction(ActionUp) || !isTunnelStartAction(ActionRepair) {
 		t.Fatal("up and repair must start the projected tunnel")
 	}
-	for _, action := range []string{ActionEnroll, ActionConnect, ActionStatus, ActionDown, ActionRotate, ActionRevoke, "exec"} {
+	for _, action := range []string{ActionEnroll, ActionConnect, ActionStatus, ActionDown, ActionRotate, ActionRevoke, ActionForget, ActionRoutes, "exec"} {
 		if isTunnelStartAction(action) {
 			t.Fatalf("%q must not start a tunnel", action)
 		}

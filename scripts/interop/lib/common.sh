@@ -86,6 +86,8 @@ interop_record_result() {
 }
 
 interop_load_config() {
+    PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+    export PATH
     if [ -n "${WARPTWEET_INTEROP_CONFIG:-}" ] && [ -f "$WARPTWEET_INTEROP_CONFIG" ]; then
         # shellcheck disable=SC1090
         . "$WARPTWEET_INTEROP_CONFIG"

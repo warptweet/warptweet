@@ -98,6 +98,24 @@ func TestStoreReserveAndListInvalid(t *testing.T) {
 	}
 }
 
+func TestStoreRemoveReleasesListenPort(t *testing.T) {
+	t.Parallel()
+
+	store := Store{Root: t.TempDir()}
+	if err := store.ReservePort("lab-db", 15432); err != nil {
+		t.Fatalf("ReservePort: %v", err)
+	}
+	if err := store.ReservePort("other-db", 15432); err == nil {
+		t.Fatal("second route reused a reserved listen port")
+	}
+	if err := store.Remove("lab-db"); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	if err := store.ReservePort("other-db", 15432); err != nil {
+		t.Fatalf("ReservePort after Remove: %v", err)
+	}
+}
+
 func TestLoadIntentRejectsStrictJSONFailures(t *testing.T) {
 	t.Parallel()
 

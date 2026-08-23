@@ -135,6 +135,16 @@ func executeRequest(ctx context.Context, request Request) (string, error) {
 		return projectTunnel(ctx, request.TunnelID, false)
 	case ActionRotate, ActionRevoke:
 		return executeController(ctx, request.Action, request.TunnelID)
+	case ActionForget:
+		if _, stopErr := projectTunnel(ctx, request.TunnelID, false); stopErr != nil {
+			// Route may already be stopped; still release the reservation.
+		}
+		if err := forgetRoute(installlayout.ClientRoutesDirectory, request.TunnelID); err != nil {
+			return "", err
+		}
+		return encodeOutput(map[string]any{"status": "forgotten", "tunnel_id": request.TunnelID})
+	case ActionRoutes:
+		return listRoutesJSON(installlayout.ClientRoutesDirectory)
 	case ActionUninstall:
 		return uninstallAllRoutes(ctx, installlayout.ClientRoutesDirectory, func(ctx context.Context, routeID string) error {
 			_, err := projectTunnel(ctx, routeID, false)

@@ -33,6 +33,8 @@ const (
 	ActionRotate    = "rotate"
 	ActionRevoke    = "revoke"
 	ActionRepair    = "repair"
+	ActionForget    = "forget"
+	ActionRoutes    = "routes"
 	ActionUninstall = "uninstall"
 )
 
@@ -93,16 +95,19 @@ func ValidateRequest(request Request) error {
 				return errors.New("restart_policy must be unless-stopped or manual")
 			}
 		}
-	case ActionStatus, ActionUninstall:
+	case ActionStatus, ActionUninstall, ActionRoutes:
 		if len(request.Invite) != 0 || len(request.Proof) != 0 || request.Once || request.ListenPort != 0 || request.PrepareOnly {
 			return errors.New(request.Action + " contains fields for another action")
+		}
+		if request.Action == ActionRoutes && request.TunnelID != "" {
+			return errors.New("routes does not take a tunnel_id")
 		}
 		if request.TunnelID != "" {
 			if err := config.ValidateTunnelID(request.TunnelID); err != nil {
 				return err
 			}
 		}
-	case ActionUp, ActionDown, ActionRotate, ActionRevoke, ActionRepair:
+	case ActionUp, ActionDown, ActionRotate, ActionRevoke, ActionRepair, ActionForget:
 		if len(request.Invite) != 0 {
 			return errors.New("only enroll may carry an invite document")
 		}

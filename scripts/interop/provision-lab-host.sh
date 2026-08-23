@@ -3,8 +3,11 @@ set -eu
 LC_ALL=C
 export LC_ALL
 
-# Bootstrap a freshly spun Ubuntu interop host: Docker Engine and loopback
+# Bootstrap a freshly spun Ubuntu interop host over the same SSH config as
+# make interop: Docker Engine, Compose plugin, python3, iproute2, and loopback
 # Postgres bound to 127.0.0.1:5432. Safe to re-run. Loads repo-root .env.
+# Invoked as `make lab-host`. orchestrate.sh calls the same helpers, so a
+# first `make interop` against a new VPS also installs Docker.
 
 WT_SCRIPT_DIRECTORY=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 WT_REPO_ROOT=$(CDPATH= cd -- "$WT_SCRIPT_DIRECTORY/../.." && pwd)
@@ -54,3 +57,11 @@ fi
 interop_ssh_check
 interop_ensure_loopback_postgres 5432
 echo "lab host docker+postgres ready on $WARPTWEET_INTEROP_SERVER_HOST 127.0.0.1:5432"
+interop_ssh "sudo sh -s" <<'REMOTE' || true
+set -eu
+echo "docker=$(command -v docker || echo missing)"
+docker version --format 'engine={{.Server.Version}}' 2>/dev/null || true
+docker compose version 2>/dev/null || true
+ss -lnt | grep -E '127.0.0.1:5432|:5432' || netstat -lnt 2>/dev/null | grep 5432 || true
+docker inspect -f 'postgres={{.State.Status}}' warptweet-interop-postgres 2>/dev/null || true
+REMOTE

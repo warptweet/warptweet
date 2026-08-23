@@ -167,6 +167,19 @@ func executeRequest(ctx context.Context, request Request, serviceUID, serviceGID
 			return output, startErr
 		}
 		return output + started, nil
+	case ActionForget:
+		if _, stopErr := stopTunnel(ctx, request.TunnelID); stopErr != nil {
+			slog.Error("forget stop tunnel", "tunnel_id", request.TunnelID, "err", stopErr)
+		}
+		plistPath := filepath.Join(installlayout.DarwinLaunchDaemonRoot, installlayout.DarwinTunnelLabelPrefix+request.TunnelID+".plist")
+		_ = os.Remove(plistPath)
+		_ = os.RemoveAll(filepath.Join(installlayout.DarwinClientRuntimeRoot, request.TunnelID))
+		if err := forgetRoute(installlayout.DarwinClientRoutesDirectory, request.TunnelID); err != nil {
+			return "", err
+		}
+		return encodeOutput(map[string]any{"status": "forgotten", "tunnel_id": request.TunnelID})
+	case ActionRoutes:
+		return listRoutesJSON(installlayout.DarwinClientRoutesDirectory)
 	case ActionUninstall:
 		return uninstallAllRoutes(ctx, installlayout.DarwinClientRoutesDirectory, func(ctx context.Context, routeID string) error {
 			_, err := stopTunnel(ctx, routeID)

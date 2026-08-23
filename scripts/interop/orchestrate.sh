@@ -74,7 +74,19 @@ interop_require_cmd sudo
 
 interop_log "work dir $WARPTWEET_INTEROP_WORK"
 interop_ssh_check
-interop_cleanup_stale_client_routes
+# Leftover clock-rollback from a prior run must not fail-close this one.
+# On a fresh VPS the package is not installed yet; pin NTP now and recover
+# again after install.
+interop_pin_host_clock || true
+_remote_arch=$(interop_ssh "uname -m" || true)
+case "$_remote_arch" in
+    x86_64 | amd64) WARPTWEET_SERVER_ARCHITECTURE=amd64 ;;
+    aarch64 | arm64) WARPTWEET_SERVER_ARCHITECTURE=arm64 ;;
+    *) WARPTWEET_SERVER_ARCHITECTURE=${_remote_arch:-unknown} ;;
+esac
+export WARPTWEET_SERVER_ARCHITECTURE
+# Best-effort before install if a previous client package is still present.
+interop_cleanup_stale_client_routes || true
 
 # --- Install pinned packages ---
 if interop_phase_install_packages; then
@@ -83,6 +95,11 @@ else
     interop_emit_evidence || true
     interop_die "package install phase failed"
 fi
+# Provisioner is now running; drop leftover launchd jobs and interop reservations.
+interop_cleanup_stale_client_routes
+interop_pick_free_listen_port
+# Recover host clock after install so leftover blocked-clock cannot fail host.
+interop_pin_host_clock || true
 
 # --- Server preflight (best-effort doctor-server) ---
 if interop_ssh "sudo '$WARPTWEET_INTEROP_SERVER_CTRL' doctor-server --config /etc/warptweet/server.wt" >/tmp/wt-interop-doctor-server.out 2>/tmp/wt-interop-doctor-server.err; then
@@ -167,8 +184,26 @@ fi
 # --- Connect on local Mac ---
 interop_assert_package_ctrl "$WARPTWEET_INTEROP_CLIENT_CTRL" "client"
 # Flags before positionals: Go flag.Parse stops at the first positional.
-if ! INTEROP_CLIENT_OUT=/tmp/wt-interop-connect.out INTEROP_CLIENT_ERR=/tmp/wt-interop-connect.err \
-    interop_client_cmd connect --yes --listen-port "${WARPTWEET_INTEROP_CLIENT_LISTEN_PORT:-18433}" "$WARPTWEET_INTEROP_INVITE" >/dev/null; then
+_connect_port=${WARPTWEET_INTEROP_CLIENT_LISTEN_PORT:-18433}
+_connect_try=0
+_connect_ok=0
+while [ "$_connect_try" -lt 8 ]; do
+    if INTEROP_CLIENT_OUT=/tmp/wt-interop-connect.out INTEROP_CLIENT_ERR=/tmp/wt-interop-connect.err \
+        interop_client_cmd connect --yes --listen-port "$_connect_port" "$WARPTWEET_INTEROP_INVITE" >/dev/null; then
+        _connect_ok=1
+        WARPTWEET_INTEROP_CLIENT_LISTEN_PORT=$_connect_port
+        export WARPTWEET_INTEROP_CLIENT_LISTEN_PORT
+        break
+    fi
+    if grep -q 'already reserved' /tmp/wt-interop-connect.err 2>/dev/null; then
+        _connect_port=$((_connect_port + 11))
+        _connect_try=$((_connect_try + 1))
+        interop_log "listen port reserved; retrying $_connect_port"
+        continue
+    fi
+    break
+done
+if [ "$_connect_ok" -ne 1 ]; then
     interop_record_result invite-enroll-single-use positive fail "connect failed: $(tr '\n' ' ' </tmp/wt-interop-connect.err | cut -c1-200)"
     interop_emit_evidence || true
     interop_die "connect failed"
@@ -229,37 +264,69 @@ interop_phase_agent_skill
 interop_phase_invite_fail_closed
 interop_phase_second_route
 interop_phase_forwarding
+interop_phase_rekey
+interop_phase_classical_kex
+interop_phase_wrong_host_pin
+interop_phase_malformed
+interop_phase_local_state_mutation
+interop_phase_engine_tamper
+interop_phase_bounded_floods
+interop_phase_availability
+interop_phase_silent_renewal
+interop_phase_reboot_policies
+interop_phase_pid_reuse
 interop_phase_live_expiry
+
+# Live expiry must not take down the primary route; reconnect if it did.
+if [ -n "${WARPTWEET_INTEROP_OPEN_ENDPOINT:-}" ] &&
+    ! interop_payload_current "$WARPTWEET_INTEROP_OPEN_ENDPOINT" >/dev/null 2>&1; then
+    interop_log "primary payload down after live-expiry; bringing the route back up"
+    INTEROP_CLIENT_OUT=/tmp/wt-interop-primary-up.out INTEROP_CLIENT_ERR=/tmp/wt-interop-primary-up.err \
+        interop_client_cmd up "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null 2>&1 || true
+    _i=0
+    while [ "$_i" -lt 20 ]; do
+        if interop_payload_current "$WARPTWEET_INTEROP_OPEN_ENDPOINT" >/dev/null 2>&1; then
+            break
+        fi
+        _i=$((_i + 1))
+        sleep 1
+    done
+fi
 
 # --- Optional lifecycle ---
 if [ "${WARPTWEET_INTEROP_RUN_LIFECYCLE}" = "1" ]; then
     _life_ok=1
     _life_detail=""
-    # Stop/restart on the current generation, then rotate while up, then revoke.
-    # up after rotate is a separate remaining defect.
-    if ! INTEROP_CLIENT_OUT=/tmp/wt-interop-down.out INTEROP_CLIENT_ERR=/tmp/wt-interop-down.err \
-        interop_client_cmd down "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null; then
+    # Rotate while the original connect tunnel is still up, then down/up the
+    # new generation. Management RPC is a second local forward (listen+1).
+    if ! interop_ensure_mgmt_forward; then
         _life_ok=0
-        _life_detail="down failed"
+        _life_detail="management forward not listening on local listen+1"
+    fi
+    if [ "$_life_ok" -eq 1 ] && ! INTEROP_CLIENT_OUT=/tmp/wt-interop-rotate.out INTEROP_CLIENT_ERR=/tmp/wt-interop-rotate.err \
+        interop_client_cmd rotate "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null; then
+        _life_ok=0
+        _life_detail="rotate: $(tr '\n' ' ' </tmp/wt-interop-rotate.err | cut -c1-160)"
+        interop_ssh "sudo journalctl -u warptweet-mgmt.service -u warptweet-sshd.service -n 80 --no-pager" >/tmp/wt-interop-rotate-journal.log 2>/dev/null || true
+    fi
+    if [ "$_life_ok" -eq 1 ] && [ -n "${WARPTWEET_INTEROP_OPEN_ENDPOINT:-}" ]; then
+        if ! interop_payload_current "$WARPTWEET_INTEROP_OPEN_ENDPOINT"; then
+            _life_ok=0
+            _life_detail="payload after rotate failed"
+        fi
+    fi
+    if [ "$_life_ok" -eq 1 ]; then
+        if ! INTEROP_CLIENT_OUT=/tmp/wt-interop-down.out INTEROP_CLIENT_ERR=/tmp/wt-interop-down.err \
+            interop_client_cmd down "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null; then
+            _life_ok=0
+            _life_detail="down failed"
+        fi
     fi
     if [ "$_life_ok" -eq 1 ]; then
         INTEROP_CLIENT_OUT=/tmp/wt-interop-up.out INTEROP_CLIENT_ERR=/tmp/wt-interop-up.err \
             interop_client_cmd up "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null || _life_ok=0
         if [ "$_life_ok" -ne 1 ]; then
-            _life_detail="up failed: $(tr '\n' ' ' </tmp/wt-interop-up.err | cut -c1-120)"
-        fi
-    fi
-    if [ "$_life_ok" -eq 1 ] && [ -n "${WARPTWEET_INTEROP_OPEN_ENDPOINT:-}" ]; then
-        if ! interop_payload_current "$WARPTWEET_INTEROP_OPEN_ENDPOINT"; then
-            _life_ok=0
-            _life_detail="payload after up failed"
-        fi
-    fi
-    if [ "$_life_ok" -eq 1 ]; then
-        if ! INTEROP_CLIENT_OUT=/tmp/wt-interop-rotate.out INTEROP_CLIENT_ERR=/tmp/wt-interop-rotate.err \
-            interop_client_cmd rotate "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null; then
-            _life_ok=0
-            _life_detail="rotate: $(tr '\n' ' ' </tmp/wt-interop-rotate.err | cut -c1-160)"
+            _life_detail="up after rotate failed: $(tr '\n' ' ' </tmp/wt-interop-up.err | cut -c1-120)"
         fi
     fi
     if [ "$_life_ok" -eq 1 ] && [ -n "${WARPTWEET_INTEROP_OPEN_ENDPOINT:-}" ]; then
@@ -295,6 +362,7 @@ if [ "${WARPTWEET_INTEROP_RUN_LIFECYCLE}" = "1" ]; then
         interop_record_result stop-restart-rotate-revoke-upgrade positive fail "${_life_detail:-lifecycle command failed}"
     fi
 fi
+interop_phase_clock_rollback
 
 # interop_emit_evidence: 0=all pass, 1=pass+not_run only, 2=fail present
 _ev=0

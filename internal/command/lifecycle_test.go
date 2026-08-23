@@ -35,6 +35,7 @@ func TestLifecycleUsageMentionsCommands(t *testing.T) {
 		"warptweet repair",
 		"warptweet rotate",
 		"warptweet revoke",
+		"warptweet forget",
 		"warptweet uninstall --preserve-identity",
 	} {
 		if !strings.Contains(stdout.String(), required) {
@@ -94,6 +95,40 @@ func TestEnrollPrepareOnlyStagesWithoutSecrets(t *testing.T) {
 		!strings.Contains(stderr.String(), "ssh-keygen") &&
 		!strings.Contains(stderr.String(), "invite") {
 		t.Fatalf("code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+	}
+}
+
+func TestCopyGenerationPolicyStagesRouteManifest(t *testing.T) {
+	t.Parallel()
+
+	generationDir := t.TempDir()
+	stageRoot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(generationDir, "client.wt"), []byte(`{"tunnels":[{"id":"lab-db"}]}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(generationDir, "known_hosts"), []byte("warptweet-lab-db ssh-mldsa44-ed25519@openssh.com AAAA\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	manifest, knownHosts, emptyTrust, err := copyGenerationPolicy(generationDir, stageRoot)
+	if err != nil {
+		t.Fatalf("copyGenerationPolicy: %v", err)
+	}
+	gotManifest, err := os.ReadFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(gotManifest), `"id":"lab-db"`) {
+		t.Fatalf("staged manifest=%s", gotManifest)
+	}
+	gotHosts, err := os.ReadFile(knownHosts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(gotHosts), "warptweet-lab-db") {
+		t.Fatalf("staged known_hosts=%s", gotHosts)
+	}
+	if _, err := os.Stat(emptyTrust); err != nil {
+		t.Fatalf("staged empty trust: %v", err)
 	}
 }
 

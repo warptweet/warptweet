@@ -190,6 +190,15 @@ if [ -z "${WARPTWEET_SOURCE_COMMIT:-}" ]; then
 fi
 [ -n "${WARPTWEET_SOURCE_COMMIT:-}" ] || interop_dev_die "set WARPTWEET_SOURCE_COMMIT or run inside a git checkout"
 export WARPTWEET_SOURCE_COMMIT
+if [ -z "${WARPTWEET_CLEAN_TREE_PROOF:-}" ]; then
+    if git -C "$WT_REPO_ROOT" diff-index --quiet HEAD -- 2>/dev/null &&
+        [ -z "$(git -C "$WT_REPO_ROOT" status --porcelain=v1)" ]; then
+        WARPTWEET_CLEAN_TREE_PROOF=clean
+    else
+        WARPTWEET_CLEAN_TREE_PROOF=dirty-$(git -C "$WT_REPO_ROOT" status --porcelain=v1 | openssl sha256 | awk '{print $NF}')
+    fi
+fi
+export WARPTWEET_CLEAN_TREE_PROOF
 
 _arch=$(uname -m)
 case "$_arch" in

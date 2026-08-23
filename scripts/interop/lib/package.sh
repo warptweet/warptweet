@@ -252,16 +252,43 @@ interop_verify_package_signatures() {
     _server_pkg=$1
     _client_pkg=$2
     _ok=1
+    WARPTWEET_INTEROP_SIGNATURE_DETAIL=""
+    PATH="/opt/homebrew/bin:/usr/local/bin:/usr/sbin:/usr/bin:/bin:$PATH"
+    export PATH
+    case "$_server_pkg" in
+        /*) ;;
+        *) _server_pkg=$WARPTWEET_INTEROP_ARTIFACTS/$_server_pkg ;;
+    esac
+    case "$_client_pkg" in
+        /*) ;;
+        *) _client_pkg=$WARPTWEET_INTEROP_ARTIFACTS/$_client_pkg ;;
+    esac
+    _gpg=
+    if [ -x /opt/homebrew/bin/gpg ]; then
+        _gpg=/opt/homebrew/bin/gpg
+    elif command -v gpg >/dev/null 2>&1; then
+        _gpg=$(command -v gpg)
+    fi
+    interop_log "signature check server=$_server_pkg client=$_client_pkg gpg=${_gpg:-missing} asc=$([ -f "$_server_pkg.asc" ] && echo yes || echo no)"
 
     case "$_server_pkg" in
         *.deb)
-            if command -v dpkg-sig >/dev/null 2>&1; then
+            if [ -n "$_gpg" ] && [ -f "$_server_pkg.asc" ]; then
+                if "$_gpg" --verify "$_server_pkg.asc" "$_server_pkg" >/tmp/wt-interop-gpg-verify.out 2>&1; then
+                    WARPTWEET_INTEROP_SIGNATURE_DETAIL="gpg ${_server_pkg##*/}.asc"
+                else
+                    _ok=0
+                    WARPTWEET_INTEROP_SIGNATURE_DETAIL="gpg verify failed"
+                fi
+            elif command -v dpkg-sig >/dev/null 2>&1; then
                 dpkg-sig --verify "$_server_pkg" >/dev/null 2>&1 || _ok=0
+                WARPTWEET_INTEROP_SIGNATURE_DETAIL="dpkg-sig"
             elif command -v debsig-verify >/dev/null 2>&1; then
                 debsig-verify "$_server_pkg" >/dev/null 2>&1 || _ok=0
-            elif [ -f "$_server_pkg.asc" ] && command -v gpg >/dev/null 2>&1; then
-                gpg --verify "$_server_pkg.asc" "$_server_pkg" >/dev/null 2>&1 || _ok=0
+                WARPTWEET_INTEROP_SIGNATURE_DETAIL="debsig-verify"
             else
+                WARPTWEET_INTEROP_SIGNATURE_DETAIL="no gpg/dpkg-sig and no .asc"
+                export WARPTWEET_INTEROP_SIGNATURE_DETAIL
                 return 1
             fi
             ;;
@@ -269,6 +296,7 @@ interop_verify_package_signatures() {
             if command -v rpm >/dev/null 2>&1; then
                 # Require cryptographic signature presence and success.
                 rpm --checksig "$_server_pkg" 2>/dev/null | grep -Eq 'pgp|gpg|signatures? OK' || _ok=0
+                WARPTWEET_INTEROP_SIGNATURE_DETAIL="rpm --checksig"
             else
                 return 1
             fi
@@ -281,9 +309,15 @@ interop_verify_package_signatures() {
     case "$_client_pkg" in
         *.pkg)
             if command -v pkgutil >/dev/null 2>&1; then
-                pkgutil --check-signature "$_client_pkg" >/dev/null 2>&1 || _ok=0
+                pkgutil --check-signature "$_client_pkg" >/tmp/wt-interop-pkgutil.out 2>&1 || _ok=0
+                if grep -qi 'notarization:[[:space:]]*trusted' /tmp/wt-interop-pkgutil.out 2>/dev/null; then
+                    WARPTWEET_INTEROP_SIGNATURE_DETAIL="${WARPTWEET_INTEROP_SIGNATURE_DETAIL}; pkgutil notarized"
+                else
+                    WARPTWEET_INTEROP_SIGNATURE_DETAIL="${WARPTWEET_INTEROP_SIGNATURE_DETAIL}; pkgutil signed"
+                fi
             elif command -v spctl >/dev/null 2>&1; then
                 spctl -a -t install -v "$_client_pkg" >/dev/null 2>&1 || _ok=0
+                WARPTWEET_INTEROP_SIGNATURE_DETAIL="${WARPTWEET_INTEROP_SIGNATURE_DETAIL}; spctl"
             else
                 return 1
             fi
@@ -293,6 +327,7 @@ interop_verify_package_signatures() {
             ;;
     esac
 
+    export WARPTWEET_INTEROP_SIGNATURE_DETAIL
     [ "$_ok" -eq 1 ]
 }
 
@@ -374,9 +409,9 @@ interop_verify_installed_client() {
 }
 
 interop_derive_provenance_fields() {
-    _server_pkg=${WARPTWEET_INTEROP_SERVER_FROM_PACKAGE:-0}
-    _client_pkg=${WARPTWEET_INTEROP_CLIENT_FROM_PACKAGE:-0}
-    if [ "$_server_pkg" -eq 1 ] && [ "$_client_pkg" -eq 1 ]; then
+    _server_from_pkg=${WARPTWEET_INTEROP_SERVER_FROM_PACKAGE:-0}
+    _client_from_pkg=${WARPTWEET_INTEROP_CLIENT_FROM_PACKAGE:-0}
+    if [ "$_server_from_pkg" -eq 1 ] && [ "$_client_from_pkg" -eq 1 ]; then
         WARPTWEET_INTEROP_PACKAGE_TO_PACKAGE=true
     else
         WARPTWEET_INTEROP_PACKAGE_TO_PACKAGE=false
@@ -417,10 +452,11 @@ interop_phase_install_packages() {
     interop_derive_provenance_fields
 
     # SHA-256 pins and manifests are checked above. Signature is a separate gate.
+    # Use the resolved artifact paths, not the provenance 0/1 flags.
     if interop_verify_package_signatures "$_server_pkg" "$_client_pkg"; then
-        interop_record_result pkg-signature-and-manifest positive pass "pinned artifacts installed, manifests match, package signatures verified"
+        interop_record_result pkg-signature-and-manifest positive pass "pinned artifacts installed, manifests match, signatures verified (${WARPTWEET_INTEROP_SIGNATURE_DETAIL:-ok})"
     else
-        interop_record_result pkg-signature-and-manifest positive not_run "install and digest pins ok; platform package signer validation unavailable or unsuccessful"
+        interop_record_result pkg-signature-and-manifest positive not_run "install and digest pins ok; platform package signer validation unavailable or unsuccessful (${WARPTWEET_INTEROP_SIGNATURE_DETAIL:-})"
     fi
     return 0
 }
