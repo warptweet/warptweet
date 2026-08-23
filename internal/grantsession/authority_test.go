@@ -272,6 +272,31 @@ func TestClearMatchingRemovesLegacyPIDNamedRecords(t *testing.T) {
 	}
 }
 
+func TestGrantLockAcceptsExistingGroupWritableFile(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	lockPath := filepath.Join(root, "grant.lock")
+	if err := os.WriteFile(lockPath, nil, 0o660); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(lockPath, 0o660); err != nil {
+		t.Fatal(err)
+	}
+	authority := &Authority{Root: root, LockPath: lockPath}
+	if err := authority.lock(); err != nil {
+		t.Fatalf("lock existing 0660 file: %v", err)
+	}
+	authority.unlock()
+	info, err := os.Stat(lockPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o660 {
+		t.Fatalf("lock mode=%o want 0660", info.Mode().Perm())
+	}
+}
+
 func TestAuthorityClearDeletesUnparseableRecords(t *testing.T) {
 	t.Parallel()
 

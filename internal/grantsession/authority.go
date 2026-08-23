@@ -261,8 +261,11 @@ func (authority *Authority) lock() error {
 		return err
 	}
 	if err := file.Chmod(0o660); err != nil {
-		_ = file.Close()
-		return err
+		info, statErr := file.Stat()
+		if statErr != nil || info.Mode().Perm()&0o060 != 0o060 {
+			_ = file.Close()
+			return err
+		}
 	}
 	if err := flockExclusive(file); err != nil {
 		_ = file.Close()
