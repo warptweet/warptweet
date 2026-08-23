@@ -53,12 +53,8 @@ func Preflight(policy Policy) error {
 	if err != nil {
 		return err
 	}
-	keys, err := authorizedRawKeys(authRaw)
-	if err != nil {
+	if _, err := authorizedRawKeys(authRaw); err != nil {
 		return fmt.Errorf("authorized_keys: %w", err)
-	}
-	if len(keys) == 0 {
-		return fmt.Errorf("authorized_keys is empty")
 	}
 	if policy.HostSignSocket != "" {
 		if _, err := os.Stat(policy.HostSignSocket); err != nil {

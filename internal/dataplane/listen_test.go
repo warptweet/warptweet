@@ -149,8 +149,8 @@ func TestPreflightRejectsMissingAndWorldWritableKeys(t *testing.T) {
 	if err := os.WriteFile(policy.HostKeyPath, []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := Preflight(policy); err == nil {
-		t.Fatal("accepted empty authorized_keys")
+	if err := Preflight(policy); err != nil {
+		t.Fatalf("empty authorized_keys before first enroll: %v", err)
 	}
 	auth := filepath.Join(dir, "authorized_keys")
 	writeTestAuthorizedKey(t, auth)
