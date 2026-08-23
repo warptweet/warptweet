@@ -455,13 +455,14 @@ go build -trimpath -o "$REMOTE_ROOT/warptweet" ./cmd/warptweet
 go build -trimpath -o "$REMOTE_ROOT/warptweet-provisioner" ./cmd/warptweet-provisioner
 chown warptweet-build:warptweet-build "$REMOTE_ROOT/warptweet" "$REMOTE_ROOT/warptweet-provisioner"
 chown -R warptweet-build:warptweet-build "$WT_BUILD_HOME/warptweet-openssh-stage"
-rm -rf "$REMOTE_ROOT/pkg-out"
+install -d -o warptweet-build -g warptweet-build -m 0755 "$REMOTE_ROOT/out"
+rm -rf "$REMOTE_ROOT/out/pkg"
 sudo -u warptweet-build -H env HOME="$WT_BUILD_HOME" WARPTWEET_VERSION="${WARPTWEET_VERSION:-0.1.0-dev}" \
   ./scripts/build-linux-packages.sh \
   "$WT_BUILD_HOME/warptweet-openssh-stage" \
   "$REMOTE_ROOT/warptweet" \
-  "$REMOTE_ROOT/pkg-out"
-DEB=$(ls -1 "$REMOTE_ROOT/pkg-out"/*.deb | head -1)
+  "$REMOTE_ROOT/out/pkg"
+DEB=$(ls -1 "$REMOTE_ROOT/out/pkg"/*.deb | head -1)
 cp -a "$DEB" "$REMOTE_ROOT/server.deb"
 REMOTE
 
