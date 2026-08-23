@@ -27,6 +27,8 @@ WT_REPO_ROOT=$(CDPATH= cd -- "$WT_SCRIPT_DIRECTORY/../.." && pwd)
 . "$WARPTWEET_INTEROP_ROOT/lib/fixture.sh"
 # shellcheck disable=SC1091
 . "$WARPTWEET_INTEROP_ROOT/lib/evidence.sh"
+# shellcheck disable=SC1091
+. "$WARPTWEET_INTEROP_ROOT/lib/privilege.sh"
 
 usage() {
     cat <<'EOF'
@@ -134,6 +136,13 @@ else
     interop_record_result engine-identity-trust-preflight positive fail "doctor-server failed after host"
     interop_emit_evidence || true
     interop_die "doctor-server failed after host"
+fi
+
+if interop_collect_privilege_evidence; then
+    interop_log "live UID/capability/host-sign isolation matched the unit contract"
+else
+    interop_emit_evidence || true
+    interop_die "live UID/capability/host-sign isolation failed"
 fi
 
 # --- Connect on local Mac ---
