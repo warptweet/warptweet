@@ -3,9 +3,13 @@
 
 interop_collect_privilege_evidence() {
     _out=${WARPTWEET_INTEROP_WORK:-/tmp}/privilege-evidence.txt
+    _err=${WARPTWEET_INTEROP_WORK:-/tmp}/privilege-evidence.err
     : >"$_out"
+    : >"$_err"
 
-    if ! interop_ssh 'sh -s' >"$_out" 2>"$_out.err" <<'REMOTE'
+    # Copy the probe to a remote file. ssh stdin is not a safe script channel:
+    # an empty `sh -s` exits 0 and looks like a pass.
+    if ! interop_ssh "cat > /tmp/warptweet-privilege-probe.sh && sh /tmp/warptweet-privilege-probe.sh" >"$_out" 2>"$_err" <<'REMOTE'
 set -eu
 LC_ALL=C
 export LC_ALL
@@ -27,13 +31,13 @@ systemctl is-active --quiet "$SIGN_UNIT" || fail "$SIGN_UNIT is not active"
 
 sshd_user=$(systemctl show -p User --value "$SSHD_UNIT")
 sshd_group=$(systemctl show -p Group --value "$SSHD_UNIT")
-sshd_capb=$(systemctl show -p CapabilityBoundingSet --value "$SSHD_UNIT")
-sshd_capa=$(systemctl show -p AmbientCapabilities --value "$SSHD_UNIT")
+sshd_capb=$(systemctl show -p CapabilityBoundingSet --value "$SSHD_UNIT" | tr '[:upper:]' '[:lower:]')
+sshd_capa=$(systemctl show -p AmbientCapabilities --value "$SSHD_UNIT" | tr '[:upper:]' '[:lower:]')
 sshd_exec=$(systemctl show -p ExecStart --value "$SSHD_UNIT")
 [ "$sshd_user" = "warptweet-sshd" ] || fail "sshd User=$sshd_user want warptweet-sshd"
 [ "$sshd_group" = "warptweet-sshd" ] || fail "sshd Group=$sshd_group want warptweet-sshd"
-[ "$sshd_capb" = "CAP_NET_BIND_SERVICE" ] || fail "sshd CapabilityBoundingSet=$sshd_capb"
-[ "$sshd_capa" = "CAP_NET_BIND_SERVICE" ] || fail "sshd AmbientCapabilities=$sshd_capa"
+[ "$sshd_capb" = "cap_net_bind_service" ] || fail "sshd CapabilityBoundingSet=$sshd_capb"
+[ "$sshd_capa" = "cap_net_bind_service" ] || fail "sshd AmbientCapabilities=$sshd_capa"
 case "$sshd_exec" in
     *"warptweet server data-plane"*) ;;
     *) fail "sshd ExecStart=$sshd_exec" ;;
@@ -113,7 +117,7 @@ REMOTE
         interop_log "privilege evidence written to $_out"
         return 0
     fi
-    cat "$_out" "$_out.err" >&2 || true
-    interop_log "privilege evidence failed; see $_out and $_out.err"
+    cat "$_out" "$_err" >&2 || true
+    interop_log "privilege evidence failed; see $_out and $_err"
     return 1
 }
