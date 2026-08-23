@@ -1,6 +1,7 @@
 package dataplane
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"net"
@@ -8,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -166,6 +169,182 @@ func TestOpenSSHClientDirectTCPIP(t *testing.T) {
 	}
 	if string(got) != string(payload) {
 		t.Fatalf("echo=%q", got)
+	}
+}
+
+func TestOpenSSHClientServerInitiatedRekey(t *testing.T) {
+	sshPath, keygenPath := packagedOpenSSH(t)
+
+	dir := t.TempDir()
+	hostKeyPath := filepath.Join(dir, "host")
+	clientKeyPath := filepath.Join(dir, "client")
+	generateOpenSSHKey(t, keygenPath, hostKeyPath, "dataplane-host")
+	generateOpenSSHKey(t, keygenPath, clientKeyPath, "dataplane-client")
+
+	backend, backendAddr := startEchoBackend(t)
+	defer backend.Close()
+
+	listenAddr := freeAddrPort(t)
+	localAddr := freeAddrPort(t)
+
+	authPath := filepath.Join(dir, "authorized_keys")
+	clientPub, err := os.ReadFile(clientKeyPath + ".pub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(authPath, clientPub, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	policy := mustPolicy(t)
+	policy.Listen = listenAddr
+	policy.Target = backendAddr
+	policy.HostKeyPath = hostKeyPath
+	policy.AuthorizedKeysPath = authPath
+	policy.RekeyAfter = 1024
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- Serve(ctx, policy, nil)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-errCh:
+		case <-time.After(2 * time.Second):
+		}
+	})
+	waitForListen(t, errCh, policy.Listen.String())
+
+	hostPub, err := os.ReadFile(hostKeyPath + ".pub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	knownHosts, err := knownhosts.RenderManagedHost("loopback", hostPub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	knownHostsPath := filepath.Join(dir, "known_hosts")
+	emptyKnownHosts := filepath.Join(dir, "known_hosts.empty")
+	if err := os.WriteFile(knownHostsPath, knownHosts, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(emptyKnownHosts, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	selected, err := profile.Lookup(profile.CurrentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args, err := engine.Arguments(engine.ClientSpec{
+		TunnelID:             "loopback",
+		ServerAddress:        listenAddr.Addr(),
+		ServerPort:           listenAddr.Port(),
+		ServerUser:           server.DefaultDedicatedUser,
+		ListenAddress:        netip.MustParseAddr("127.0.0.1"),
+		ListenPort:           localAddr.Port(),
+		TargetAddress:        backendAddr.Addr(),
+		TargetPort:           backendAddr.Port(),
+		IdentityFile:         clientKeyPath,
+		KnownHostsFile:       knownHostsPath,
+		GlobalKnownHostsFile: emptyKnownHosts,
+		Profile:              selected,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if len(args) == 0 {
+		t.Fatal("engine.Arguments returned no argv")
+	}
+	replaced := false
+	for i, arg := range args {
+		if arg == "LogLevel=VERBOSE" {
+			args[i] = "LogLevel=DEBUG3"
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		t.Fatal("engine.Arguments omitted LogLevel=VERBOSE")
+	}
+	cmd := exec.Command(sshPath, args...)
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	errOut := make(chan []byte, 1)
+	go func() {
+		out, _ := io.ReadAll(stderr)
+		errOut <- out
+	}()
+	defer func() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+	}()
+
+	payload := bytes.Repeat([]byte("openssh-rekey"), 512)
+	var conn net.Conn
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+			t.Fatalf("ssh exited early: %s", <-errOut)
+		}
+		conn, err = net.DialTimeout("tcp", localAddr.String(), 100*time.Millisecond)
+		if err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if conn == nil {
+		select {
+		case out := <-errOut:
+			t.Fatalf("dial LocalForward: %v\nssh stderr:\n%s", err, out)
+		default:
+			t.Fatalf("dial LocalForward: %v", err)
+		}
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(20 * time.Second))
+	for i := 0; i < 3; i++ {
+		if _, err := conn.Write(payload); err != nil {
+			select {
+			case out := <-errOut:
+				t.Fatalf("echo write round %d: %v\nssh stderr:\n%s", i, err, out)
+			default:
+				t.Fatalf("echo write round %d: %v", i, err)
+			}
+		}
+		got := make([]byte, len(payload))
+		if _, err := io.ReadFull(conn, got); err != nil {
+			select {
+			case out := <-errOut:
+				t.Fatalf("echo read round %d: %v\nssh stderr:\n%s", i, err, out)
+			default:
+				t.Fatalf("echo read round %d: %v", i, err)
+			}
+		}
+		if !bytes.Equal(got, payload) {
+			t.Fatalf("echo round %d mismatch", i)
+		}
+	}
+	_ = conn.Close()
+	_ = cmd.Process.Signal(syscall.SIGTERM)
+	out := <-errOut
+	_ = cmd.Wait()
+	sent := strings.Count(string(out), "SSH2_MSG_NEWKEYS sent")
+	received := strings.Count(string(out), "SSH2_MSG_NEWKEYS received")
+	if sent < 3 || received < 3 {
+		t.Fatalf("expected at least two rekey epochs (3 NEWKEYS each way), sent=%d received=%d\nargv=%q\nssh stderr:\n%s", sent, received, args, out)
+	}
+	if strings.Contains(string(out), "Bad packet length") {
+		t.Fatalf("OpenSSH rejected a packet after rekey:\n%s", out)
 	}
 }
 

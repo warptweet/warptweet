@@ -80,6 +80,36 @@ func TestClientInitiatedRekeyKeepsSessionID(t *testing.T) {
 	}
 }
 
+func TestServerInitiatedRekeyKeepsSessionID(t *testing.T) {
+	t.Parallel()
+
+	client, policy := startAuthenticatedLoopbackWith(t, func(p *Policy) {
+		p.RekeyAfter = 256
+	})
+	defer client.conn.Close()
+	firstID := append([]byte(nil), client.sessionID...)
+	remoteID, localID, err := client.openDirectTCPIP(policy.Target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := bytes.Repeat([]byte("server-rekey"), 256)
+	for i := 0; i < 4; i++ {
+		if err := client.sendData(remoteID, payload); err != nil {
+			t.Fatal(err)
+		}
+		got, err := client.recvExact(localID, remoteID, len(payload))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, payload) {
+			t.Fatalf("echo round %d", i)
+		}
+	}
+	if !bytes.Equal(client.sessionID, firstID) {
+		t.Fatal("session ID changed across server-initiated rekey")
+	}
+}
+
 func TestChannelQuotaRejectsExcess(t *testing.T) {
 	t.Parallel()
 
@@ -204,7 +234,6 @@ func (c *loopbackClient) rekey() error {
 }
 
 func (c *loopbackClient) completeKEX() error {
-	initial := len(c.sessionID) == 0
 	dk, err := mlkem.GenerateKey768()
 	if err != nil {
 		return err
@@ -277,9 +306,7 @@ func (c *loopbackClient) completeKEX() error {
 	if err := c.write([]byte{sshMsgNewKeys}); err != nil {
 		return err
 	}
-	if initial {
-		c.outSeq = 0
-	}
+	c.outSeq = 0
 	newKeys, err := c.read()
 	if err != nil {
 		return err
@@ -291,10 +318,21 @@ func (c *loopbackClient) completeKEX() error {
 	c.in = pendingIn
 	c.clearOut = false
 	c.clearIn = false
-	if initial {
-		c.inSeq = 0
-	}
+	c.inSeq = 0
 	return nil
+}
+
+func (c *loopbackClient) completePeerRekey(serverKex []byte) error {
+	c.serverKex = serverKex
+	clientKex, err := c.policy.marshalKexInitClient()
+	if err != nil {
+		return err
+	}
+	c.clientKex = clientKex
+	if err := c.write(clientKex); err != nil {
+		return err
+	}
+	return c.completeKEX()
 }
 
 func (c *loopbackClient) authenticate() error {
@@ -446,6 +484,11 @@ func (c *loopbackClient) recvData(localID uint32) ([]byte, error) {
 		}
 		switch pkt[0] {
 		case sshMsgIgnore, sshMsgDebug, sshMsgExtInfo, sshMsgChannelWindowAdjust:
+			continue
+		case sshMsgKexInit:
+			if err := c.completePeerRekey(pkt); err != nil {
+				return nil, err
+			}
 			continue
 		case sshMsgChannelData:
 			gotID, rest, err := consumeUint32(pkt[1:])

@@ -241,7 +241,8 @@ func (c *connection) handleNewKeys() error {
 	c.in = c.pendingIn
 	c.pendingIn = nil
 	c.clearIn = false
-	if c.strictKEX && c.initialKEX {
+	if c.strictKEX {
+		// OpenSSH PROTOCOL 1.10: seq reset persists for every NEWKEYS.
 		c.inSeq = 0
 	}
 	c.initialKEX = false
@@ -353,7 +354,7 @@ func (c *connection) handleKEX(payload []byte) error {
 	c.pendingIn = pendingIn
 	c.clearOut = false
 	c.phase = kexAwaitNewKeys
-	if c.strictKEX && c.initialKEX {
+	if c.strictKEX {
 		c.outSeq = 0
 	}
 	c.mu.Unlock()
@@ -448,6 +449,7 @@ func (c *connection) handleUserauth(payload []byte) error {
 		return c.write(userauthFailure())
 	}
 	c.authed = true
+	c.bytesOut = 0
 	sum := sha256.Sum256(hostKeyBlob(rawPub))
 	c.keyDigest = hex.EncodeToString(sum[:])
 	connID, err := newConnectionID()
@@ -582,7 +584,7 @@ func (c *connection) write(payload []byte) error {
 		c.outSeq++
 	}
 	c.bytesOut += uint64(n)
-	needRekey := c.phase == kexReady && c.rekeyAfter > 0 && c.bytesOut >= c.rekeyAfter && payload[0] != sshMsgKexInit
+	needRekey := c.authed && c.phase == kexReady && c.rekeyAfter > 0 && c.bytesOut >= c.rekeyAfter && payload[0] != sshMsgKexInit
 	c.mu.Unlock()
 	if needRekey {
 		return c.startRekey()
