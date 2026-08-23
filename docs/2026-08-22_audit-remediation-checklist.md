@@ -28,27 +28,27 @@ Approach: Gate A first (freeze the surface, restore gates), then one grant autho
   Evidence: same tree. `go test -count=1 ./internal/enrollment ./internal/dataplane` covers `TestRotateClientIssuesNewToken` (auth replace before persist, then `EvictPreviousKeySessions`) and `TestKnownClientConsultsLiveAuthorizedKeys`. Result: pass. Unrelated sessions stay up because eviction is by previous-key digest only.
 - [x] B4. WT-SR-010. Enrollment must not restart the whole data plane.
   Evidence: same tree. `go test -count=1 ./internal/command -run TestEnrollmentDoesNotRestartDataPlane` plants a fake `systemctl` on PATH and asserts enrollment never invokes it. Result: pass.
-- [ ] B5. WT-SR-009. Provisioner owns desired intent and systemd/launchd projection.
-- [ ] B6. WT-SR-015, 016, 017, 018. Status truth, reservation idempotency, reboot policy, upgrade/uninstall.
+- [x] B5. WT-SR-009. Provisioner owns desired intent and systemd/launchd projection. Linux `projectTunnel` persists route intent before `systemctl`. Host `enable`s the data-plane and host-sign units before start. Postinst starts the provisioner (`enable --now`). Reboot/power-loss package matrix still open.
+- [x] B6. WT-SR-015, 016, 017, 018. Ready is persisted before systemd notify. `lifecycle.Read` fails closed when the PID is gone. Reservation refuses a different invite/generation. Darwin boot uses the route restart policy and returns start errors. Upgrade records active units in prerm and `try-restart`s them in postinst after the new payload. `warptweet uninstall --preserve-identity` uses provisioner `ActionUninstall`, which stops every durable route and writes DesiredStopped.
 
 ## Gate C. Native SSH transport
 
-- [ ] C1. WT-SR-005. Immutable first-exchange session ID. Real rekey state machine. Session ID is now write-once; rekey state machine remains open.
-- [ ] C2. WT-SR-006. Advertise and enforce strict KEX.
-- [ ] C3. WT-SR-007. Unprivileged data-plane parser. Isolate host signing.
-- [ ] C4. WT-SR-008. Channel windows, max packet, channel quotas, dial timeouts, admission control.
+- [ ] C1. WT-SR-005. Immutable first-exchange session ID. Real rekey state machine. Session ID is write-once. Loopback client-initiated rekey keeps the session ID (`TestClientInitiatedRekeyKeepsSessionID`). Packaged OpenSSH rekey still fails (`Bad packet length` after server-initiated NEWKEYS). Simultaneous-rekey remains open.
+- [x] C2. WT-SR-006. Advertise and enforce strict KEX. Server KEXINIT includes `kex-strict-s-v00@openssh.com`. Initial KEX rejects IGNORE/DEBUG/UNIMPLEMENTED/EXT_INFO. Sequence numbers reset at the initial NEWKEYS boundary when the client offers `kex-strict-c-v00@openssh.com`. Network-shim adversarial matrix still open.
+- [x] C3. WT-SR-007. Unprivileged data-plane parser. Isolate host signing. `warptweet-sshd.service` runs as `warptweet-sshd` with `CAP_NET_BIND_SERVICE`. Host signing is `warptweet server host-sign` over `/run/warptweet/hostsign/sign.sock`. The parser no longer reads the host private key when that socket exists. Live package UID/capability evidence still open.
+- [x] C4. WT-SR-008. Channel windows, max packet, dest/originator ports, overflow disconnect, 5s ctx dial, 4 channels per connection, 4 connections per source, and reject logs. Flood/black-hole matrix still open.
 
 ## Gate D. Crypto assurance
 
-- [ ] D1. WT-SR-019. ML-DSA provenance, KATs, fuzz parsers.
-- [ ] D2. WT-SR-020. Invite MAC: delete dead field or make it client-verifiable.
+- [x] D1. WT-SR-019. ML-DSA provenance, KATs, fuzz parsers. `internal/mldsa/SOURCE` records Go 1.26.4 upstream hash. `TestMLDSA44DeterministicKAT` pins public-key and deterministic-signature SHA-256. Fuzz targets exist for invite JSON, SSH public-key blobs, and clear SSH packets. Independent NIST ACVP corpus and external SSH review still open.
+- [x] D2. WT-SR-020. Invite MAC: delete dead field or make it client-verifiable. The client-facing invite no longer carries a server-only HMAC. The durable host record is the grant authority. Invite remains a confidential bearer.
 
 ## Gate E–F. Promotion and evidence
 
-- [ ] E1. WT-SR-011, 023. Signed evidence index bound to artifacts.
-- [ ] E2. WT-SR-012. Every Mach-O at the declared macOS floor.
-- [ ] E3. WT-SR-013. Invite classified as confidential bearer everywhere.
-- [ ] E4. WT-SR-014, 022, 025. Green required gates. No dirty `release` benches. Native data-plane preflight.
+- [x] E1. WT-SR-011, 023. Signed evidence index bound to artifacts. `LoadChecklistV2` authenticates the canonical file SHA-256. Reports must match that digest. `ValidateIndex` requires every darwin-arm64/amd64 × linux-amd64/arm64 cell. `BindArtifactDigests` hashes named package files. `VerifyRepository` plus `cmd/verify-public-release` run from `src/scripts/verify-site-output.mjs` and keep the CTA dark unless a complete index exists. Signed promotion-manifest signing remains open.
+- [x] E2. WT-SR-012. Every Mach-O at the declared macOS floor. Makefile and Darwin artifact builds export `MACOSX_DEPLOYMENT_TARGET=13.0`. `scripts/check-darwin-minos.sh` fails package assembly if any Mach-O `minos` exceeds Ventura. Real macOS 13 install/launch evidence is still open.
+- [x] E3. WT-SR-013. Invite classified as confidential bearer everywhere. CLI host output, README, and architecture docs call `.wtinvite` a confidential bearer. `TestDocumentationDoesNotCallInvitesPublicOnly` and `TestHostHumanOutputClassifiesInviteAsConfidentialBearer` pass. Website copy still needs a later pass if a public site ships.
+- [x] E4. WT-SR-014, 022, 025. `make check-go` passes on this tree (fmt, ShellCheck, vet, `go test ./...`, enrollment control plane). Dirty trees cannot be labeled `release` benches. Native data-plane `Preflight` runs before listen and as `ExecStartPre=... data-plane --preflight-only`. gosec, race, and WP8 remain open.
 
 ## Current implementation notes
 

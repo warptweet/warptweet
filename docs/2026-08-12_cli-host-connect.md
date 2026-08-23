@@ -229,7 +229,7 @@ warptweet gen client --name studio-mac
 
 - No DNS for authorized targets in v1 (exact IP:port under the hood).
 - Port-only `--to 5432` is sugar for `127.0.0.1:5432` on the server machine.
-- Invites are single-use, short-lived, public-only.
+- Invites are single-use, short-lived confidential bearers. Transfer them authenticated and delete them after use.
 - Fail closed on profile, path, ownership, and algorithm mismatch.
 - Target health is never implied by Ready.
 

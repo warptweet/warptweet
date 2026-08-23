@@ -61,7 +61,7 @@ Reviewers should keep these three kinds distinct.
 | --- | --- | --- | --- |
 | `warptweet.client-tunnels` | `client.wt` | Client policy: server endpoint, tunnels, supervision, ssh digest pin | No |
 | `warptweet.server-gateway` | `server.wt` | Server policy: listen, target, account, fixed key paths, sshd/bundle pins | No |
-| `warptweet.invite` | `*.wtinvite` (JSON document) | Single-use enrollment authorization | Public only; MAC is server-side authenticity |
+| `warptweet.invite` | `*.wtinvite` (JSON document) | Single-use enrollment authorization | Confidential bearer; transfer authenticated and delete after use |
 
 Media type for tunnel manifests: `application/vnd.warptweet.tunnel+json`.  
 Load path requires the **`.wt` extension**.  
@@ -128,9 +128,9 @@ Schemas: `schemas/client-tunnels-v1.schema.json`, `schemas/server-gateway-v1.sch
 
 ### Purpose
 
-Single-use, short-lived, **public-only** enrollment authorizations.  
-Kind: `warptweet.invite`, `schema_version: 1`.  
-Not a tunnel manifest. Not a bearer token reusable after consume. Never private keys or passwords.
+Single-use, short-lived, **confidential bearer** enrollment authorizations.  
+Kind: `warptweet.invite`, `schema_version: 2`.  
+Not a tunnel manifest. Not reusable after consume. Never private keys or passwords. Transfer over an authenticated channel and delete after consumption or expiry.
 
 ### Canonical fields (from `internal/enrollment`)
 
@@ -187,13 +187,13 @@ sequenceDiagram
   participant C as Client host
 
   Op->>S: host
-  S->>S: host key + server.wt + MAC secret
+  S->>S: host key + server.wt
   Op->>S: host writes one invite
-  S-->>Op: invite file / JSON (public + MAC)
-  Op->>C: transfer invite file
+  S-->>Op: confidential invite file
+  Op->>C: authenticated transfer of invite file
   C->>C: parse invite, gen client key locally
-  C->>S: EnrollmentRequest (public only)
-  S->>S: verify MAC, consume invite, install authorized_keys
+  C->>S: EnrollmentRequest (no private keys)
+  S->>S: match durable invite record, consume invite, install authorized_keys
   S-->>C: EnrollmentProof
   C->>C: activate client.wt + known_hosts + identity
   C->>S: SSH tunnel up
