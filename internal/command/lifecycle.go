@@ -1478,6 +1478,10 @@ func projectManagedTunnel(ctx context.Context, routeID string, start bool) error
 	case "linux":
 		return projectLinuxTunnel(ctx, routeID, start)
 	case "darwin":
+		if os.Geteuid() == 0 {
+			// Root is the provisioner. It bounce-starts launchd after rotate/revoke.
+			return nil
+		}
 		return fmt.Errorf("%w: start or reinstall the WarpTweet client package so the provisioner socket exists", outcome.ErrProvisionerUnavailable)
 	default:
 		return fmt.Errorf("%w: no service-manager projector for %s", outcome.ErrPackageBoundary, runtime.GOOS)

@@ -152,7 +152,19 @@ func executeRequest(ctx context.Context, request Request, serviceUID, serviceGID
 	case ActionDown:
 		return stopTunnel(ctx, request.TunnelID)
 	case ActionRotate, ActionRevoke:
-		return executeController(ctx, request.Action, request.TunnelID)
+		output, err := executeController(ctx, request.Action, request.TunnelID)
+		if err != nil {
+			return output, err
+		}
+		if request.Action == ActionRevoke {
+			_, stopErr := stopTunnel(ctx, request.TunnelID)
+			return output, stopErr
+		}
+		started, startErr := startTunnel(ctx, request.TunnelID, false, serviceUID, serviceGID)
+		if startErr != nil {
+			return output, startErr
+		}
+		return output + started, nil
 	case ActionUninstall:
 		return uninstallAllRoutes(ctx, installlayout.DarwinClientRoutesDirectory, func(ctx context.Context, routeID string) error {
 			_, err := stopTunnel(ctx, routeID)

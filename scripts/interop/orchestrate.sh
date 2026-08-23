@@ -72,6 +72,7 @@ interop_require_cmd sudo
 
 interop_log "work dir $WARPTWEET_INTEROP_WORK"
 interop_ssh_check
+interop_cleanup_stale_client_routes
 
 # --- Install pinned packages ---
 if interop_phase_install_packages; then

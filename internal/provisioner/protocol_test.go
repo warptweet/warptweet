@@ -164,11 +164,17 @@ func TestRotateAndRevokeDoNotStopTheTunnelFirst(t *testing.T) {
 		if block == "" {
 			t.Fatalf("%s missing rotate/revoke action block", name)
 		}
-		if strings.Contains(block, "stopTunnel") || strings.Contains(block, "projectTunnel") {
-			t.Fatalf("%s still stops the tunnel before rotate/revoke", name)
-		}
-		if !strings.Contains(block, "executeController") {
+		execIdx := strings.Index(block, "executeController")
+		if execIdx < 0 {
 			t.Fatalf("%s rotate/revoke does not invoke the controller", name)
+		}
+		stopIdx := strings.Index(block, "stopTunnel")
+		projectIdx := strings.Index(block, "projectTunnel")
+		if stopIdx >= 0 && stopIdx < execIdx {
+			t.Fatalf("%s stops the tunnel before rotate/revoke", name)
+		}
+		if projectIdx >= 0 && projectIdx < execIdx {
+			t.Fatalf("%s projects the tunnel before rotate/revoke", name)
 		}
 	}
 }

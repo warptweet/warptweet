@@ -1,6 +1,17 @@
 # shellcheck shell=sh
 # Extra Phase A cases that this darwin-arm64 × linux-amd64 lab pair can prove.
 
+interop_cleanup_stale_client_routes() {
+    # Leftover unless-stopped interop tunnels consume the data-plane source quota.
+    for _plist in /Library/LaunchDaemons/com.warptweet.tunnel.interop-mac*.plist; do
+        [ -f "$_plist" ] || continue
+        _id=$(basename "$_plist" .plist)
+        _id=${_id#com.warptweet.tunnel.}
+        INTEROP_CLIENT_OUT=/tmp/wt-interop-stale-down.out INTEROP_CLIENT_ERR=/tmp/wt-interop-stale-down.err \
+            interop_client_cmd down "$_id" >/dev/null 2>&1 || true
+    done
+}
+
 interop_python_json_get() {
     # file key
     python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2],"") or "")' "$1" "$2"
