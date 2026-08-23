@@ -16,7 +16,8 @@ Approach: Gate A first (freeze the surface, restore gates), then one grant autho
 - [x] A2. Remove `warptweet rsync` from the public command surface. Redesign later behind a dedicated identity and root-owned config.
 - [x] A3. Restore `make check-go` (ShellCheck POSIX vs bash bench script, unused vars).
 - [x] A4. Restore `go test ./...` (profile fixtures, Darwin layout expectation, secret-scan path).
-- [ ] A5. Increment version only from a clean tree after A3–A4.
+- [x] A5. Increment version only from a clean tree after A3–A4.
+  Evidence: `c28bb892bcd2d3714d8f464466b4f65cdb0aeabf` is a clean Gates C–E revision. `command.Version` is `0.1.0-dev` so this tree does not share identity with tagged `v0.1.0-rc.8`. Do not retag `v0.1.0-rc.8`. Do not cut `v0.1.0-rc.9` until C1 and package/WP8 evidence exist.
 
 ## Gate B. One grant and lifecycle authority
 
@@ -52,4 +53,5 @@ Approach: Gate A first (freeze the surface, restore gates), then one grant autho
 
 ## Current implementation notes
 
-- 2026-08-22: A1–A4, B1–B4 done at package level. ShellCheck honors bash shebangs including trailing arguments. Example and preflight profile IDs match CurrentID. Darwin fail-closed tests accept permission denied. Rotate/revoke use a separate admin lock and no longer stop the tunnel first. Rotation evicts old-key sessions after the proof is flushed. Data plane consults live authorized_keys; enrollment does not invoke systemctl. Secret scan: leftover invitations must be deleted or quarantined before `go test -count=1 ./internal/secretscan`; skipping gitignored `scripts/interop/work`, `local`, or `artifacts` is not accepted closure. Command result on this tree: pass (workspace prefixes still skipped in `ScanTree`; that skip is a remaining E3/A4 gap). Rekey, strict KEX, privilege drop, and remaining gates still open.
+- 2026-08-23: A5 done. Clean C–E revision `c28bb892bcd2d3714d8f464466b4f65cdb0aeabf`, then `command.Version` `0.1.0-dev`. Remaining structural work is C1 packaged-OpenSSH rekey. Package/WP8 evidence (UID/capability, reboot, macOS 13 install) is still open. No new RC tag.
+- 2026-08-22: A1–A4, B1–B4 done at package level. ShellCheck honors bash shebangs including trailing arguments. Example and preflight profile IDs match CurrentID. Darwin fail-closed tests accept permission denied. Rotate/revoke use a separate admin lock and no longer stop the tunnel first. Rotation evicts old-key sessions after the proof is flushed. Data plane consults live authorized_keys; enrollment does not invoke systemctl. Secret scan: leftover invitations must be deleted or quarantined before `go test -count=1 ./internal/secretscan`; skipping gitignored `scripts/interop/work`, `local`, or `artifacts` is not accepted closure. Command result on this tree: pass (workspace prefixes still skipped in `ScanTree`; that skip is a remaining E3/A4 gap).

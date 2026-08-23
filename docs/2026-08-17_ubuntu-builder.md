@@ -45,9 +45,12 @@ ssh -o StrictHostKeyChecking=yes -i "$HOME/.ssh/id_ed25519" ubuntu@203.0.113.10 
 
 ## Every Linux RC
 
-From the tagged WarpTweet tree on this Mac. `VERSION` must match
+From a tagged WarpTweet tree on this Mac. `VERSION` must match
 `command.Version` in `internal/command/command.go`. Host, SSH identity,
-and `WARPTWEET_LINUX_GPG_KEY` come from `.env`.
+and `WARPTWEET_LINUX_GPG_KEY` come from `.env`. The current tree is
+`0.1.0-dev`; `linux-rc` rejects `*-dev*` versions. Do not rebuild or
+retag `v0.1.0-rc.8`. Do not cut the next RC until packaged OpenSSH
+rekey and package/WP8 evidence exist.
 
 ```sh
 make linux-rc VERSION=0.1.0-rc.8
