@@ -194,6 +194,15 @@ ensure_client_pkg() {
     if [ -e "$_pkg" ]; then
         rm -f "$_pkg"
     fi
+    if [ -z "${WARPTWEET_INSTALLER_IDENTITY:-}" ] &&
+        security find-identity -v -p basic 2>/dev/null | grep -Fq "Developer ID Installer: Baldwinson Corporation (CP4268Q8UF)"; then
+        WARPTWEET_INSTALLER_IDENTITY="Developer ID Installer: Baldwinson Corporation (CP4268Q8UF)"
+        export WARPTWEET_INSTALLER_IDENTITY
+    fi
+    if [ -z "${WARPTWEET_NOTARY_PROFILE:-}" ] && [ -n "${WARPTWEET_INSTALLER_IDENTITY:-}" ]; then
+        WARPTWEET_NOTARY_PROFILE=warptweet-notary
+        export WARPTWEET_NOTARY_PROFILE
+    fi
     ensure_log "assembling client package $_pkg"
     "$WT_REPO_ROOT/scripts/build-macos-pkg.sh" \
         "$_stage" \
@@ -469,6 +478,11 @@ REMOTE
     _out_deb=warptweet_${WARPTWEET_RELEASE_VERSION}_amd64.deb
     # shellcheck disable=SC2086
     scp $_scp_base "$_target:$_remote_root/server.deb" "$WARPTWEET_INTEROP_ARTIFACTS/$_out_deb"
+    if [ -n "${WARPTWEET_LINUX_GPG_KEY:-}" ] && [ -x "$WT_REPO_ROOT/scripts/sign-linux-deb.sh" ]; then
+        ensure_log "signing Linux package with $WARPTWEET_LINUX_GPG_KEY"
+        "$WT_REPO_ROOT/scripts/sign-linux-deb.sh" "$WARPTWEET_INTEROP_ARTIFACTS/$_out_deb" ||
+            ensure_log "warning: Linux package signing failed (pinentry?)"
+    fi
     _have_server=1
     ensure_log "server package ready: $WARPTWEET_INTEROP_ARTIFACTS/$_out_deb"
 }

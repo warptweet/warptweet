@@ -160,7 +160,7 @@ func executeRequest(ctx context.Context, request Request, serviceUID, serviceGID
 			_, stopErr := stopTunnel(ctx, request.TunnelID)
 			return output, stopErr
 		}
-		started, startErr := startTunnel(ctx, request.TunnelID, false, serviceUID, serviceGID)
+		started, startErr := restartTunnel(ctx, request.TunnelID, false, serviceUID, serviceGID)
 		if startErr != nil {
 			return output, startErr
 		}
@@ -196,6 +196,14 @@ func executeEnroll(ctx context.Context, request Request) (string, error) {
 }
 
 func startTunnel(ctx context.Context, tunnelID string, once bool, serviceUID, serviceGID uint32) (string, error) {
+	return launchTunnel(ctx, tunnelID, once, serviceUID, serviceGID, false)
+}
+
+func restartTunnel(ctx context.Context, tunnelID string, once bool, serviceUID, serviceGID uint32) (string, error) {
+	return launchTunnel(ctx, tunnelID, once, serviceUID, serviceGID, true)
+}
+
+func launchTunnel(ctx context.Context, tunnelID string, once bool, serviceUID, serviceGID uint32, force bool) (string, error) {
 	if err := config.ValidateTunnelID(tunnelID); err != nil {
 		return "", err
 	}
@@ -207,10 +215,12 @@ func startTunnel(ctx context.Context, tunnelID string, once bool, serviceUID, se
 	if err != nil {
 		return "", err
 	}
-	if current, readErr := store.Read(tunnelID); readErr == nil &&
-		current.Phase == lifecycle.PhaseReady && current.PID > 0 &&
-		job.loaded && job.pid == current.PID && processAlive(current.PID) {
-		return encodeOutput(map[string]any{"status": "already_ready", "tunnel_id": tunnelID, "pid": current.PID})
+	if !force {
+		if current, readErr := store.Read(tunnelID); readErr == nil &&
+			current.Phase == lifecycle.PhaseReady && current.PID > 0 &&
+			job.loaded && job.pid == current.PID && processAlive(current.PID) {
+			return encodeOutput(map[string]any{"status": "already_ready", "tunnel_id": tunnelID, "pid": current.PID})
+		}
 	}
 	if err := persistDarwinDesiredState(tunnelID, routestate.DesiredRunning); err != nil {
 		return "", err

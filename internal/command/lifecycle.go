@@ -229,26 +229,14 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		})
 	}
 
-	generationDir, err := routeStore.GenerationDir(view.TunnelID, generationID)
-	if err != nil {
-		return err
-	}
-	if err := ensureRouteGenerationDirectories(generationDir); err != nil {
-		return err
-	}
-	if err := activateGeneration(
-		filepath.Join(generationDir, "client.wt"),
-		filepath.Join(generationDir, "identity"),
-		filepath.Join(generationDir, "known_hosts"),
-		filepath.Join(generationDir, "known_hosts.empty"),
+	if err := persistActivatedGeneration(
+		view.TunnelID,
+		generationID,
 		identityPath,
 		manifestStage,
 		knownHostsStage,
 		emptyTrust,
 	); err != nil {
-		return err
-	}
-	if err := routeStore.Activate(view.TunnelID, generationID); err != nil {
 		return err
 	}
 
@@ -631,6 +619,16 @@ func runRotate(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		return failCleanup(err)
 	}
 	if err := copyFile(layout.ClientKnownHostsPath, filepath.Join(stageRoot, "known_hosts"), 0o600); err != nil {
+		return failCleanup(err)
+	}
+	if err := persistActivatedGeneration(
+		tunnelID,
+		generationID,
+		identityPath,
+		filepath.Join(stageRoot, "client.wt"),
+		filepath.Join(stageRoot, "known_hosts"),
+		emptyTrust,
+	); err != nil {
 		return failCleanup(err)
 	}
 	if err := activateGeneration(
@@ -1063,6 +1061,33 @@ func loadEnrollmentReceipt(clientManifestPath, tunnelID string) (enrollmentRecei
 		receipt.TunnelID = tunnelID
 	}
 	return receipt, nil
+}
+
+func persistActivatedGeneration(routeID, generationID, identityPath, manifestPath, knownHostsPath, emptyTrustPath string) error {
+	routeStore, err := productionRouteStore()
+	if err != nil {
+		return err
+	}
+	generationDir, err := routeStore.GenerationDir(routeID, generationID)
+	if err != nil {
+		return err
+	}
+	if err := ensureRouteGenerationDirectories(generationDir); err != nil {
+		return err
+	}
+	if err := activateGeneration(
+		filepath.Join(generationDir, "client.wt"),
+		filepath.Join(generationDir, "identity"),
+		filepath.Join(generationDir, "known_hosts"),
+		filepath.Join(generationDir, "known_hosts.empty"),
+		identityPath,
+		manifestPath,
+		knownHostsPath,
+		emptyTrustPath,
+	); err != nil {
+		return err
+	}
+	return routeStore.Activate(routeID, generationID)
 }
 
 func productionRouteStore() (routestate.Store, error) {

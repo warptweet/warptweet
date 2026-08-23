@@ -17,6 +17,40 @@ interop_python_json_get() {
     python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get(sys.argv[2],"") or "")' "$1" "$2"
 }
 
+interop_phase_live_expiry() {
+    _name=${WARPTWEET_INTEROP_CLIENT_NAME}-exp
+    _port=$((WARPTWEET_INTEROP_CLIENT_LISTEN_PORT + 31))
+    _target=${WARPTWEET_INTEROP_TARGET_PORT:-5432}
+    _remote_invite="/tmp/${_name}.wtinvite"
+    if ! interop_ssh "sudo rm -f '$_remote_invite' && sudo '$WARPTWEET_INTEROP_SERVER_CTRL' host --to 127.0.0.1:${_target} --listen '${WARPTWEET_INTEROP_SERVER_LISTEN}' --name '$_name' --access-for 30s --out '$_remote_invite'" >/tmp/wt-interop-host-exp.out 2>/tmp/wt-interop-host-exp.err; then
+        interop_record_result live-expiry-and-revocation positive fail "short-grant host failed"
+        return 0
+    fi
+    interop_ssh "sudo cat '$_remote_invite'" >"$WARPTWEET_INTEROP_WORK/${_name}.wtinvite" || true
+    if [ ! -s "$WARPTWEET_INTEROP_WORK/${_name}.wtinvite" ]; then
+        interop_record_result live-expiry-and-revocation positive fail "short-grant invite missing"
+        return 0
+    fi
+    chmod 0600 "$WARPTWEET_INTEROP_WORK/${_name}.wtinvite"
+    if ! INTEROP_CLIENT_OUT=/tmp/wt-interop-connect-exp.out INTEROP_CLIENT_ERR=/tmp/wt-interop-connect-exp.err \
+        interop_client_cmd connect --yes --listen-port "$_port" "$WARPTWEET_INTEROP_WORK/${_name}.wtinvite" >/dev/null; then
+        interop_record_result live-expiry-and-revocation positive fail "short-grant connect failed"
+        return 0
+    fi
+    _open_exp=127.0.0.1:$_port
+    if ! interop_payload_current "$_open_exp"; then
+        interop_record_result live-expiry-and-revocation positive fail "short-grant payload failed before expiry"
+        return 0
+    fi
+    interop_log "waiting for 30s grant to expire"
+    sleep 40
+    if interop_payload_current "$_open_exp" >/dev/null 2>&1; then
+        interop_record_result live-expiry-and-revocation positive fail "payload still succeeded after authorization_not_after"
+        return 0
+    fi
+    interop_record_result live-expiry-and-revocation positive pass "short grant died after not_after; payload no longer reachable"
+}
+
 interop_phase_algorithms() {
     INTEROP_CLIENT_OUT=/tmp/wt-interop-profile.json INTEROP_CLIENT_ERR=/tmp/wt-interop-profile.err \
         interop_client_cmd profile >/dev/null || true
@@ -91,7 +125,8 @@ interop_phase_second_route() {
     _second=${WARPTWEET_INTEROP_CLIENT_NAME}-b
     _second_port=$((WARPTWEET_INTEROP_CLIENT_LISTEN_PORT + 17))
     _remote_invite="/tmp/${_second}.wtinvite"
-    if ! interop_ssh "sudo rm -f '$_remote_invite' && sudo '$WARPTWEET_INTEROP_SERVER_CTRL' host --to 127.0.0.1:${WARPTWEET_INTEROP_ECHO_PORT} --listen '${WARPTWEET_INTEROP_SERVER_LISTEN}' --name '$_second' --out '$_remote_invite'" >/tmp/wt-interop-host2.out 2>/tmp/wt-interop-host2.err; then
+    _target_port=${WARPTWEET_INTEROP_TARGET_PORT:-$WARPTWEET_INTEROP_ECHO_PORT}
+    if ! interop_ssh "sudo rm -f '$_remote_invite' && sudo '$WARPTWEET_INTEROP_SERVER_CTRL' host --to 127.0.0.1:${_target_port} --listen '${WARPTWEET_INTEROP_SERVER_LISTEN}' --name '$_second' --out '$_remote_invite'" >/tmp/wt-interop-host2.out 2>/tmp/wt-interop-host2.err; then
         interop_record_result second-client-grant positive fail "second host invite failed"
         interop_record_result two-independent-routes positive fail "second host invite failed"
         return 0
@@ -124,8 +159,8 @@ interop_phase_second_route() {
         interop_record_result second-client-grant positive pass "independent grant; server client records=$_n"
     fi
     if [ -n "${WARPTWEET_INTEROP_OPEN_ENDPOINT:-}" ] &&
-        interop_payload_through_local "$WARPTWEET_INTEROP_OPEN_ENDPOINT" "warptweet-interop-payload-v1" &&
-        interop_payload_through_local "$_open2" "warptweet-interop-payload-v1"; then
+        interop_payload_current "$WARPTWEET_INTEROP_OPEN_ENDPOINT" &&
+        interop_payload_current "$_open2"; then
         interop_record_result two-independent-routes positive pass "two Ready routes on $WARPTWEET_INTEROP_OPEN_ENDPOINT and $_open2"
         WARPTWEET_ROUTE_COUNT=2
         export WARPTWEET_ROUTE_COUNT

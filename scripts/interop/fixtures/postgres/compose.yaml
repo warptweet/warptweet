@@ -1,0 +1,19 @@
+name: warptweet-interop-postgres
+
+# Loopback-only. Do not publish 0.0.0.0. Fresh lab hosts pull this image on first run.
+services:
+  postgres:
+    image: postgres:16.10-alpine
+    container_name: warptweet-interop-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: warptweet
+      POSTGRES_PASSWORD: warptweet-interop
+      POSTGRES_DB: warptweet
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U warptweet -d warptweet"]
+      interval: 2s
+      timeout: 3s
+      retries: 30

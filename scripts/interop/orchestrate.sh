@@ -31,6 +31,8 @@ WT_REPO_ROOT=$(CDPATH= cd -- "$WT_SCRIPT_DIRECTORY/../.." && pwd)
 . "$WARPTWEET_INTEROP_ROOT/lib/privilege.sh"
 # shellcheck disable=SC1091
 . "$WARPTWEET_INTEROP_ROOT/lib/cases.sh"
+# shellcheck disable=SC1091
+. "$WARPTWEET_INTEROP_ROOT/lib/postgres.sh"
 
 usage() {
     cat <<'EOF'
@@ -91,8 +93,16 @@ else
     _NEED_DOCTOR_RETRY=1
 fi
 
-# --- Echo fixture ---
-interop_ensure_echo_fixture "$WARPTWEET_INTEROP_ECHO_PORT"
+# --- Loopback Postgres (fresh VPS: installs Docker) plus echo fallback ---
+: "${WARPTWEET_INTEROP_TARGET_PORT:=5432}"
+export WARPTWEET_INTEROP_TARGET_PORT
+if interop_ensure_loopback_postgres "$WARPTWEET_INTEROP_TARGET_PORT"; then
+    WARPTWEET_INTEROP_PAYLOAD=postgres
+else
+    interop_die "loopback postgres is required; run scripts/interop/provision-lab-host.sh on a fresh Ubuntu host"
+fi
+export WARPTWEET_INTEROP_PAYLOAD
+interop_reset_host_grants
 
 # --- Host + invite on remote ---
 _remote_invite="/tmp/${WARPTWEET_INTEROP_CLIENT_NAME}.wtinvite"
@@ -100,12 +110,18 @@ interop_ssh "sudo rm -f '$_remote_invite'"
 
 # `host` is the sole public bootstrap path. It must establish both listeners
 # before reporting the invite.
-if ! interop_ssh "sudo rm -f '$_remote_invite' && sudo '$WARPTWEET_INTEROP_SERVER_CTRL' host --to 127.0.0.1:${WARPTWEET_INTEROP_ECHO_PORT} --listen '${WARPTWEET_INTEROP_SERVER_LISTEN}' --name '${WARPTWEET_INTEROP_CLIENT_NAME}' --out '$_remote_invite'" >/tmp/wt-interop-host.out 2>/tmp/wt-interop-host.err; then
+if ! interop_ssh "sudo rm -f '$_remote_invite' && sudo '$WARPTWEET_INTEROP_SERVER_CTRL' host --to 127.0.0.1:${WARPTWEET_INTEROP_TARGET_PORT} --listen '${WARPTWEET_INTEROP_SERVER_LISTEN}' --name '${WARPTWEET_INTEROP_CLIENT_NAME}' --out '$_remote_invite'" >/tmp/wt-interop-host.out 2>/tmp/wt-interop-host.err; then
     interop_record_result invite-enroll-single-use positive fail "warptweet host failed: $(tr '\n' ' ' </tmp/wt-interop-host.err | cut -c1-200)"
     interop_emit_evidence || true
     interop_die "host failed"
 fi
 interop_log "host ready"
+# Issued invite must pin the target. A second host --to a different port must fail.
+if interop_ssh "sudo '$WARPTWEET_INTEROP_SERVER_CTRL' host --to 127.0.0.1:18432 --listen '${WARPTWEET_INTEROP_SERVER_LISTEN}' --no-invite" >/tmp/wt-interop-target-change.out 2>/tmp/wt-interop-target-change.err; then
+    interop_record_result target-change-denial positive fail "host allowed target change while an invite exists"
+else
+    interop_record_result target-change-denial positive pass "host refused target change while invite or grant exists"
+fi
 
 # Always pull the invite minted this run (do not reuse a leftover local file).
 if ! interop_ssh "sudo cat '$_remote_invite'" >"$WARPTWEET_INTEROP_INVITE"; then
@@ -194,7 +210,15 @@ else
 fi
 
 # --- Deterministic payload ---
-if interop_payload_through_local "$_open" "warptweet-interop-payload-v1"; then
+if [ "$WARPTWEET_INTEROP_PAYLOAD" = postgres ]; then
+    if interop_payload_through_postgres "$_open"; then
+        interop_record_result deterministic-target-payload positive pass "postgres startup reached through loopback"
+        interop_record_result compose-loopback-postgres positive pass "remote Postgres bound to 127.0.0.1:5432; query path through WarpTweet"
+    else
+        interop_record_result deterministic-target-payload positive fail "postgres probe failed"
+        interop_record_result compose-loopback-postgres positive fail "postgres probe failed"
+    fi
+elif interop_payload_through_local "$_open" "warptweet-interop-payload-v1"; then
     interop_record_result deterministic-target-payload positive pass "echo payload matched through loopback"
 else
     interop_record_result deterministic-target-payload positive fail "echo payload mismatch or connection failed"
@@ -205,6 +229,7 @@ interop_phase_agent_skill
 interop_phase_invite_fail_closed
 interop_phase_second_route
 interop_phase_forwarding
+interop_phase_live_expiry
 
 # --- Optional lifecycle ---
 if [ "${WARPTWEET_INTEROP_RUN_LIFECYCLE}" = "1" ]; then
@@ -225,7 +250,7 @@ if [ "${WARPTWEET_INTEROP_RUN_LIFECYCLE}" = "1" ]; then
         fi
     fi
     if [ "$_life_ok" -eq 1 ] && [ -n "${WARPTWEET_INTEROP_OPEN_ENDPOINT:-}" ]; then
-        if ! interop_payload_through_local "$WARPTWEET_INTEROP_OPEN_ENDPOINT" "warptweet-interop-payload-v1"; then
+        if ! interop_payload_current "$WARPTWEET_INTEROP_OPEN_ENDPOINT"; then
             _life_ok=0
             _life_detail="payload after up failed"
         fi
@@ -238,9 +263,23 @@ if [ "${WARPTWEET_INTEROP_RUN_LIFECYCLE}" = "1" ]; then
         fi
     fi
     if [ "$_life_ok" -eq 1 ] && [ -n "${WARPTWEET_INTEROP_OPEN_ENDPOINT:-}" ]; then
-        if ! interop_payload_through_local "$WARPTWEET_INTEROP_OPEN_ENDPOINT" "warptweet-interop-payload-v1"; then
+        if ! interop_payload_current "$WARPTWEET_INTEROP_OPEN_ENDPOINT"; then
             _life_ok=0
             _life_detail="payload after rotate failed"
+        fi
+    fi
+    if [ "$_life_ok" -eq 1 ]; then
+        INTEROP_CLIENT_OUT=/tmp/wt-interop-up2.out INTEROP_CLIENT_ERR=/tmp/wt-interop-up2.err \
+            interop_client_cmd down "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null || _life_ok=0
+        if [ "$_life_ok" -eq 1 ]; then
+            INTEROP_CLIENT_OUT=/tmp/wt-interop-up2.out INTEROP_CLIENT_ERR=/tmp/wt-interop-up2.err \
+                interop_client_cmd up "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null || _life_ok=0
+        fi
+        if [ "$_life_ok" -ne 1 ]; then
+            _life_detail="up after rotate failed: $(tr '\n' ' ' </tmp/wt-interop-up2.err | cut -c1-120)"
+        elif [ -n "${WARPTWEET_INTEROP_OPEN_ENDPOINT:-}" ] && ! interop_payload_current "$WARPTWEET_INTEROP_OPEN_ENDPOINT"; then
+            _life_ok=0
+            _life_detail="payload after up-after-rotate failed"
         fi
     fi
     if [ "$_life_ok" -eq 1 ]; then
@@ -251,7 +290,7 @@ if [ "${WARPTWEET_INTEROP_RUN_LIFECYCLE}" = "1" ]; then
         fi
     fi
     if [ "$_life_ok" -eq 1 ]; then
-        interop_record_result stop-restart-rotate-revoke-upgrade positive pass "down, up, payload, rotate, payload, revoke (upgrade not in this pass)"
+        interop_record_result stop-restart-rotate-revoke-upgrade positive pass "down, up, rotate, up-after-rotate, revoke (upgrade not in this pass)"
     else
         interop_record_result stop-restart-rotate-revoke-upgrade positive fail "${_life_detail:-lifecycle command failed}"
     fi
