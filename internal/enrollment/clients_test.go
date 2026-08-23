@@ -5,6 +5,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -75,6 +77,13 @@ func TestAcceptStoresClientAndRevokeBurnsToken(t *testing.T) {
 	}
 	if loaded.Status != ClientStatusActive || loaded.ManagementTokenSHA256 != HashManagementToken(testManagementToken) {
 		t.Fatalf("client record insecure or wrong: %+v", loaded)
+	}
+	clientInfo, err := os.Stat(clientPath(clients, result.ClientID))
+	if err != nil {
+		t.Fatalf("stat client record: %v", err)
+	}
+	if clientInfo.Mode().Perm() != 0o640 {
+		t.Fatalf("client record mode=%o want 0640", clientInfo.Mode().Perm())
 	}
 
 	revokeRequest := ManagementRequest{
@@ -613,4 +622,26 @@ func testCompositePublicKeyRotated() string {
 		blob[offset+4+index] = byte(255 - index)
 	}
 	return algorithm + " " + base64.StdEncoding.EncodeToString(blob)
+}
+
+func TestEnsureClientsDirectoryPreservesSetgid(t *testing.T) {
+	t.Parallel()
+
+	dir := filepath.Join(t.TempDir(), "clients")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(dir, os.ModeSetgid|0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureClientsDirectory(dir); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSetgid == 0 {
+		t.Fatal("ensureClientsDirectory stripped setgid")
+	}
 }

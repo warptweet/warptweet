@@ -15,7 +15,7 @@ StartLimitBurst=5
 [Service]
 Type=simple
 User=root
-Group=root
+Group=warptweet-sshd
 ExecStartPre=/opt/warptweet/bin/warptweet doctor-server --config /etc/warptweet/server.wt
 ExecStart=/opt/warptweet/bin/warptweet server enroll-listen
 Restart=on-failure

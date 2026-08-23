@@ -342,3 +342,35 @@ func TestEnsureDirectoryModeRepairsExistingMode(t *testing.T) {
 		t.Fatalf("authorized_keys dir mode=%o", keysInfo.Mode().Perm())
 	}
 }
+
+func TestEnsureDirectoryModeSetsSetgid(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "clients")
+	if err := os.Mkdir(path, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := ensureDirectoryMode(path, 0o2750); err != nil {
+		t.Fatal(err)
+	}
+	stripped, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stripped.Mode()&os.ModeSetgid != 0 {
+		t.Fatal("unix 0o2750 must not be treated as Go setgid")
+	}
+	if err := ensureDirectoryMode(path, os.ModeSetgid|0o750); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode()&os.ModeSetgid == 0 {
+		t.Fatalf("clients dir missing setgid: %s", info.Mode())
+	}
+	if info.Mode().Perm() != 0o750 {
+		t.Fatalf("clients dir mode=%o", info.Mode().Perm())
+	}
+}

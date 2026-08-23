@@ -475,9 +475,6 @@ func acceptAndAuthorizeLocked(
 	if grant.ClockIsBlocked(installlayout.HostClockBlockedPath) {
 		return enrollment.EnrollmentProof{}, errors.New("host clock is blocked")
 	}
-	if err := os.MkdirAll(installlayout.ClientsDirectory, 0o700); err != nil {
-		return enrollment.EnrollmentProof{}, err
-	}
 	result, err := enrollment.Accept(enrollment.AcceptInput{
 		Directory:        inviteDirectory,
 		ClientsDirectory: installlayout.ClientsDirectory,

@@ -62,11 +62,8 @@ func (server *Server) Serve(ctx context.Context) error {
 	}
 	defer listener.Close()
 	defer os.Remove(installlayout.LinuxProvisionerSocket)
-	if err := os.Chown(installlayout.LinuxProvisionerSocket, 0, int(operatorGID)); err != nil {
-		return fmt.Errorf("set provisioner socket ownership: %w", err)
-	}
-	if err := os.Chmod(installlayout.LinuxProvisionerSocket, 0o660); err != nil {
-		return fmt.Errorf("set provisioner socket mode: %w", err)
+	if err := applyUnixSocketOwnership(installlayout.LinuxProvisionerSocket, 0, int(operatorGID), 0o660); err != nil {
+		return err
 	}
 
 	go func() {

@@ -140,6 +140,30 @@ interop_install_server_package() {
             fi
             case "$_have" in
                 *"install ok installed $_deb_name $_deb_ver")
+                    if [ "${WARPTWEET_INTEROP_FORCE_SERVER_REINSTALL:-0}" = "1" ]; then
+                        interop_log "reinstalling server package $_deb_name=$_deb_ver in place"
+                        interop_ssh "sudo sh -s" <<'STOP'
+set -eu
+for WT_UNIT in warptweet-enroll.service warptweet-sshd.service warptweet-hostsign.service warptweet-mgmt.service warptweet-provisioner.service warptweet-reconcile.service; do
+    if systemctl is-active --quiet "$WT_UNIT"; then
+        systemctl stop "$WT_UNIT"
+    fi
+done
+STOP
+                        interop_ssh "sudo dpkg -i '$_remote_tmp'"
+                        _status=$(interop_ssh "dpkg-query -W -f='\${Status} \${Package} \${Version}' '$_deb_name' 2>/dev/null" || true)
+                        case "$_status" in
+                            *"install ok installed $_deb_name $_deb_ver")
+                                ;;
+                            *)
+                                interop_ssh "rm -f '$_remote_tmp'" || true
+                                interop_die "deb not installed/configured as $_deb_name=$_deb_ver (got: ${_status:-empty})"
+                                ;;
+                        esac
+                        interop_ssh "rm -f '$_remote_tmp'"
+                        interop_log "server package installed"
+                        return 0
+                    fi
                     if [ "$_host_ok" -eq 1 ]; then
                         interop_log "server package already installed $_deb_name=$_deb_ver"
                         interop_ssh "rm -f '$_remote_tmp'" || true

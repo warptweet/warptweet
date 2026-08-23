@@ -94,7 +94,7 @@ func PublicKeyDigest(publicKey string) string {
 }
 
 func StoreClient(directory string, record ClientRecord) error {
-	if err := os.MkdirAll(directory, 0o2750); err != nil {
+	if err := ensureClientsDirectory(directory); err != nil {
 		return err
 	}
 	if record.ClientID == "" || !isHexID(record.ClientID) {
@@ -695,6 +695,23 @@ func ListClients(directory string) ([]ClientRecord, error) {
 
 func clientPath(directory, clientID string) string {
 	return filepath.Join(directory, clientID+".json")
+}
+
+func ensureClientsDirectory(directory string) error {
+	info, err := os.Stat(directory)
+	if err == nil {
+		if !info.IsDir() {
+			return fmt.Errorf("%s is not a directory", directory)
+		}
+		return nil
+	}
+	if !os.IsNotExist(err) {
+		return err
+	}
+	if err := os.MkdirAll(directory, 0o750); err != nil {
+		return err
+	}
+	return os.Chmod(directory, 0o750)
 }
 
 func lockClient(directory, clientID string) (func(), error) {

@@ -102,7 +102,7 @@ func writeRecord(path string, record Record) error {
 		_ = temp.Close()
 		return err
 	}
-	if err := temp.Chmod(0o600); err != nil {
+	if err := temp.Chmod(0o640); err != nil {
 		_ = temp.Close()
 		return err
 	}

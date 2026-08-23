@@ -55,6 +55,22 @@ func TestValidateRecordRejectsNonLowerHexKeyBindings(t *testing.T) {
 	}
 }
 
+func TestWriteRecordUsesGroupReadableMode(t *testing.T) {
+	t.Parallel()
+
+	path := filepath.Join(t.TempDir(), "session.json")
+	if err := writeRecord(path, validTestRecord()); err != nil {
+		t.Fatalf("writeRecord: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o640 {
+		t.Fatalf("session record mode=%o want 0640", info.Mode().Perm())
+	}
+}
+
 func TestWriteRecordRejectsOversizedSerializedContents(t *testing.T) {
 	t.Parallel()
 

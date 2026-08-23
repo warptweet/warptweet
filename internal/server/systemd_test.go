@@ -33,6 +33,7 @@ func TestWarpTweetSSHDUnitUsesBundledValidatedConfiguration(t *testing.T) {
 		"ReadOnlyPaths=/opt/warptweet /etc/warptweet /run/warptweet/hostsign /var/lib/warptweet/authorized_keys /var/lib/warptweet/clients",
 		"ReadWritePaths=/run/warptweet/sshd /run/warptweet/server /var/lib/warptweet/sessions -/run/utmp -/var/log/btmp -/var/log/lastlog",
 		"ExecStartPre=+/bin/sh -c 'umask 027; cat /proc/sys/kernel/random/boot_id > /var/lib/warptweet/sessions/boot.id; chgrp warptweet-sshd /var/lib/warptweet/sessions /var/lib/warptweet/sessions/boot.id; chmod 0770 /var/lib/warptweet/sessions; chmod 0640 /var/lib/warptweet/sessions/boot.id'",
+		"ExecStartPre=+/bin/sh -c 'chown root:warptweet-sshd /var/lib/warptweet/clients; chmod 2750 /var/lib/warptweet/clients; if [ -e /var/lib/warptweet/sessions/grant.lock ]; then chown root:warptweet-sshd /var/lib/warptweet/sessions/grant.lock; chmod 0660 /var/lib/warptweet/sessions/grant.lock; fi; find /var/lib/warptweet/clients -maxdepth 1 -type f -name \"*.json\" -exec chown root:warptweet-sshd {} + -exec chmod 0640 {} +'",
 		"ExecStartPre=/opt/warptweet/bin/warptweet server data-plane --preflight-only",
 	)
 
@@ -63,6 +64,7 @@ func TestEnrollUnitUsesControllerEnrollmentListener(t *testing.T) {
 		"ExecStartPre=/opt/warptweet/bin/warptweet doctor-server --config /etc/warptweet/server.wt",
 		"ExecStart=/opt/warptweet/bin/warptweet server enroll-listen",
 		"User=root",
+		"Group=warptweet-sshd",
 		"RuntimeDirectory=warptweet/server",
 		"RuntimeDirectoryMode=0750",
 		"RuntimeDirectoryPreserve=yes",
@@ -95,6 +97,7 @@ func TestMgmtUnitListensOnLocalhostOnly(t *testing.T) {
 	requireUnitLines(t, unit,
 		"Description=WarpTweet localhost management RPC",
 		"ExecStart=/opt/warptweet/bin/warptweet server mgmt-listen --listen 127.0.0.1:29723",
+		"Group=warptweet-sshd",
 		"WantedBy=multi-user.target",
 		"NoNewPrivileges=yes",
 		"ProtectSystem=strict",
@@ -134,6 +137,7 @@ func TestProvisionerUnitIsRootProjector(t *testing.T) {
 		"AssertFileIsExecutable=/opt/warptweet/bin/warptweet-provisioner",
 		"ExecStart=/opt/warptweet/bin/warptweet-provisioner serve",
 		"User=root",
+		"Group=warptweet-operator",
 		"KillMode=control-group",
 		"NoNewPrivileges=yes",
 		"ProtectSystem=strict",

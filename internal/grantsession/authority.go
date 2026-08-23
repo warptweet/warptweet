@@ -256,8 +256,12 @@ func (authority *Authority) lock() error {
 	if err := os.MkdirAll(filepath.Dir(authority.LockPath), 0o770); err != nil {
 		return err
 	}
-	file, err := os.OpenFile(authority.LockPath, os.O_CREATE|os.O_RDWR, 0o600)
+	file, err := os.OpenFile(authority.LockPath, os.O_CREATE|os.O_RDWR, 0o660)
 	if err != nil {
+		return err
+	}
+	if err := file.Chmod(0o660); err != nil {
+		_ = file.Close()
 		return err
 	}
 	if err := flockExclusive(file); err != nil {

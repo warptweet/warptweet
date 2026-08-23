@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"os"
 	"strings"
@@ -459,6 +460,7 @@ func (c *connection) handleUserauth(payload []byte) error {
 	c.connectionID = connID
 	if c.grant != nil {
 		if _, err := c.grant.Register(os.Getpid(), c.keyDigest, c.connectionID); err != nil {
+			slog.Info("dataplane_reject", "reason", "grant_session_register", "err", err)
 			return c.disconnect("grant session registration failed")
 		}
 		if c.sessions != nil {

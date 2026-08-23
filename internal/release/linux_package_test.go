@@ -88,6 +88,9 @@ func TestLinuxPackageScriptsForbidNetwork(t *testing.T) {
 		`--uid "$WT_UID"`,
 		`systemctl enable --now warptweet-provisioner.service`,
 		`systemctl enable warptweet-mgmt.service`,
+		`install -d -o root -g warptweet-sshd -m 2750 /var/lib/warptweet/clients`,
+		`find /var/lib/warptweet/clients -maxdepth 1 -type f -name '*.json'`,
+		`chmod 0660 /var/lib/warptweet/sessions/grant.lock`,
 		`upgrade-active.units`,
 		`try-restart`,
 	} {

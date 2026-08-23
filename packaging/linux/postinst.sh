@@ -82,6 +82,14 @@ install -d -o root -g root -m 0700 /var/lib/warptweet/invites
 install -d -o root -g root -m 0700 /var/lib/warptweet/server
 install -d -o root -g warptweet-sshd -m 0770 /var/lib/warptweet/sessions
 install -d -o root -g warptweet-sshd -m 2750 /var/lib/warptweet/clients
+chown root:warptweet-sshd /var/lib/warptweet/clients
+chmod 2750 /var/lib/warptweet/clients
+find /var/lib/warptweet/clients -maxdepth 1 -type f -name '*.json' -exec chown root:warptweet-sshd {} +
+find /var/lib/warptweet/clients -maxdepth 1 -type f -name '*.json' -exec chmod 0640 {} +
+if [ -e /var/lib/warptweet/sessions/grant.lock ]; then
+    chown root:warptweet-sshd /var/lib/warptweet/sessions/grant.lock
+    chmod 0660 /var/lib/warptweet/sessions/grant.lock
+fi
 install -d -o root -g root -m 0755 /run/warptweet
 install -d -o root -g root -m 0750 /run/warptweet/server
 install -d -o root -g root -m 0750 /run/warptweet/sshd

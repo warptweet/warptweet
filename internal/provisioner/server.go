@@ -72,11 +72,8 @@ func (server *Server) Serve(ctx context.Context) error {
 	}
 	defer listener.Close()
 	defer os.Remove(installlayout.DarwinProvisionerSocket)
-	if err := os.Chown(installlayout.DarwinProvisionerSocket, 0, int(adminGID)); err != nil {
-		return fmt.Errorf("set provisioner socket ownership: %w", err)
-	}
-	if err := os.Chmod(installlayout.DarwinProvisionerSocket, 0o660); err != nil {
-		return fmt.Errorf("set provisioner socket mode: %w", err)
+	if err := applyUnixSocketOwnership(installlayout.DarwinProvisionerSocket, 0, int(adminGID), 0o660); err != nil {
+		return err
 	}
 
 	go func() {
