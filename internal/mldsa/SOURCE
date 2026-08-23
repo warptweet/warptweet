@@ -1,0 +1,7 @@
+Adapted from Go 1.26.4 crypto/internal/fips140/mldsa.
+
+Upstream path: $GOROOT/src/crypto/internal/fips140/mldsa/mldsa.go
+Upstream SHA-256: 487e8d6c474f16989d8617b60591aa6a908ee58bbce45ca2c3108db83a2a9924
+This tree SHA-256: 492aba4c7cc399ad7624f224638f56f86788caa56c38cb2cee6a38683d6c523b
+
+The adaptation replaces FIPS-module imports (crypto/internal/fips140, sha3, subtle, byteorder, drbg) with crypto/sha3, crypto/subtle, encoding/binary, and crypto/rand so WarpTweet can compile without importing stdlib internal packages. Algorithm parameters and encodings remain ML-DSA-44/65/87 as in FIPS 204.

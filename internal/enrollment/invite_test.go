@@ -35,7 +35,7 @@ func TestCreateParseConsumeInviteLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if record.Status != StatusIssued || invite.MAC == "" || invite.InviteID == "" {
+	if record.Status != StatusIssued || invite.InviteID == "" || invite.Nonce == "" {
 		t.Fatalf("unexpected invite: %+v record=%+v", invite, record)
 	}
 
@@ -47,20 +47,12 @@ func TestCreateParseConsumeInviteLifecycle(t *testing.T) {
 		t.Fatal("invite encoding contains private-key markers")
 	}
 
-	parsed, err := ParseAndVerify(raw, secret, now.Add(time.Minute))
-	if err != nil {
-		t.Fatalf("ParseAndVerify: %v", err)
+	var parsed Invite
+	if err := decodeStrictJSON(raw, &parsed); err != nil {
+		t.Fatalf("decode: %v", err)
 	}
 	if parsed.InviteID != invite.InviteID {
 		t.Fatalf("parsed id = %q", parsed.InviteID)
-	}
-	if _, err := ParseAndVerify(raw, secret, now.Add(DefaultTTL+time.Second)); err == nil {
-		t.Fatal("ParseAndVerify accepted expired invite")
-	}
-	tampered := append([]byte(nil), raw...)
-	tampered[len(tampered)/2] ^= 0x01
-	if _, err := ParseAndVerify(tampered, secret, now.Add(time.Minute)); err == nil {
-		t.Fatal("ParseAndVerify accepted tampered invite")
 	}
 
 	directory := t.TempDir()
@@ -219,15 +211,11 @@ func TestCancelExpiredUnconsumedInvite(t *testing.T) {
 	}
 }
 
-func TestCreateBindsAuthorizationDurationToMAC(t *testing.T) {
+func TestStoredInviteDurationIsAuthoritative(t *testing.T) {
 	t.Parallel()
 
-	secret, err := GenerateSecret()
-	if err != nil {
-		t.Fatalf("GenerateSecret: %v", err)
-	}
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
-	invite, _, err := Create(CreateInput{
+	invite, record, err := Create(CreateInput{
 		ClientName:                   "laptop-1",
 		ServerAddress:                netip.MustParseAddr("192.0.2.10"),
 		ServerPort:                   2222,
@@ -241,7 +229,6 @@ func TestCreateBindsAuthorizationDurationToMAC(t *testing.T) {
 		TTL:                          DefaultTTL,
 		AuthorizationDurationSeconds: 3600,
 		Now:                          now,
-		Secret:                       secret,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -249,16 +236,16 @@ func TestCreateBindsAuthorizationDurationToMAC(t *testing.T) {
 	if invite.SchemaVersion != 2 || invite.AuthorizationDurationSeconds != 3600 {
 		t.Fatalf("invite=%+v", invite)
 	}
-	raw, err := Encode(invite)
+	directory := t.TempDir()
+	if err := Store(directory, record); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := Load(directory, invite.InviteID)
 	if err != nil {
-		t.Fatalf("Encode: %v", err)
+		t.Fatal(err)
 	}
-	if _, err := ParseAndVerify(raw, secret, now.Add(time.Minute)); err != nil {
-		t.Fatalf("ParseAndVerify: %v", err)
-	}
-	tampered := []byte(strings.Replace(string(raw), `"authorization_duration_seconds":3600`, `"authorization_duration_seconds":7200`, 1))
-	if _, err := ParseAndVerify(tampered, secret, now.Add(time.Minute)); err == nil {
-		t.Fatal("ParseAndVerify accepted a duration that was not in the original MAC binding")
+	if loaded.AuthorizationDurationSeconds != 3600 {
+		t.Fatalf("stored duration=%d", loaded.AuthorizationDurationSeconds)
 	}
 }
 
@@ -324,7 +311,6 @@ func TestInviteIDRejectsPathTraversal(t *testing.T) {
 		Principal:                    "warptweet",
 		ProfileID:                    "profile-v1",
 		Nonce:                        strings.Repeat("ab", 16),
-		MAC:                          strings.Repeat("cd", 32),
 		EnrollmentTLSSPKISHA256:      strings.Repeat("ab", 32),
 		AuthorizationDurationSeconds: 2592000,
 	}

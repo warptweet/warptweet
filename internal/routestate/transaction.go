@@ -79,6 +79,17 @@ func (store Store) ReserveAndWriteTransaction(transaction Transaction) error {
 		return err
 	}
 	defer unlock()
+	existing, loadErr := store.LoadTransaction(transaction.RouteID)
+	if loadErr == nil {
+		if existing.InviteID != "" && existing.InviteID != transaction.InviteID {
+			return fmt.Errorf("%w: route %s is reserved for a different invite", ErrInvalidRoute, transaction.RouteID)
+		}
+		if existing.Generation != "" && existing.Generation != transaction.Generation {
+			return fmt.Errorf("%w: route %s is reserved for a different generation", ErrInvalidRoute, transaction.RouteID)
+		}
+	} else if !os.IsNotExist(loadErr) {
+		return loadErr
+	}
 	created, err := store.reservePortLocked(transaction.RouteID, transaction.ListenPort)
 	if err != nil {
 		return err

@@ -52,7 +52,6 @@ type Finding struct {
 type inviteShape struct {
 	Kind  string `json:"kind"`
 	Nonce string `json:"nonce"`
-	MAC   string `json:"mac"`
 }
 
 // ScanTree reports invite files, private-key material, and invite JSON secrets.
@@ -105,7 +104,7 @@ func ScanTree(root string) ([]Finding, error) {
 			}
 		}
 		if looksLikeInviteSecret(raw) {
-			findings = append(findings, Finding{Path: rel, Reason: "invite mac and nonce"})
+			findings = append(findings, Finding{Path: rel, Reason: "invite nonce"})
 		}
 		return nil
 	})
@@ -130,7 +129,7 @@ func looksLikeInviteSecret(raw []byte) bool {
 	if invite.Kind != "warptweet.invite" {
 		return false
 	}
-	return isHexSecret(invite.Nonce) && isHexSecret(invite.MAC)
+	return isHexSecret(invite.Nonce)
 }
 
 func isHexSecret(value string) bool {

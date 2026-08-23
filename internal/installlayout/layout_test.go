@@ -45,6 +45,7 @@ func TestFixedInstallLayoutIsAbsoluteAndContained(t *testing.T) {
 		GrantAuthorityLockPath,
 		DataPlaneBootIDPath,
 		DataPlaneControlSocket,
+		HostSignSocket,
 	} {
 		if !filepath.IsAbs(path) || filepath.Clean(path) != path {
 			t.Errorf("fixed path %q is not clean and absolute", path)

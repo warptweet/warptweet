@@ -1,6 +1,8 @@
 package releaseevidence
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,6 +29,8 @@ type ReportV2 struct {
 	CleanTreeProof             string   `json:"clean_tree_proof"`
 	ClientPackageSHA256        string   `json:"client_package_sha256"`
 	ServerPackageSHA256        string   `json:"server_package_sha256"`
+	ClientPackagePath          string   `json:"client_package_path,omitempty"`
+	ServerPackagePath          string   `json:"server_package_path,omitempty"`
 	ClientArtifactProfileID    string   `json:"client_artifact_profile_id"`
 	ServerArtifactProfileID    string   `json:"server_artifact_profile_id"`
 	ClientEngineManifestSHA256 string   `json:"client_engine_manifest_sha256"`
@@ -60,6 +64,8 @@ func LoadChecklistV2(path string) (Checklist, error) {
 	if err := decodeStrict(raw, &checklist); err != nil {
 		return Checklist{}, err
 	}
+	sum := sha256.Sum256(raw)
+	checklist.FileSHA256 = hex.EncodeToString(sum[:])
 	if checklist.Kind != ChecklistKind || checklist.SchemaVersion != SchemaVersionV2 {
 		return Checklist{}, fmt.Errorf("unsupported checklist kind/version")
 	}
@@ -121,8 +127,11 @@ func ValidateReportV2(checklist Checklist, report ReportV2) error {
 	if len(report.ContractChecklistSHA256) != 64 || !isLowerHex(report.ContractChecklistSHA256) {
 		return fmt.Errorf("contract_checklist_sha256 must be 64 lowercase hex characters")
 	}
-	if report.ContractChecklistSHA256 != adoptionresult.ContractChecklistSHA256 {
-		return fmt.Errorf("contract_checklist_sha256 must be %s", adoptionresult.ContractChecklistSHA256)
+	if checklist.FileSHA256 != "" && report.ContractChecklistSHA256 != checklist.FileSHA256 {
+		return fmt.Errorf("contract_checklist_sha256 must be the SHA-256 of the canonical checklist file")
+	}
+	if report.CleanTreeProof == "not_recorded" {
+		return fmt.Errorf("clean_tree_proof must be recorded")
 	}
 	if report.RouteCount < 0 {
 		return fmt.Errorf("route_count must be non-negative")

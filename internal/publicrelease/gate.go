@@ -118,10 +118,33 @@ func ValidateEnabledCTA(repositoryRoot string, gate Gate) error {
 	if err := releaseevidence.ValidateReportV2(checklist, report); err != nil {
 		return fmt.Errorf("invalid required evidence document: %w", err)
 	}
+	if err := releaseevidence.BindArtifactDigests(repositoryRoot, report); err != nil {
+		return fmt.Errorf("evidence artifacts: %w", err)
+	}
 	if !releaseevidence.CompleteV2(report) {
 		return fmt.Errorf("required evidence document is incomplete")
 	}
 	return nil
+}
+
+// VerifyRepository authenticates the canonical checklist and keeps the CTA
+// dark unless a complete matrix index is supplied.
+func VerifyRepository(repositoryRoot string) error {
+	gate, err := LoadGate(DefaultGatePath(repositoryRoot))
+	if err != nil {
+		return err
+	}
+	checklist, err := releaseevidence.LoadChecklistV2(releaseevidence.DefaultChecklistV2Path(repositoryRoot))
+	if err != nil {
+		return err
+	}
+	if checklist.FileSHA256 == "" {
+		return fmt.Errorf("canonical checklist is not authenticated")
+	}
+	if !gate.HomebrewCTAEnabled {
+		return nil
+	}
+	return fmt.Errorf("homebrew CTA cannot enable without a complete signed evidence index")
 }
 
 // DefaultGatePath returns the repository public-release gate path.

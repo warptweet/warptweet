@@ -138,6 +138,11 @@ func executeRequest(ctx context.Context, request Request) (string, error) {
 		return projectTunnel(ctx, request.TunnelID, false)
 	case ActionRotate, ActionRevoke:
 		return executeController(ctx, request.Action, request.TunnelID)
+	case ActionUninstall:
+		return uninstallAllRoutes(ctx, installlayout.ClientRoutesDirectory, func(ctx context.Context, routeID string) error {
+			_, err := projectTunnel(ctx, routeID, false)
+			return err
+		})
 	default:
 		if isTunnelStartAction(request.Action) {
 			return projectTunnel(ctx, request.TunnelID, true)
@@ -171,6 +176,13 @@ func projectTunnel(ctx context.Context, routeID string, start bool) (string, err
 	}
 	if _, err := exec.LookPath("systemctl"); err != nil {
 		return "", fmt.Errorf("%w: systemctl is required to project warptweet-tunnel@%s", outcome.ErrPackageBoundary, routeID)
+	}
+	desired := routestate.DesiredStopped
+	if start {
+		desired = routestate.DesiredRunning
+	}
+	if err := persistRouteIntent(installlayout.ClientRoutesDirectory, routeID, desired, linuxBootID(), true); err != nil {
+		return "", err
 	}
 	unit := "warptweet-tunnel@" + routeID + ".service"
 	action := "stop"

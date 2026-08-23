@@ -1,7 +1,17 @@
+import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const root = process.cwd();
+const goVerify = spawnSync("go", ["run", "./cmd/verify-public-release"], {
+  cwd: root,
+  encoding: "utf8"
+});
+if (goVerify.status !== 0) {
+  throw new Error(
+    `authoritative public-release validator failed: ${goVerify.stderr || goVerify.stdout || "exit " + goVerify.status}`
+  );
+}
 const brandSource = await readFile(resolve(root, "src/lib/brand.ts"), "utf8");
 const releaseGate = JSON.parse(
   await readFile(resolve(root, "packaging/evidence/public-release.json"), "utf8")

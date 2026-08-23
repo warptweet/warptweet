@@ -29,9 +29,8 @@ func TestParseClientInviteRejectsV1Schema(t *testing.T) {
   "enrollment_tls_spki_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "issued_at":"2026-08-16T12:00:00Z",
   "expires_at":"2026-08-16T12:10:00Z",
-  "nonce":"00",
-  "mac":"aa"
-}`)
+   "nonce":"00"
+ }`)
 	if _, _, err := ParseClientInvite(raw, now.Add(time.Minute)); err == nil {
 		t.Fatal("accepted invite schema v1")
 	}
@@ -58,10 +57,9 @@ func TestParseClientInviteRejectsSecretsAndExpiry(t *testing.T) {
   "enrollment_tls_spki_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
   "issued_at":"2026-08-12T12:00:00Z",
   "expires_at":"2026-08-12T12:10:00Z",
-  "authorization_duration_seconds":2592000,
-  "nonce":"00",
-  "mac":"aa"
-}`)
+   "authorization_duration_seconds":2592000,
+   "nonce":"00"
+ }`)
 	invite, view, err := ParseClientInvite(raw, now.Add(time.Minute))
 	if err != nil {
 		t.Fatalf("ParseClientInvite: %v", err)

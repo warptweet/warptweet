@@ -125,6 +125,12 @@ if [ "${WARPTWEET_REQUIRE_SIGNED_PKG:-}" = "1" ]; then
         verify_release_codesign "$WT_SIGNED_INPUT"
     done
 fi
+WT_CHECK_MINOS="$WT_REPOSITORY_ROOT/scripts/check-darwin-minos.sh"
+if [ ! -x "$WT_CHECK_MINOS" ]; then
+    echo "missing $WT_CHECK_MINOS" >&2
+    exit 66
+fi
+"$WT_CHECK_MINOS" "$WT_CONTROLLER" "$WT_PROVISIONER" "$WT_STAGE_SSH" "$WT_STAGE_KEYGEN"
 for WT_FORBIDDEN in \
     "$WT_OPENSSH_STAGE/Library/Application Support/WarpTweet/libexec/openssh/sbin/sshd" \
     "$WT_OPENSSH_STAGE/Library/Application Support/WarpTweet/libexec/openssh/libexec/sshd-auth" \

@@ -265,6 +265,29 @@ func TestReserveAndWriteTransactionIsAtomic(t *testing.T) {
 	if err := store.ReserveAndWriteTransaction(Transaction{RouteID: "staging-db", Phase: PhaseConnected, ListenPort: 15432}); err == nil {
 		t.Fatal("accepted non-reserved phase")
 	}
+	if err := store.ReserveAndWriteTransaction(Transaction{
+		RouteID:    "staging-db",
+		Phase:      PhaseReserved,
+		ListenPort: 15432,
+		InviteID:   "invite-2",
+		Generation: "gen-1",
+	}); err == nil {
+		t.Fatal("overwrote a different invite reservation")
+	}
+	kept, err := store.LoadTransaction("staging-db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if kept.InviteID != "invite-1" || kept.Generation != "gen-1" || kept.ListenPort != 15432 {
+		t.Fatalf("rejected reservation mutated state: %+v", kept)
+	}
+	keptRes, err := store.loadReservation("staging-db")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keptRes.ListenPort != 15432 {
+		t.Fatalf("rejected reservation mutated port: %+v", keptRes)
+	}
 }
 
 func TestReserveAndWriteTransactionKeepsExistingReservationOnWriteFailure(t *testing.T) {

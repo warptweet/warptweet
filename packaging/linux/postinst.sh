@@ -81,7 +81,8 @@ install -d -o root -g root -m 0755 /var/lib/warptweet
 install -d -o root -g root -m 0700 /var/lib/warptweet/invites
 install -d -o root -g root -m 0700 /var/lib/warptweet/clients
 install -d -o root -g root -m 0700 /var/lib/warptweet/server
-install -d -o root -g root -m 0700 /var/lib/warptweet/sessions
+install -d -o root -g warptweet-sshd -m 0770 /var/lib/warptweet/sessions
+install -d -o root -g warptweet-sshd -m 0750 /var/lib/warptweet/clients
 install -d -o root -g root -m 0755 /run/warptweet
 install -d -o root -g root -m 0750 /run/warptweet/server
 install -d -o root -g root -m 0750 /run/warptweet/sshd
@@ -96,8 +97,20 @@ usermod -L warptweet-sshd
 
 command -v systemctl >/dev/null 2>&1 || fail "systemctl is required"
 systemctl daemon-reload
+systemctl enable warptweet-hostsign.service
 systemctl enable warptweet-mgmt.service
-systemctl enable warptweet-provisioner.service
+systemctl enable --now warptweet-provisioner.service
 systemctl enable warptweet-reconcile.service
+
+WT_UPGRADE_UNITS=${WT_UPGRADE_UNITS:-/var/lib/warptweet/upgrade-active.units}
+if [ -f "$WT_UPGRADE_UNITS" ]; then
+    while IFS= read -r WT_UNIT; do
+        [ -n "$WT_UNIT" ] || continue
+        if systemctl is-active --quiet "$WT_UNIT"; then
+            systemctl try-restart "$WT_UNIT"
+        fi
+    done <"$WT_UPGRADE_UNITS"
+    rm -f "$WT_UPGRADE_UNITS"
+fi
 
 exit 0

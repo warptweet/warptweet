@@ -15,20 +15,25 @@ func TestWarpTweetSSHDUnitUsesBundledValidatedConfiguration(t *testing.T) {
 		"Description=WarpTweet restricted post-quantum tunnel server",
 		"AssertFileIsExecutable=/opt/warptweet/bin/warptweet",
 		"AssertPathExists=/etc/warptweet/server.wt",
-		"AssertPathExists=/var/lib/warptweet/ssh/ssh_host_mldsa44_ed25519_key",
 		"AssertPathExists=/var/lib/warptweet/authorized_keys/warptweet",
+		"AssertPathExists=/run/warptweet/hostsign/sign.sock",
 		"ExecStart=/opt/warptweet/bin/warptweet server data-plane",
 		"NoNewPrivileges=yes",
 		"CapabilityBoundingSet=CAP_NET_BIND_SERVICE",
-		"User=root",
+		"AmbientCapabilities=CAP_NET_BIND_SERVICE",
+		"User=warptweet-sshd",
+		"Group=warptweet-sshd",
+		"Requires=warptweet-hostsign.service",
 		"UnsetEnvironment=LD_AUDIT LD_LIBRARY_PATH LD_PRELOAD OPENSSL_CONF OPENSSL_CONF_INCLUDE OPENSSL_MODULES",
 		"ProtectSystem=strict",
 		"ProtectHome=yes",
 		"PrivateDevices=yes",
 		"RestrictNamespaces=yes",
 		"RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK",
+		"ReadOnlyPaths=/opt/warptweet /etc/warptweet /run/warptweet/hostsign /var/lib/warptweet/authorized_keys /var/lib/warptweet/clients",
 		"ReadWritePaths=/run/warptweet/sshd /run/warptweet/server /var/lib/warptweet/sessions -/run/utmp -/var/log/btmp -/var/log/lastlog",
 		"ExecStartPre=+/bin/sh -c 'umask 077; cat /proc/sys/kernel/random/boot_id > /var/lib/warptweet/sessions/boot.id'",
+		"ExecStartPre=/opt/warptweet/bin/warptweet server data-plane --preflight-only",
 	)
 
 	for _, forbidden := range []string{
@@ -180,6 +185,26 @@ func TestTunnelUnitUsesControllerContractWithoutAmbientPrivileges(t *testing.T) 
 		if strings.Contains(unit, forbidden) {
 			t.Fatalf("tunnel unit contains removed client boundary %q", forbidden)
 		}
+	}
+}
+
+func TestHostSignUnitIsolatesHostKey(t *testing.T) {
+	t.Parallel()
+
+	unit := readUnit(t, "warptweet-hostsign.service")
+	requireUnitLines(t, unit,
+		"Description=WarpTweet host-key signer",
+		"ExecStart=/opt/warptweet/bin/warptweet server host-sign",
+		"Type=notify",
+		"User=root",
+		"Group=warptweet-sshd",
+		"RuntimeDirectoryPreserve=yes",
+		"RestrictAddressFamilies=AF_UNIX",
+		"ReadOnlyPaths=/opt/warptweet /etc/warptweet /var/lib/warptweet/ssh",
+		"ReadWritePaths=/run/warptweet/hostsign",
+	)
+	if strings.Contains(unit, "User=warptweet-sshd") {
+		t.Fatal("signer must not run as the network parser")
 	}
 }
 

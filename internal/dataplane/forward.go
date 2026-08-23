@@ -1,7 +1,6 @@
 package dataplane
 
 import (
-	"context"
 	"encoding/binary"
 	"net"
 	"net/netip"
@@ -67,12 +66,23 @@ func (c *connection) handleChannelOpen(payload []byte) error {
 	if err := c.policy.allowDirectTCPIP(dest); err != nil {
 		return c.channelOpenFailure(sender, err.Error())
 	}
+	c.mu.Lock()
+	if len(c.channels) >= c.maxChannels {
+		c.mu.Unlock()
+		return c.channelOpenFailure(sender, "channel quota exceeded")
+	}
+	c.mu.Unlock()
 	dialer := net.Dialer{Timeout: 5 * time.Second}
-	backend, err := dialer.DialContext(context.Background(), "tcp", dest.String())
+	backend, err := dialer.DialContext(c.ctx, "tcp", dest.String())
 	if err != nil {
 		return c.channelOpenFailure(sender, err.Error())
 	}
 	c.mu.Lock()
+	if len(c.channels) >= c.maxChannels {
+		c.mu.Unlock()
+		_ = backend.Close()
+		return c.channelOpenFailure(sender, "channel quota exceeded")
+	}
 	localID := c.nextLocal
 	c.nextLocal++
 	ch := &sshChannel{
@@ -131,7 +141,7 @@ func (c *connection) forwardBackend(ch *sshChannel) {
 func (c *connection) sendChannelData(ch *sshChannel, data []byte) error {
 	for len(data) > 0 {
 		c.mu.Lock()
-		for !ch.closed && ch.window == 0 {
+		for !ch.closed && (ch.window == 0 || c.phase != kexReady) {
 			c.win.Wait()
 		}
 		if ch.closed {

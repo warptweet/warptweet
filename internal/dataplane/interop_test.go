@@ -45,6 +45,79 @@ func TestLoopbackDirectTCPIP(t *testing.T) {
 	}
 }
 
+func TestClientInitiatedRekeyKeepsSessionID(t *testing.T) {
+	t.Parallel()
+
+	client, policy := startAuthenticatedLoopback(t)
+	defer client.conn.Close()
+	firstID := append([]byte(nil), client.sessionID...)
+	remoteID, localID, err := client.openDirectTCPIP(policy.Target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.rekey(); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(client.sessionID, firstID) {
+		t.Fatal("session ID changed across rekey")
+	}
+	payload := []byte("after-rekey")
+	if err := client.sendData(remoteID, payload); err != nil {
+		t.Fatal(err)
+	}
+	got, err := client.recvData(localID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatalf("echo=%q", got)
+	}
+	if err := client.rekey(); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(client.sessionID, firstID) {
+		t.Fatal("session ID changed across second rekey")
+	}
+}
+
+func TestChannelQuotaRejectsExcess(t *testing.T) {
+	t.Parallel()
+
+	client, policy := startAuthenticatedLoopbackWith(t, func(p *Policy) {
+		p.MaxChannels = 1
+	})
+	defer client.conn.Close()
+	if _, _, err := client.openDirectTCPIP(policy.Target); err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := client.openDirectTCPIP(policy.Target)
+	if err == nil {
+		t.Fatal("second channel accepted")
+	}
+	if !strings.Contains(err.Error(), "CHANNEL_OPEN") {
+		t.Fatalf("err=%v", err)
+	}
+}
+
+func TestSourceLimiterEnforcesQuota(t *testing.T) {
+	t.Parallel()
+
+	limiter := &sourceLimiter{limit: 1}
+	if !limiter.acquire("192.0.2.1") {
+		t.Fatal("first acquire failed")
+	}
+	if limiter.acquire("192.0.2.1") {
+		t.Fatal("source quota not enforced")
+	}
+	if !limiter.acquire("192.0.2.2") {
+		t.Fatal("other source blocked")
+	}
+	limiter.release("192.0.2.1")
+	if !limiter.acquire("192.0.2.1") {
+		t.Fatal("release did not free quota")
+	}
+}
+
 type loopbackClient struct {
 	conn                 net.Conn
 	reader               *bufio.Reader
@@ -76,13 +149,62 @@ func (c *loopbackClient) handshake() error {
 	if len(c.serverKex) == 0 || c.serverKex[0] != sshMsgKexInit {
 		return fmt.Errorf("first packet is not KEXINIT")
 	}
-	c.clientKex, err = c.policy.marshalKexInit()
+	c.clientKex, err = c.policy.marshalKexInitClient()
 	if err != nil {
 		return err
 	}
 	if err := c.write(c.clientKex); err != nil {
 		return err
 	}
+	return c.completeKEX()
+}
+
+func (c *loopbackClient) rekey() error {
+	clientKex, err := c.policy.marshalKexInitClient()
+	if err != nil {
+		return err
+	}
+	c.clientKex = clientKex
+	if err := c.write(clientKex); err != nil {
+		return err
+	}
+	for {
+		pkt, err := c.read()
+		if err != nil {
+			return err
+		}
+		if len(pkt) == 0 {
+			continue
+		}
+		if pkt[0] == sshMsgKexInit {
+			c.serverKex = pkt
+			break
+		}
+		if pkt[0] == sshMsgChannelData {
+			localID, rest, err := consumeUint32(pkt[1:])
+			if err != nil {
+				return err
+			}
+			data, _, err := consumeSSHString(rest)
+			if err != nil {
+				return err
+			}
+			if c.recvBuf == nil {
+				c.recvBuf = map[uint32][]byte{}
+			}
+			c.recvBuf[localID] = append(c.recvBuf[localID], data...)
+			continue
+		}
+		if pkt[0] == sshMsgIgnore || pkt[0] == sshMsgDebug || pkt[0] == sshMsgGlobalRequest {
+			continue
+		}
+		return fmt.Errorf("unexpected message during rekey %v", msgType(pkt))
+	}
+	return c.completeKEX()
+}
+
+func (c *loopbackClient) completeKEX() error {
+	initial := len(c.sessionID) == 0
 	dk, err := mlkem.GenerateKey768()
 	if err != nil {
 		return err
@@ -121,7 +243,9 @@ func (c *loopbackClient) handshake() error {
 	}
 	secret := sshString(shared)
 	hash := exchangeHash(c.clientID, c.serverID, c.clientKex, c.serverKex, hostBlob, clientPub, serverPub, secret)
-	c.sessionID = append([]byte(nil), hash...)
+	if len(c.sessionID) == 0 {
+		c.sessionID = append([]byte(nil), hash...)
+	}
 	alg, sigRest, err := consumeSSHString(sigBlob)
 	if err != nil || string(alg) != composite.Algorithm {
 		return fmt.Errorf("host signature algorithm")
@@ -141,19 +265,21 @@ func (c *loopbackClient) handshake() error {
 	if err := composite.Verify(rawHost, hash, rawSig); err != nil {
 		return err
 	}
-	keyC, keyD := deriveKeys(secret, hash)
-	c.out, err = newChaChaDirection(keyC)
+	keyC, keyD := deriveKeys(secret, hash, c.sessionID)
+	pendingOut, err := newChaChaDirection(keyC)
 	if err != nil {
 		return err
 	}
-	c.in, err = newChaChaDirection(keyD)
+	pendingIn, err := newChaChaDirection(keyD)
 	if err != nil {
 		return err
 	}
 	if err := c.write([]byte{sshMsgNewKeys}); err != nil {
 		return err
 	}
-	c.clearOut = false
+	if initial {
+		c.outSeq = 0
+	}
 	newKeys, err := c.read()
 	if err != nil {
 		return err
@@ -161,7 +287,13 @@ func (c *loopbackClient) handshake() error {
 	if len(newKeys) == 0 || newKeys[0] != sshMsgNewKeys {
 		return fmt.Errorf("expected NEWKEYS, got %v", msgType(newKeys))
 	}
+	c.out = pendingOut
+	c.in = pendingIn
+	c.clearOut = false
 	c.clearIn = false
+	if initial {
+		c.inSeq = 0
+	}
 	return nil
 }
 
@@ -375,13 +507,23 @@ type loopbackServer struct {
 
 func startAuthenticatedLoopback(t testing.TB) (*loopbackClient, Policy) {
 	t.Helper()
-	server := startLoopbackServer(t)
+	return startAuthenticatedLoopbackWith(t, nil)
+}
+
+func startAuthenticatedLoopbackWith(t testing.TB, tweak func(*Policy)) (*loopbackClient, Policy) {
+	t.Helper()
+	server := startLoopbackServerWith(t, tweak)
 	client := server.dial(t)
 	t.Cleanup(func() { _ = client.conn.Close() })
 	return client, server.policy
 }
 
 func startLoopbackServer(t testing.TB) loopbackServer {
+	t.Helper()
+	return startLoopbackServerWith(t, nil)
+}
+
+func startLoopbackServerWith(t testing.TB, tweak func(*Policy)) loopbackServer {
 	t.Helper()
 
 	_, backendAddr := startEchoBackend(t)
@@ -421,6 +563,9 @@ func startLoopbackServer(t testing.TB) loopbackServer {
 	policy.Target = backendAddr
 	policy.HostKeyPath = hostPath
 	policy.AuthorizedKeysPath = authPath
+	if tweak != nil {
+		tweak(&policy)
+	}
 	hostPEMBytes, err := os.ReadFile(hostPath)
 	if err != nil {
 		t.Fatal(err)

@@ -26,8 +26,18 @@ type Policy struct {
 	Management         netip.AddrPort
 	HostKeyPath        string
 	AuthorizedKeysPath string
+	HostSignSocket     string
 	Grant              *grantsession.Authority
 	ControlSocket      string
+	RekeyAfter         uint64
+	MaxChannels        int
+	MaxConnsPerSource  int
+}
+
+// HostSigner isolates host private-key use from the network parser.
+type HostSigner interface {
+	Public() ([]byte, error)
+	Sign([]byte) ([]byte, error)
 }
 
 // NewPolicy derives the data-plane policy from a validated server manifest.
@@ -84,4 +94,14 @@ func (policy Policy) allowDirectTCPIP(destination netip.AddrPort) error {
 		return nil
 	}
 	return fmt.Errorf("direct-tcpip destination %s is not permitted", dest)
+}
+
+func (policy Policy) maxConnsPerSource() int {
+	if policy.MaxConnsPerSource < 0 {
+		return policy.MaxConnsPerSource
+	}
+	if policy.MaxConnsPerSource == 0 {
+		return defaultMaxConnsPerSource
+	}
+	return policy.MaxConnsPerSource
 }

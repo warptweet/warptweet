@@ -33,6 +33,22 @@ func TestUsageMentionsHostAndConnect(t *testing.T) {
 	}
 }
 
+func TestHostHumanOutputClassifiesInviteAsConfidentialBearer(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	if err := writeHostHuman(&stdout, hostHumanOutput{
+		Target:     "127.0.0.1:5432",
+		Listen:     "0.0.0.0:2222",
+		InvitePath: "/tmp/laptop.wtinvite",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(stdout.String(), "confidential bearer") {
+		t.Fatalf("host output missing classification: %s", stdout.String())
+	}
+}
+
 func TestParseHostTargetPortSugar(t *testing.T) {
 	t.Parallel()
 

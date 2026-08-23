@@ -1,17 +1,18 @@
 [Unit]
 Description=WarpTweet restricted post-quantum tunnel server
-After=network.target
+After=network.target warptweet-hostsign.service
+Requires=warptweet-hostsign.service
 AssertFileIsExecutable=/opt/warptweet/bin/warptweet
 AssertPathExists=/etc/warptweet/server.wt
-AssertPathExists=/var/lib/warptweet/ssh/ssh_host_mldsa44_ed25519_key
 AssertPathExists=/var/lib/warptweet/authorized_keys/warptweet
+AssertPathExists=/run/warptweet/hostsign/sign.sock
 StartLimitIntervalSec=60
 StartLimitBurst=5
 
 [Service]
 Type=simple
-User=root
-Group=root
+User=warptweet-sshd
+Group=warptweet-sshd
 ExecStart=/opt/warptweet/bin/warptweet server data-plane
 Restart=on-failure
 RestartSec=5s
@@ -23,7 +24,7 @@ UMask=0077
 UnsetEnvironment=LD_AUDIT LD_LIBRARY_PATH LD_PRELOAD OPENSSL_CONF OPENSSL_CONF_INCLUDE OPENSSL_MODULES
 
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
-AmbientCapabilities=
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 NoNewPrivileges=yes
 KeyringMode=private
 LockPersonality=yes
@@ -41,9 +42,10 @@ ProtectKernelModules=yes
 ProtectKernelTunables=yes
 ProtectProc=invisible
 ProtectSystem=strict
-ReadOnlyPaths=/opt/warptweet /etc/warptweet
+ReadOnlyPaths=/opt/warptweet /etc/warptweet /run/warptweet/hostsign /var/lib/warptweet/authorized_keys /var/lib/warptweet/clients
 ReadWritePaths=/run/warptweet/sshd /run/warptweet/server /var/lib/warptweet/sessions -/run/utmp -/var/log/btmp -/var/log/lastlog
 ExecStartPre=+/bin/sh -c 'umask 077; cat /proc/sys/kernel/random/boot_id > /var/lib/warptweet/sessions/boot.id'
+ExecStartPre=/opt/warptweet/bin/warptweet server data-plane --preflight-only
 RemoveIPC=yes
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
 RestrictNamespaces=yes

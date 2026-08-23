@@ -91,6 +91,8 @@ mkdir -p "$WT_ROOT/usr/bin"
 ln -s /opt/warptweet/bin/warptweet "$WT_ROOT/usr/bin/warptweet"
 install -m 0644 "$WT_REPOSITORY_ROOT/packaging/systemd/warptweet-sshd.service" \
     "$WT_ROOT/lib/systemd/system/warptweet-sshd.service"
+install -m 0644 "$WT_REPOSITORY_ROOT/packaging/systemd/warptweet-hostsign.service" \
+    "$WT_ROOT/lib/systemd/system/warptweet-hostsign.service"
 install -m 0644 "$WT_REPOSITORY_ROOT/packaging/systemd/warptweet-enroll.service" \
     "$WT_ROOT/lib/systemd/system/warptweet-enroll.service"
 install -m 0644 "$WT_REPOSITORY_ROOT/packaging/systemd/warptweet-mgmt.service" \

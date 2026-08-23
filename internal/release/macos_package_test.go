@@ -45,6 +45,7 @@ func TestMacOSPackageUsesTypedProvisionerAndDedicatedTunnelJobs(t *testing.T) {
 		`install -m 0755 "$WT_PROVISIONER"`,
 		`com.warptweet.provisioner.plist`,
 		`WARPTWEET_REQUIRE_SIGNED_PKG`,
+		`check-darwin-minos.sh`,
 	} {
 		if !strings.Contains(build, required) {
 			t.Errorf("macOS package build omits %q", required)

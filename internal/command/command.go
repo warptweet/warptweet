@@ -744,10 +744,6 @@ func runTunnel(
 		}, nil
 	}
 	ready := func(_ context.Context, event supervisor.ReadyEvent) error {
-		if err := notifier.Ready("WarpTweet authenticated transport and local listener ready"); err != nil {
-			return err
-		}
-		readyPublished = true
 		if managedLifecycle.value {
 			if err := lifecycleStore.Write(lifecycle.State{
 				TunnelID: tunnelID.value, Phase: lifecycle.PhaseReady,
@@ -758,6 +754,10 @@ func runTunnel(
 				return fmt.Errorf("write managed lifecycle readiness: %w", err)
 			}
 		}
+		if err := notifier.Ready("WarpTweet authenticated transport and local listener ready"); err != nil {
+			return err
+		}
+		readyPublished = true
 		if readinessWriter != nil {
 			if _, err := fmt.Fprintf(readinessWriter, "READY %d\n", event.PID); err != nil {
 				return fmt.Errorf("publish inherited readiness: %w", err)

@@ -247,6 +247,7 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 	result["invite_expires_at"] = invite.ExpiresAt
 	result["authorization_duration_seconds"] = invite.AuthorizationDurationSeconds
 	result["invite_path"] = invitePath
+	result["invite_class"] = "confidential_bearer"
 	result["client_name"] = label
 
 	if asJSON.value {
@@ -294,7 +295,7 @@ func writeHostHuman(stdout io.Writer, output hostHumanOutput) error {
 		return err
 	}
 	if output.InvitePath != "" {
-		_, err = fmt.Fprintf(stdout, "invite   %s\n", output.InvitePath)
+		_, err = fmt.Fprintf(stdout, "invite   %s\nclass    confidential bearer; transfer authenticated and delete after use\n", output.InvitePath)
 		if err != nil {
 			return err
 		}
@@ -885,6 +886,11 @@ func ensureSSHDStarted(ctx context.Context, manifest server.Config) (string, err
 		}
 		if _, err := exec.LookPath("systemctl"); err != nil {
 			return "", errors.New("warptweet-sshd.service is installed but systemctl is unavailable")
+		}
+		enable := exec.CommandContext(ctx, "systemctl", "enable", "warptweet-hostsign.service", "warptweet-sshd.service")
+		enable.Env = []string{"LANG=C", "LC_ALL=C"}
+		if output, err := enable.CombinedOutput(); err != nil {
+			return "", fmt.Errorf("enable warptweet-sshd.service: %w (%s)", err, strings.TrimSpace(string(output)))
 		}
 		cmd := exec.CommandContext(ctx, "systemctl", "start", "warptweet-sshd.service")
 		cmd.Env = []string{"LANG=C", "LC_ALL=C"}

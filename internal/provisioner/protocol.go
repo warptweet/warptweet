@@ -25,14 +25,15 @@ const (
 	MaxRequestBytes  = 1 << 20
 	MaxResponseBytes = 1 << 20
 
-	ActionEnroll  = "enroll"
-	ActionConnect = "connect"
-	ActionUp      = "up"
-	ActionStatus  = "status"
-	ActionDown    = "down"
-	ActionRotate  = "rotate"
-	ActionRevoke  = "revoke"
-	ActionRepair  = "repair"
+	ActionEnroll    = "enroll"
+	ActionConnect   = "connect"
+	ActionUp        = "up"
+	ActionStatus    = "status"
+	ActionDown      = "down"
+	ActionRotate    = "rotate"
+	ActionRevoke    = "revoke"
+	ActionRepair    = "repair"
+	ActionUninstall = "uninstall"
 )
 
 func isTunnelStartAction(action string) bool {
@@ -92,9 +93,9 @@ func ValidateRequest(request Request) error {
 				return errors.New("restart_policy must be unless-stopped or manual")
 			}
 		}
-	case ActionStatus:
+	case ActionStatus, ActionUninstall:
 		if len(request.Invite) != 0 || len(request.Proof) != 0 || request.Once || request.ListenPort != 0 || request.PrepareOnly {
-			return errors.New("status contains fields for another action")
+			return errors.New(request.Action + " contains fields for another action")
 		}
 		if request.TunnelID != "" {
 			if err := config.ValidateTunnelID(request.TunnelID); err != nil {

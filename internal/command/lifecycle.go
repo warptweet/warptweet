@@ -1521,6 +1521,11 @@ func runUninstall(arguments []string, stdout, stderr io.Writer) error {
 	if !preserve.value {
 		return errors.New("uninstall requires --preserve-identity (destroying identity is an explicit package uninstall path)")
 	}
+	if handled, err := callInstalledProvisioner(context.Background(), provisioner.Request{
+		Version: provisioner.ProtocolVersion, Action: provisioner.ActionUninstall,
+	}, stdout); handled {
+		return err
+	}
 	layout, err := productionClientLayout()
 	if err != nil {
 		return err

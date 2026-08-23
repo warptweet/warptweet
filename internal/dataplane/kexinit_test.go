@@ -22,8 +22,14 @@ func TestKexInitAdvertisesOnlyThePinnedProfile(t *testing.T) {
 	hostKey, rest := mustNameList(t, rest)
 	c2s, rest := mustNameList(t, rest)
 	s2c, _ := mustNameList(t, rest)
-	if kex != policy.Profile.KeyExchangeAlgorithm {
+	if !nameListContains(kex, policy.Profile.KeyExchangeAlgorithm) {
 		t.Fatalf("kex=%q", kex)
+	}
+	if !nameListContains(kex, strictKEXServer) {
+		t.Fatalf("missing strict KEX server extension in %q", kex)
+	}
+	if nameListContains(kex, strictKEXClient) {
+		t.Fatal("server KEXINIT advertised the client strict-KEX marker")
 	}
 	if hostKey != policy.Profile.AuthenticationKeyType {
 		t.Fatalf("hostkey=%q", hostKey)
@@ -31,8 +37,22 @@ func TestKexInitAdvertisesOnlyThePinnedProfile(t *testing.T) {
 	if c2s != s2c || !strings.Contains(c2s, "chacha20-poly1305@openssh.com") || strings.Contains(c2s, "aes256-gcm@openssh.com") {
 		t.Fatalf("ciphers c2s=%q s2c=%q", c2s, s2c)
 	}
-	if strings.Contains(kex, ",") || strings.Contains(hostKey, ",") {
-		t.Fatal("KEXINIT advertised more than one KEX or host key algorithm")
+	if strings.Contains(hostKey, ",") {
+		t.Fatal("KEXINIT advertised more than one host key algorithm")
+	}
+}
+
+func TestClientKexInitAdvertisesStrictClientExtension(t *testing.T) {
+	t.Parallel()
+
+	policy := mustPolicy(t)
+	payload, err := policy.marshalKexInitClient()
+	if err != nil {
+		t.Fatal(err)
+	}
+	kex, _ := mustNameList(t, payload[17:])
+	if !nameListContains(kex, strictKEXClient) || nameListContains(kex, strictKEXServer) {
+		t.Fatalf("client kex=%q", kex)
 	}
 }
 
@@ -43,6 +63,20 @@ func TestClientOffersPinnedAlgorithmsRejectsAESOnly(t *testing.T) {
 	kex := fakeClientKexInit(t, policy.Profile.KeyExchangeAlgorithm, policy.Profile.AuthenticationKeyType, "aes256-gcm@openssh.com")
 	if err := clientOffersPinnedAlgorithms(kex, policy); err == nil {
 		t.Fatal("accepted AES-GCM-only client KEXINIT")
+	}
+}
+
+func TestClientOffersStrictKEXDetectsClientMarker(t *testing.T) {
+	t.Parallel()
+
+	policy := mustPolicy(t)
+	plain := fakeClientKexInit(t, policy.Profile.KeyExchangeAlgorithm, policy.Profile.AuthenticationKeyType, "chacha20-poly1305@openssh.com")
+	if clientOffersStrictKEX(plain) {
+		t.Fatal("plain KEXINIT reported as strict")
+	}
+	strict := fakeClientKexInit(t, policy.Profile.KeyExchangeAlgorithm+","+strictKEXClient, policy.Profile.AuthenticationKeyType, "chacha20-poly1305@openssh.com")
+	if !clientOffersStrictKEX(strict) {
+		t.Fatal("strict client marker not detected")
 	}
 }
 

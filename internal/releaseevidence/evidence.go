@@ -41,6 +41,7 @@ type Checklist struct {
 	Negative                 []Case   `json:"negative"`
 	ArtifactBindingFields    []string `json:"artifact_binding_fields"`
 	Matrix                   Matrix   `json:"matrix"`
+	FileSHA256               string   `json:"-"`
 }
 
 // Result is one executed checklist case.

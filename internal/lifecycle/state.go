@@ -37,6 +37,7 @@ type State struct {
 	TunnelID       string `json:"tunnel_id"`
 	Phase          Phase  `json:"phase"`
 	PID            int    `json:"pid,omitempty"`
+	StartIdentity  uint64 `json:"start_identity,omitempty"`
 	ListenEndpoint string `json:"listen_endpoint,omitempty"`
 	TargetHealth   string `json:"target_health"`
 	UpdatedAt      string `json:"updated_at"`
@@ -117,6 +118,11 @@ func (store Store) Write(state State) error {
 	if state.UpdatedAt == "" {
 		state.UpdatedAt = time.Now().UTC().Format(time.RFC3339Nano)
 	}
+	if state.PID > 0 {
+		if id, ok := processStartIdentity(state.PID); ok {
+			state.StartIdentity = id
+		}
+	}
 	if err := os.MkdirAll(store.tunnelDir(state.TunnelID), 0o700); err != nil {
 		return err
 	}
@@ -181,7 +187,35 @@ func (store Store) Read(tunnelID string) (State, error) {
 	if state.TargetHealth == "" {
 		state.TargetHealth = TargetHealthNotChecked
 	}
+	if state.PID > 0 && !processMatches(state.PID, state.StartIdentity) {
+		switch state.Phase {
+		case PhaseReady, PhaseStarting, PhaseAwaitingReadiness, PhaseBackoff:
+			state.Phase = PhaseFailed
+			state.Error = "process is not running"
+		}
+	}
 	return state, nil
+}
+
+func processMatches(pid int, recorded uint64) bool {
+	if pid <= 0 {
+		return false
+	}
+	err := syscall.Kill(pid, 0)
+	if err != nil {
+		if errors.Is(err, syscall.EPERM) {
+			return true
+		}
+		return false
+	}
+	if recorded == 0 {
+		return true
+	}
+	got, ok := processStartIdentity(pid)
+	if !ok {
+		return true
+	}
+	return got == recorded
 }
 
 // List returns states for all tunnels with state files.

@@ -2,6 +2,7 @@ package dataplane
 
 import (
 	"bufio"
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
@@ -53,28 +54,48 @@ const (
 	sessionIdleTimeout         = 5 * time.Minute
 	windowAdjustThreshold      = 1 << 20
 	maxSSHSeq                  = uint64(^uint32(0))
+	defaultRekeyAfter          = 512 << 20
+	defaultMaxChannels         = 4
+	defaultMaxConnsPerSource   = 4
+)
+
+type kexPhase uint8
+
+const (
+	kexAwaitInit kexPhase = iota
+	kexAwaitECDH
+	kexAwaitNewKeys
+	kexReady
 )
 
 type connection struct {
-	conn                 net.Conn
-	reader               *bufio.Reader
-	policy               Policy
-	hostKey              composite.PrivateKey
-	clearIn, clearOut    bool
-	in, out              packetCodec
-	inSeq, outSeq        uint64
-	clientID, serverID   string
-	clientKex, serverKex []byte
-	sessionID            []byte
-	authed               bool
-	mu                   sync.Mutex
-	win                  *sync.Cond
-	channels             map[uint32]*sshChannel
-	nextLocal            uint32
-	grant                *grantsession.Authority
-	sessions             *sessionTable
-	connectionID         string
-	keyDigest            string
+	conn                  net.Conn
+	reader                *bufio.Reader
+	policy                Policy
+	hostKey               HostSigner
+	clearIn, clearOut     bool
+	in, out               packetCodec
+	pendingIn, pendingOut packetCodec
+	phase                 kexPhase
+	inSeq, outSeq         uint64
+	bytesOut              uint64
+	rekeyAfter            uint64
+	clientID, serverID    string
+	clientKex, serverKex  []byte
+	sessionID             []byte
+	strictKEX             bool
+	initialKEX            bool
+	authed                bool
+	mu                    sync.Mutex
+	win                   *sync.Cond
+	channels              map[uint32]*sshChannel
+	nextLocal             uint32
+	grant                 *grantsession.Authority
+	sessions              *sessionTable
+	connectionID          string
+	keyDigest             string
+	ctx                   context.Context
+	maxChannels           int
 }
 
 type sshChannel struct {
@@ -89,17 +110,33 @@ type sshChannel struct {
 	backend    net.Conn
 }
 
-func serveConnection(raw net.Conn, policy Policy, hostKey composite.PrivateKey, sessions *sessionTable) error {
+func serveConnection(ctx context.Context, raw net.Conn, policy Policy, hostKey HostSigner, sessions *sessionTable) error {
+	rekeyAfter := policy.RekeyAfter
+	if rekeyAfter == 0 {
+		rekeyAfter = defaultRekeyAfter
+	}
+	maxChannels := policy.MaxChannels
+	if maxChannels <= 0 {
+		maxChannels = defaultMaxChannels
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	c := &connection{
-		conn:     raw,
-		reader:   bufio.NewReader(raw),
-		policy:   policy,
-		hostKey:  hostKey,
-		clearIn:  true,
-		clearOut: true,
-		channels: map[uint32]*sshChannel{},
-		grant:    policy.Grant,
-		sessions: sessions,
+		conn:        raw,
+		reader:      bufio.NewReader(raw),
+		policy:      policy,
+		hostKey:     hostKey,
+		clearIn:     true,
+		clearOut:    true,
+		phase:       kexAwaitInit,
+		initialKEX:  true,
+		rekeyAfter:  rekeyAfter,
+		channels:    map[uint32]*sshChannel{},
+		grant:       policy.Grant,
+		sessions:    sessions,
+		ctx:         ctx,
+		maxChannels: maxChannels,
 	}
 	c.win = sync.NewCond(&c.mu)
 	defer raw.Close()
@@ -136,17 +173,21 @@ func (c *connection) serve() error {
 		}
 		switch payload[0] {
 		case sshMsgKexInit:
-			c.clientKex = payload
+			if err := c.handleKexInit(payload); err != nil {
+				return err
+			}
 		case sshMsgKexECDHInit:
 			if err := c.handleKEX(payload); err != nil {
 				return err
 			}
 		case sshMsgNewKeys:
-			if c.in == nil {
-				return fmt.Errorf("NEWKEYS before key derivation")
+			if err := c.handleNewKeys(); err != nil {
+				return err
 			}
-			c.clearIn = false
 		case sshMsgIgnore, sshMsgUnimplemented, sshMsgDebug, sshMsgExtInfo:
+			if c.initialKEX {
+				return c.disconnect("unexpected message during initial KEX")
+			}
 		case sshMsgDisconnect:
 			return nil
 		case sshMsgServiceRequest, sshMsgUserauthRequest, sshMsgGlobalRequest,
@@ -161,9 +202,68 @@ func (c *connection) serve() error {
 	}
 }
 
+func (c *connection) handleKexInit(payload []byte) error {
+	c.mu.Lock()
+	phase := c.phase
+	c.mu.Unlock()
+	switch phase {
+	case kexReady:
+		serverKex, err := c.policy.marshalKexInit()
+		if err != nil {
+			return err
+		}
+		c.mu.Lock()
+		c.serverKex = serverKex
+		c.clientKex = payload
+		c.phase = kexAwaitECDH
+		c.mu.Unlock()
+		return c.write(serverKex)
+	case kexAwaitInit:
+		c.mu.Lock()
+		c.clientKex = payload
+		if c.initialKEX && clientOffersStrictKEX(payload) {
+			c.strictKEX = true
+		}
+		c.phase = kexAwaitECDH
+		c.mu.Unlock()
+		return nil
+	default:
+		return c.disconnect("unexpected KEXINIT")
+	}
+}
+
+func (c *connection) handleNewKeys() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.phase != kexAwaitNewKeys || c.pendingIn == nil {
+		return fmt.Errorf("NEWKEYS before key derivation")
+	}
+	c.in = c.pendingIn
+	c.pendingIn = nil
+	c.clearIn = false
+	if c.strictKEX && c.initialKEX {
+		c.inSeq = 0
+	}
+	c.initialKEX = false
+	c.phase = kexReady
+	c.bytesOut = 0
+	c.win.Broadcast()
+	return nil
+}
+
 func (c *connection) dispatchSecure(payload []byte) error {
 	if c.clearIn {
 		return c.disconnect("post-KEX message before NEWKEYS")
+	}
+	c.mu.Lock()
+	phase := c.phase
+	c.mu.Unlock()
+	if phase != kexReady {
+		switch payload[0] {
+		case sshMsgChannelData, sshMsgChannelWindowAdjust, sshMsgChannelEOF, sshMsgChannelClose, sshMsgGlobalRequest:
+		default:
+			return c.disconnect("application message during key exchange")
+		}
 	}
 	switch payload[0] {
 	case sshMsgServiceRequest:
@@ -190,9 +290,14 @@ func (c *connection) dispatchSecure(payload []byte) error {
 }
 
 func (c *connection) handleKEX(payload []byte) error {
-	if c.clientKex == nil {
+	c.mu.Lock()
+	if c.phase != kexAwaitECDH || c.clientKex == nil {
+		c.mu.Unlock()
 		return fmt.Errorf("KEX_ECDH_INIT before KEXINIT")
 	}
+	clientKex := c.clientKex
+	serverKex := c.serverKex
+	c.mu.Unlock()
 	clientPub, rest, err := consumeSSHString(payload[1:])
 	if err != nil {
 		return err
@@ -204,7 +309,7 @@ func (c *connection) handleKEX(payload []byte) error {
 	if err != nil {
 		return err
 	}
-	if err := clientOffersPinnedAlgorithms(c.clientKex, c.policy); err != nil {
+	if err := clientOffersPinnedAlgorithms(clientKex, c.policy); err != nil {
 		return c.disconnect(err.Error())
 	}
 	hostPub, err := c.hostKey.Public()
@@ -213,10 +318,13 @@ func (c *connection) handleKEX(payload []byte) error {
 	}
 	hostBlob := hostKeyBlob(hostPub)
 	secret := sshString(shared)
-	hash := exchangeHash(c.clientID, c.serverID, c.clientKex, c.serverKex, hostBlob, clientPub, serverPub, secret)
+	hash := exchangeHash(c.clientID, c.serverID, clientKex, serverKex, hostBlob, clientPub, serverPub, secret)
+	c.mu.Lock()
 	if len(c.sessionID) == 0 {
 		c.sessionID = append([]byte(nil), hash...)
 	}
+	sessionID := append([]byte(nil), c.sessionID...)
+	c.mu.Unlock()
 	sigRaw, err := c.hostKey.Sign(hash)
 	if err != nil {
 		return err
@@ -228,19 +336,27 @@ func (c *connection) handleKEX(payload []byte) error {
 	if err := c.write(reply); err != nil {
 		return err
 	}
-	keyC, keyD := deriveKeys(secret, hash)
-	c.out, err = newChaChaDirection(keyD)
+	keyC, keyD := deriveKeys(secret, hash, sessionID)
+	pendingOut, err := newChaChaDirection(keyD)
 	if err != nil {
 		return err
 	}
-	c.in, err = newChaChaDirection(keyC)
+	pendingIn, err := newChaChaDirection(keyC)
 	if err != nil {
 		return err
 	}
 	if err := c.write([]byte{sshMsgNewKeys}); err != nil {
 		return err
 	}
+	c.mu.Lock()
+	c.out = pendingOut
+	c.pendingIn = pendingIn
 	c.clearOut = false
+	c.phase = kexAwaitNewKeys
+	if c.strictKEX && c.initialKEX {
+		c.outSeq = 0
+	}
+	c.mu.Unlock()
 	return nil
 }
 
@@ -437,29 +553,59 @@ func checkSSHSeq(seq uint64) error {
 
 func (c *connection) write(payload []byte) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.authed {
 		_ = c.conn.SetDeadline(time.Now().Add(sessionIdleTimeout))
 	}
 	if err := checkSSHSeq(c.outSeq); err != nil {
+		c.mu.Unlock()
 		return err
 	}
+	var n int
 	if c.clearOut {
 		if err := writePacket(c.conn, payload); err != nil {
+			c.mu.Unlock()
 			return err
 		}
+		n = len(payload)
 		c.outSeq++
-		return nil
+	} else {
+		frame, err := c.out.seal(c.outSeq, payload)
+		if err != nil {
+			c.mu.Unlock()
+			return err
+		}
+		if _, err := c.conn.Write(frame); err != nil {
+			c.mu.Unlock()
+			return err
+		}
+		n = len(frame)
+		c.outSeq++
 	}
-	frame, err := c.out.seal(c.outSeq, payload)
+	c.bytesOut += uint64(n)
+	needRekey := c.phase == kexReady && c.rekeyAfter > 0 && c.bytesOut >= c.rekeyAfter && payload[0] != sshMsgKexInit
+	c.mu.Unlock()
+	if needRekey {
+		return c.startRekey()
+	}
+	return nil
+}
+
+func (c *connection) startRekey() error {
+	serverKex, err := c.policy.marshalKexInit()
 	if err != nil {
 		return err
 	}
-	if _, err := c.conn.Write(frame); err != nil {
-		return err
+	c.mu.Lock()
+	if c.phase != kexReady {
+		c.mu.Unlock()
+		return nil
 	}
-	c.outSeq++
-	return nil
+	c.serverKex = serverKex
+	c.clientKex = nil
+	c.phase = kexAwaitInit
+	c.mu.Unlock()
+	c.win.Broadcast()
+	return c.write(serverKex)
 }
 
 func (c *connection) read() ([]byte, error) {
@@ -578,9 +724,24 @@ func appendKexInitHash(dst, kex []byte) []byte {
 	return append(dst, body...)
 }
 
-func deriveKeys(secret, hash []byte) (keyC, keyD []byte) {
-	return deriveOne(secret, hash, hash, 'C', chachaKeyTotal),
-		deriveOne(secret, hash, hash, 'D', chachaKeyTotal)
+func deriveKeys(secret, hash, sessionID []byte) (keyC, keyD []byte) {
+	return deriveOne(secret, hash, sessionID, 'C', chachaKeyTotal),
+		deriveOne(secret, hash, sessionID, 'D', chachaKeyTotal)
+}
+
+func clientOffersStrictKEX(kex []byte) bool {
+	body := kex
+	if len(body) > 0 && body[0] == sshMsgKexInit {
+		body = body[1:]
+	}
+	if len(body) < 16 {
+		return false
+	}
+	kexList, _, err := consumeSSHString(body[16:])
+	if err != nil {
+		return false
+	}
+	return nameListContains(string(kexList), strictKEXClient)
 }
 
 func clientOffersPinnedAlgorithms(kex []byte, policy Policy) error {

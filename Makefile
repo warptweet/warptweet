@@ -3,6 +3,11 @@
 GOCACHE ?= /private/tmp/warptweet-go-build
 SITE_DEV_HOST ?= 127.0.0.1
 SITE_DEV_PORT ?= 4321
+ifeq ($(shell uname -s),Darwin)
+export MACOSX_DEPLOYMENT_TARGET ?= 13.0
+export CGO_CFLAGS += -mmacosx-version-min=$(MACOSX_DEPLOYMENT_TARGET)
+export CGO_LDFLAGS += -mmacosx-version-min=$(MACOSX_DEPLOYMENT_TARGET)
+endif
 
 # Dual-host local-dev interop: zero args. Configure via repo-root .env (see .env.example).
 # Auto-builds missing artifacts/*.deb + *.pkg (OpenSSH stages cached). Partial evidence fails.

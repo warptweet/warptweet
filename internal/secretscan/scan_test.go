@@ -32,7 +32,7 @@ func TestScanTreeFailsOnPlantedInviteAndKey(t *testing.T) {
 	var sawInvite, sawKey bool
 	for _, finding := range findings {
 		switch {
-		case finding.Reason == "invite mac and nonce":
+		case finding.Reason == "invite nonce":
 			sawInvite = true
 		case strings.Contains(finding.Reason, "private key"):
 			sawKey = true

@@ -8,16 +8,26 @@ import (
 const (
 	sshMsgKexInit           = 20
 	disconnectProtocolError = 2
+	strictKEXServer         = "kex-strict-s-v00@openssh.com"
+	strictKEXClient         = "kex-strict-c-v00@openssh.com"
 )
 
 func (policy Policy) marshalKexInit() ([]byte, error) {
+	return policy.marshalKexInitList(policy.Profile.KeyExchangeAlgorithm + "," + strictKEXServer)
+}
+
+func (policy Policy) marshalKexInitClient() ([]byte, error) {
+	return policy.marshalKexInitList(policy.Profile.KeyExchangeAlgorithm + "," + strictKEXClient)
+}
+
+func (policy Policy) marshalKexInitList(kexNames string) ([]byte, error) {
 	cookie := make([]byte, 16)
 	if _, err := rand.Read(cookie); err != nil {
 		return nil, err
 	}
 	payload := []byte{sshMsgKexInit}
 	payload = append(payload, cookie...)
-	payload = appendNameList(payload, policy.Profile.KeyExchangeAlgorithm)
+	payload = appendNameList(payload, kexNames)
 	payload = appendNameList(payload, policy.Profile.AuthenticationKeyType)
 	cipher := policy.Profile.Ciphers[0]
 	payload = appendNameList(payload, cipher)

@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 )
 
@@ -61,6 +62,55 @@ func TestValidateTunnelID(t *testing.T) {
 	}
 	if err := validateTunnelID(""); err == nil {
 		t.Fatal("accepted empty id")
+	}
+}
+
+func TestReadMarksMissingProcessFailed(t *testing.T) {
+	t.Parallel()
+
+	store := Store{Root: t.TempDir()}
+	if err := store.Write(State{
+		TunnelID: "gone",
+		Phase:    PhaseReady,
+		PID:      1 << 30,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Read("gone")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Phase != PhaseFailed {
+		t.Fatalf("phase=%s, want Failed", state.Phase)
+	}
+	if state.Error != "process is not running" {
+		t.Fatalf("error=%q", state.Error)
+	}
+}
+
+func TestReadRejectsPIDReuse(t *testing.T) {
+	t.Parallel()
+
+	store := Store{Root: t.TempDir()}
+	if err := store.Write(State{
+		TunnelID: "live",
+		Phase:    PhaseReady,
+		PID:      os.Getpid(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(store.Root, "live", "state.json")
+	// Force a start identity that cannot match this process.
+	replaced := []byte(`{"tunnel_id":"live","phase":"Ready","pid":` + strconv.Itoa(os.Getpid()) + `,"start_identity":1,"target_health":"not_checked","updated_at":"2026-08-23T00:00:00Z"}`)
+	if err := os.WriteFile(path, replaced, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Read("live")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Phase != PhaseFailed {
+		t.Fatalf("phase=%s, want Failed after start-identity mismatch", state.Phase)
 	}
 }
 

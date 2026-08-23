@@ -1,7 +1,10 @@
 package publicrelease
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -34,6 +37,17 @@ func TestRepositoryGateKeepsHomebrewCTADark(t *testing.T) {
 	if err := ValidateEnabledCTA(root, gate); err != nil {
 		t.Fatalf("ValidateEnabledCTA dark gate: %v", err)
 	}
+	if err := VerifyRepository(root); err != nil {
+		t.Fatalf("VerifyRepository: %v", err)
+	}
+}
+
+func TestVerifyRepositoryRejectsMissingGate(t *testing.T) {
+	t.Parallel()
+
+	if err := VerifyRepository(t.TempDir()); err == nil {
+		t.Fatal("accepted a tree without a public-release gate")
+	}
 }
 
 func TestEnabledCTARequiresCompleteV2Evidence(t *testing.T) {
@@ -59,7 +73,36 @@ func TestEnabledCTARequiresCompleteV2Evidence(t *testing.T) {
 		t.Fatal("enabled CTA accepted missing evidence document")
 	}
 
-	pseudoRoot, evidenceRel := writeV2EvidenceTree(t, root, completeV2Report(checklist))
+	report := completeV2Report(checklist)
+	report.ClientPackagePath = "dist/client.pkg"
+	report.ServerPackagePath = "dist/server.deb"
+	pseudoRoot, evidenceRel := writeV2EvidenceTree(t, root, report)
+	if err := os.MkdirAll(filepath.Join(pseudoRoot, "dist"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pseudoRoot, report.ClientPackagePath), []byte("client"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pseudoRoot, report.ServerPackagePath), []byte("server"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	clientSum, err := sha256File(filepath.Join(pseudoRoot, report.ClientPackagePath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	serverSum, err := sha256File(filepath.Join(pseudoRoot, report.ServerPackagePath))
+	if err != nil {
+		t.Fatal(err)
+	}
+	report.ClientPackageSHA256 = clientSum
+	report.ServerPackageSHA256 = serverSum
+	encoded, err := json.Marshal(report)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pseudoRoot, evidenceRel), encoded, 0o644); err != nil {
+		t.Fatal(err)
+	}
 	enabled := Gate{
 		Kind:                     Kind,
 		SchemaVersion:            SchemaVersion,
@@ -169,7 +212,7 @@ func sampleReportV2(checklist releaseevidence.Checklist) releaseevidence.ReportV
 		Kind:                       releaseevidence.Kind,
 		SchemaVersion:              releaseevidence.SchemaVersionV2,
 		ContractID:                 adoptionresult.ContractID,
-		ContractChecklistSHA256:    adoptionresult.ContractChecklistSHA256,
+		ContractChecklistSHA256:    checklist.FileSHA256,
 		ReleaseVersion:             "0.1.0-rc.1",
 		SourceCommit:               strings.Repeat("a", 40),
 		CleanTreeProof:             "git-status-empty",
@@ -225,6 +268,19 @@ func writeJSONEvidenceTree(t *testing.T, sourceRoot string, report any) (string,
 		t.Fatal(err)
 	}
 	return pseudoRoot, evidenceRel
+}
+
+func sha256File(path string) (string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer file.Close()
+	sum := sha256.New()
+	if _, err := io.Copy(sum, file); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(sum.Sum(nil)), nil
 }
 
 func repositoryRoot(t *testing.T) string {

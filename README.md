@@ -108,7 +108,7 @@ Successful `doctor-server` output also uses `"status":"preflight_ready"`, with `
 The intended release flow is:
 
 1. Install the reviewed, pinned OpenSSH 10.4p1 bundle, source receipt, and authenticated file manifest in the fixed root-owned layout.
-2. On the service host: `host` to start the restricted data and enrollment planes and mint a single-use `.wtinvite`.
+2. On the service host: `host` to start the restricted data and enrollment planes and mint a single-use confidential `.wtinvite`. That file contains no private keys or long-lived credentials. It is a confidential bearer authorization: transfer it over an authenticated channel and delete it after use.
 3. On the client: `connect` to generate a composite client key locally, enroll, pin the host, and open the loopback forward.
 4. Use `status` / `down` / `rotate` / `revoke` for lifecycle; rotate and revoke require host acknowledgment via the management token.
 5. Before a supported release, complete package-to-package dual-host evidence (WP8): authentication, forwarding readiness, negotiated algorithms, rekey, classical-only denial, confinement, invite fail-closed, and cleanup.

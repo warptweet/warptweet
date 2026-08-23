@@ -25,6 +25,7 @@ func TestLinuxPackageBuildScriptContract(t *testing.T) {
 		`opt/warptweet/bin/warptweet`,
 		`usr/bin/warptweet`,
 		`warptweet-sshd.service`,
+		`warptweet-hostsign.service`,
 		`warptweet-tunnel@.service`,
 		`warptweet-provisioner.service`,
 		`warptweet-provisioner`,
@@ -85,8 +86,10 @@ func TestLinuxPackageScriptsForbidNetwork(t *testing.T) {
 		`usermod -L warptweet-sshd`,
 		`warptweet-operator`,
 		`--uid "$WT_UID"`,
-		`systemctl enable warptweet-provisioner.service`,
+		`systemctl enable --now warptweet-provisioner.service`,
 		`systemctl enable warptweet-mgmt.service`,
+		`upgrade-active.units`,
+		`try-restart`,
 	} {
 		if !strings.Contains(postinst, required) {
 			t.Errorf("postinst omits %q", required)
@@ -103,7 +106,7 @@ func TestLinuxPackageScriptsForbidNetwork(t *testing.T) {
 		`list-unit-files`,
 		`stop_disable "$WT_UNIT"`,
 		`remove | deconfigure | 0`,
-		`try-restart`,
+		`upgrade-active.units`,
 	} {
 		if !strings.Contains(prerm, required) {
 			t.Errorf("prerm omits %q", required)

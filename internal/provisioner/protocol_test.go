@@ -27,6 +27,8 @@ func TestValidateRequestAcceptsOnlyActionSpecificFields(t *testing.T) {
 		{name: "repair", request: Request{Version: 1, Action: ActionRepair, TunnelID: "db-1"}},
 		{name: "up proof", request: Request{Version: 1, Action: ActionUp, TunnelID: "db-1", Proof: json.RawMessage(`{}`)}, wantErr: "another action"},
 		{name: "status all", request: Request{Version: 1, Action: ActionStatus}},
+		{name: "uninstall", request: Request{Version: 1, Action: ActionUninstall}},
+		{name: "uninstall invite", request: Request{Version: 1, Action: ActionUninstall, Invite: invite}, wantErr: "another action"},
 		{name: "status once", request: Request{Version: 1, Action: ActionStatus, Once: true}, wantErr: "another action"},
 		{name: "down once", request: Request{Version: 1, Action: ActionDown, TunnelID: "db-1", Once: true}, wantErr: "only for"},
 		{name: "invalid id", request: Request{Version: 1, Action: ActionUp, TunnelID: "../db"}, wantErr: "invalid tunnel_id"},
@@ -130,6 +132,21 @@ func TestMaterializeEnrollInputsWritesProof(t *testing.T) {
 	}
 	if string(proof) != "{\"proof\":true}\n" {
 		t.Fatalf("proof=%q", proof)
+	}
+}
+
+func TestLinuxProjectTunnelPersistsIntent(t *testing.T) {
+	t.Parallel()
+
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	contents := string(readFile(t, filepath.Join(filepath.Dir(file), "server_linux.go")))
+	persistAt := strings.Index(contents, "persistRouteIntent(")
+	startAt := strings.Index(contents, `exec.CommandContext(ctx, "systemctl", action, unit)`)
+	if persistAt < 0 || startAt < 0 || persistAt > startAt {
+		t.Fatal("Linux projectTunnel must persist desired intent before systemctl")
 	}
 }
 

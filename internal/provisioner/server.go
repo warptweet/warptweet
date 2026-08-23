@@ -156,6 +156,11 @@ func executeRequest(ctx context.Context, request Request, serviceUID, serviceGID
 		return stopTunnel(ctx, request.TunnelID)
 	case ActionRotate, ActionRevoke:
 		return executeController(ctx, request.Action, request.TunnelID)
+	case ActionUninstall:
+		return uninstallAllRoutes(ctx, installlayout.DarwinClientRoutesDirectory, func(ctx context.Context, routeID string) error {
+			_, err := stopTunnel(ctx, routeID)
+			return err
+		})
 	default:
 		if isTunnelStartAction(request.Action) {
 			return startTunnel(ctx, request.TunnelID, request.Once, serviceUID, serviceGID)
@@ -362,31 +367,7 @@ func writeTunnelPlist(tunnelID string, once, runAtLoad bool) (string, string, er
 }
 
 func persistDarwinDesiredState(tunnelID, desired string) error {
-	store := routestate.Store{Root: installlayout.DarwinClientRoutesDirectory}
-	exists, err := store.Exists(tunnelID)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return nil
-	}
-	intent, err := store.LoadIntent(tunnelID)
-	if err != nil {
-		intent = routestate.Intent{
-			Kind:          routestate.KindDesiredState,
-			SchemaVersion: routestate.CurrentSchemaVersion,
-			RouteID:       tunnelID,
-			RestartPolicy: routestate.RestartUnlessStopped,
-		}
-	}
-	intent.DesiredState = desired
-	if desired == routestate.DesiredRunning && intent.RestartPolicy == routestate.RestartManual {
-		intent.BootID = darwinBootID()
-	}
-	if desired == routestate.DesiredStopped {
-		intent.BootID = ""
-	}
-	return store.WriteIntent(intent)
+	return persistRouteIntent(installlayout.DarwinClientRoutesDirectory, tunnelID, desired, darwinBootID(), false)
 }
 
 func desiredRunAtLoad(tunnelID string) bool {
@@ -727,7 +708,8 @@ func reconcileDarwinBoot(ctx context.Context, serviceUID, serviceGID uint32) err
 		if route.Invalid {
 			continue
 		}
-		if _, _, err := writeTunnelPlist(route.RouteID, true, false); err != nil {
+		once := route.Intent.RestartPolicy == routestate.RestartManual
+		if _, _, err := writeTunnelPlist(route.RouteID, once, false); err != nil {
 			slog.Error("darwin boot plist failed", "route_id", route.RouteID, "err", err)
 			errs = append(errs, fmt.Errorf("route %s plist: %w", route.RouteID, err))
 			continue
@@ -735,8 +717,9 @@ func reconcileDarwinBoot(ctx context.Context, serviceUID, serviceGID uint32) err
 		if !routestate.ShouldStartAtBoot(route.Intent, bootID) {
 			continue
 		}
-		if _, err := startTunnel(ctx, route.RouteID, true, serviceUID, serviceGID); err != nil {
+		if _, err := startTunnel(ctx, route.RouteID, once, serviceUID, serviceGID); err != nil {
 			slog.Error("darwin boot start failed", "route_id", route.RouteID, "err", err)
+			errs = append(errs, fmt.Errorf("route %s start: %w", route.RouteID, err))
 		}
 	}
 	return errors.Join(errs...)

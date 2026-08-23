@@ -1,14 +1,13 @@
 // Package enrollment defines single-use server invite authorizations for
-// managed client bootstrap. Invites never carry private keys or reusable
-// bearer credentials.
+// managed client bootstrap. A .wtinvite is a confidential, short-lived,
+// single-use bearer. Transfer it over an authenticated channel and delete it
+// after consumption or expiry. Invites never carry private keys.
 package enrollment
 
 import (
 	"bytes"
-	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -62,7 +61,6 @@ type Invite struct {
 	ExpiresAt                    string `json:"expires_at"`
 	AuthorizationDurationSeconds int64  `json:"authorization_duration_seconds"`
 	Nonce                        string `json:"nonce"`
-	MAC                          string `json:"mac"`
 }
 
 // Record is durable server-side invite state.
@@ -159,47 +157,7 @@ func Create(input CreateInput) (Invite, Record, error) {
 		AuthorizationDurationSeconds: authorizationSeconds,
 		Nonce:                        hex.EncodeToString(nonce),
 	}
-	mac, err := macInvite(input.Secret, invite)
-	if err != nil {
-		return Invite{}, Record{}, err
-	}
-	invite.MAC = mac
 	return invite, Record{Invite: invite, Status: StatusIssued}, nil
-}
-
-// ParseAndVerify authenticates invite JSON against the server-local secret.
-func ParseAndVerify(raw []byte, secret []byte, now time.Time) (Invite, error) {
-	if len(raw) == 0 {
-		return Invite{}, fmt.Errorf("%w: input is empty", ErrInvalidInvite)
-	}
-	if len(raw) > MaxInviteBytes {
-		return Invite{}, fmt.Errorf("%w: input exceeds %d bytes", ErrInvalidInvite, MaxInviteBytes)
-	}
-	var invite Invite
-	if err := decodeStrictJSON(raw, &invite); err != nil {
-		return Invite{}, fmt.Errorf("%w: %v", ErrInvalidInvite, err)
-	}
-	if err := validateInviteShape(invite); err != nil {
-		return Invite{}, err
-	}
-	expected, err := macInvite(secret, invite)
-	if err != nil {
-		return Invite{}, err
-	}
-	if !hmac.Equal([]byte(invite.MAC), []byte(expected)) {
-		return Invite{}, fmt.Errorf("%w: mac mismatch", ErrInvalidInvite)
-	}
-	if now.IsZero() {
-		now = time.Now().UTC()
-	}
-	expires, err := time.Parse(time.RFC3339Nano, invite.ExpiresAt)
-	if err != nil {
-		return Invite{}, fmt.Errorf("%w: parse expires_at: %v", ErrInvalidInvite, err)
-	}
-	if !now.Before(expires) {
-		return Invite{}, fmt.Errorf("%w: invite expired", ErrInvalidInvite)
-	}
-	return invite, nil
 }
 
 // Store persists one invite record under the invites directory.
@@ -419,9 +377,6 @@ func validateCreateInput(input CreateInput) error {
 	if !isLowerHexDigest(input.EnrollmentTLSSPKISHA256) {
 		return fmt.Errorf("%w: enrollment_tls_spki_sha256 must be a lowercase SHA-256 digest", ErrInvalidInvite)
 	}
-	if len(input.Secret) != InviteSecretBytes {
-		return fmt.Errorf("%w: invite secret must be %d bytes", ErrInvalidInvite, InviteSecretBytes)
-	}
 	return nil
 }
 
@@ -429,7 +384,7 @@ func validateInviteShape(invite Invite) error {
 	if invite.Kind != KindInvite || invite.SchemaVersion != CurrentSchemaVersion {
 		return fmt.Errorf("%w: unsupported kind or schema", ErrInvalidInvite)
 	}
-	if invite.InviteID == "" || invite.ClientName == "" || invite.Nonce == "" || invite.MAC == "" {
+	if invite.InviteID == "" || invite.ClientName == "" || invite.Nonce == "" {
 		return fmt.Errorf("%w: required fields missing", ErrInvalidInvite)
 	}
 	if !isHexID(invite.InviteID) {
@@ -457,35 +412,6 @@ func validateInviteShape(invite Invite) error {
 		return fmt.Errorf("%w: authorization_duration_seconds: %v", ErrInvalidInvite, err)
 	}
 	return nil
-}
-
-func macInvite(secret []byte, invite Invite) (string, error) {
-	if len(secret) != InviteSecretBytes {
-		return "", fmt.Errorf("%w: invite secret must be %d bytes", ErrInvalidInvite, InviteSecretBytes)
-	}
-	payload := strings.Join([]string{
-		invite.Kind,
-		fmt.Sprintf("%d", invite.SchemaVersion),
-		invite.InviteID,
-		invite.ClientName,
-		invite.ServerAddress,
-		fmt.Sprintf("%d", invite.ServerPort),
-		fmt.Sprintf("%d", invite.EnrollPort),
-		invite.TargetAddress,
-		fmt.Sprintf("%d", invite.TargetPort),
-		invite.Principal,
-		invite.ProfileID,
-		invite.ArtifactProfileID,
-		invite.HostPublicKey,
-		invite.EnrollmentTLSSPKISHA256,
-		invite.IssuedAt,
-		invite.ExpiresAt,
-		fmt.Sprintf("%d", invite.AuthorizationDurationSeconds),
-		invite.Nonce,
-	}, "\n")
-	mac := hmac.New(sha256.New, secret)
-	_, _ = mac.Write([]byte(payload))
-	return base64.RawStdEncoding.EncodeToString(mac.Sum(nil)), nil
 }
 
 func isLowerHexDigest(value string) bool {

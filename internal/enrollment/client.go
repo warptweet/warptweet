@@ -33,8 +33,7 @@ type ClientView struct {
 }
 
 // ParseClientInvite validates invite JSON shape before any network activity.
-// MAC authentication remains a server-side gate because the MAC key never leaves
-// the server.
+// An invite is a confidential bearer. The host durable record is the grant authority.
 func ParseClientInvite(raw []byte, now time.Time) (Invite, ClientView, error) {
 	if len(raw) == 0 {
 		return Invite{}, ClientView{}, fmt.Errorf("%w: input is empty", ErrInvalidInvite)
@@ -74,7 +73,6 @@ func ParseClientInvite(raw []byte, now time.Time) (Invite, ClientView, error) {
 	}
 	tunnelID := sanitizeTunnelID(invite.ClientName)
 	// Legacy transfer documents may omit enroll_port; fill the product default.
-	// Fresh Create always sets enroll_port and includes it in the server MAC.
 	if invite.EnrollPort == 0 {
 		invite.EnrollPort = DefaultEnrollmentPort
 	}

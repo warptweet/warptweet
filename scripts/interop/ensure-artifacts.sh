@@ -166,8 +166,13 @@ ensure_client_pkg() {
     GOCACHE=${GOCACHE:-/private/tmp/warptweet-go-build}
     export GOCACHE
     mkdir -p "$GOCACHE"
-    go build -trimpath -o "$WT_REPO_ROOT/bin/warptweet" "$WT_REPO_ROOT/cmd/warptweet"
-    go build -trimpath -o "$WT_REPO_ROOT/bin/warptweet-provisioner" "$WT_REPO_ROOT/cmd/warptweet-provisioner"
+    MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET:-13.0}
+    export MACOSX_DEPLOYMENT_TARGET
+    CGO_CFLAGS="${CGO_CFLAGS:-} -mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET"
+    CGO_LDFLAGS="${CGO_LDFLAGS:-} -mmacosx-version-min=$MACOSX_DEPLOYMENT_TARGET"
+    export CGO_CFLAGS CGO_LDFLAGS
+    CGO_ENABLED=1 go build -trimpath -o "$WT_REPO_ROOT/bin/warptweet" "$WT_REPO_ROOT/cmd/warptweet"
+    CGO_ENABLED=1 go build -trimpath -o "$WT_REPO_ROOT/bin/warptweet-provisioner" "$WT_REPO_ROOT/cmd/warptweet-provisioner"
 
     # Sign with Developer ID when available (matches productionCodeSigningTeamID).
     _sign_id=${WARPTWEET_CODESIGN_IDENTITY:-"Developer ID Application: Baldwinson Corporation (CP4268Q8UF)"}

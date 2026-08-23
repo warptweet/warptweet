@@ -1,0 +1,50 @@
+[Unit]
+Description=WarpTweet host-key signer
+After=network.target
+AssertFileIsExecutable=/opt/warptweet/bin/warptweet
+AssertPathExists=/etc/warptweet/server.wt
+AssertPathExists=/var/lib/warptweet/ssh/ssh_host_mldsa44_ed25519_key
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=notify
+User=root
+Group=warptweet-sshd
+ExecStart=/opt/warptweet/bin/warptweet server host-sign
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=15s
+RuntimeDirectory=warptweet/hostsign
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
+UMask=0077
+UnsetEnvironment=LD_AUDIT LD_LIBRARY_PATH LD_PRELOAD OPENSSL_CONF OPENSSL_CONF_INCLUDE OPENSSL_MODULES
+CapabilityBoundingSet=
+NoNewPrivileges=yes
+KeyringMode=private
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+PrivateDevices=yes
+PrivateMounts=yes
+PrivateTmp=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectHome=yes
+ProtectHostname=yes
+ProtectKernelLogs=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectProc=invisible
+ProtectSystem=strict
+ReadOnlyPaths=/opt/warptweet /etc/warptweet /var/lib/warptweet/ssh
+ReadWritePaths=/run/warptweet/hostsign
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+SystemCallArchitectures=native
+TasksMax=32
+
+[Install]
+WantedBy=multi-user.target

@@ -12,6 +12,10 @@ import (
 
 func runServerDataPlane(ctx context.Context, arguments []string, stdout, stderr io.Writer) error {
 	flags := newFlagSet("server data-plane", stderr)
+	preflightOnly := onceBoolFlag{name: "--preflight-only"}
+	allowHostKey := onceBoolFlag{name: "--allow-host-key"}
+	flags.Var(&preflightOnly, "preflight-only", "verify installed identity and exit")
+	flags.Var(&allowHostKey, "allow-host-key", "load the host private key in-process instead of the signer socket")
 	if err := parseFlags(flags, arguments); err != nil {
 		return err
 	}
@@ -30,5 +34,14 @@ func runServerDataPlane(ctx context.Context, arguments []string, stdout, stderr 
 		ExpectedExe: installlayout.ControllerPath,
 	}
 	policy.ControlSocket = installlayout.DataPlaneControlSocket
+	if !allowHostKey.value {
+		policy.HostSignSocket = installlayout.HostSignSocket
+	}
+	if err := dataplane.Preflight(policy); err != nil {
+		return err
+	}
+	if preflightOnly.value {
+		return nil
+	}
 	return dataplane.Serve(ctx, policy, stdout)
 }

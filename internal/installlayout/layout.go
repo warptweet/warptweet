@@ -36,6 +36,7 @@ const (
 	GrantAuthorityLockPath      = "/var/lib/warptweet/sessions/grant.lock"
 	DataPlaneBootIDPath         = "/var/lib/warptweet/sessions/boot.id"
 	DataPlaneControlSocket      = "/run/warptweet/sshd/control.sock"
+	HostSignSocket              = "/run/warptweet/hostsign/sign.sock"
 	HostClockBlockedPath        = "/var/lib/warptweet/blocked-clock.json"
 	ClientRoutesDirectory       = "/etc/warptweet/routes"
 	LinuxProvisionerPath        = "/opt/warptweet/bin/warptweet-provisioner"

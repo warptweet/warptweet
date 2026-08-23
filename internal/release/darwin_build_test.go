@@ -170,3 +170,33 @@ func TestDarwinOpenSSHClientBuildCIExercisesNativeRunners(t *testing.T) {
 		t.Fatal("darwin OpenSSH CI uses an invalid runner label macos-15-intel")
 	}
 }
+
+func TestDarwinGoBuildsPinVenturaFloor(t *testing.T) {
+	t.Parallel()
+
+	root := repositoryRoot(t)
+	makefile := string(readFile(t, filepath.Join(root, "Makefile")))
+	ensure := string(readFile(t, filepath.Join(root, "scripts", "interop", "ensure-artifacts.sh")))
+	checker := filepath.Join(root, "scripts", "check-darwin-minos.sh")
+	info, err := os.Stat(checker)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		t.Fatal("check-darwin-minos.sh is not executable")
+	}
+	for _, required := range []string{
+		"MACOSX_DEPLOYMENT_TARGET ?= 13.0",
+		"-mmacosx-version-min=",
+	} {
+		if !strings.Contains(makefile, required) {
+			t.Errorf("Makefile omits %q", required)
+		}
+	}
+	if !strings.Contains(ensure, "MACOSX_DEPLOYMENT_TARGET=${MACOSX_DEPLOYMENT_TARGET:-13.0}") {
+		t.Fatal("ensure-artifacts.sh does not pin the Darwin Go deployment target")
+	}
+	if !strings.Contains(string(readFile(t, checker)), "minos") {
+		t.Fatal("check-darwin-minos.sh does not inspect minos")
+	}
+}
