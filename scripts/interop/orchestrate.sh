@@ -231,7 +231,7 @@ if [ "${WARPTWEET_INTEROP_RUN_LIFECYCLE}" = "1" ]; then
     fi
     if [ "$_life_ok" -eq 1 ]; then
         INTEROP_CLIENT_OUT=/tmp/wt-interop-up.out INTEROP_CLIENT_ERR=/tmp/wt-interop-up.err \
-            interop_client_cmd up --once "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null || _life_ok=0
+            interop_client_cmd up "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null || _life_ok=0
         if [ "$_life_ok" -ne 1 ]; then
             _life_detail="up failed"
         fi
