@@ -43,7 +43,7 @@ interop_phase_live_expiry() {
         return 0
     fi
     interop_log "waiting for 30s grant to expire"
-    sleep 40
+    sleep 45
     if interop_payload_current "$_open_exp" >/dev/null 2>&1; then
         interop_record_result live-expiry-and-revocation positive fail "payload still succeeded after authorization_not_after"
         return 0

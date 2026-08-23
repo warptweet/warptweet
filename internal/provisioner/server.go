@@ -160,7 +160,9 @@ func executeRequest(ctx context.Context, request Request, serviceUID, serviceGID
 			_, stopErr := stopTunnel(ctx, request.TunnelID)
 			return output, stopErr
 		}
-		started, startErr := restartTunnel(ctx, request.TunnelID, false, serviceUID, serviceGID)
+		// Do not force-restart here: the live SSH session still holds the previous
+		// key. persistActivatedGeneration makes the next up use the new identity.
+		started, startErr := startTunnel(ctx, request.TunnelID, false, serviceUID, serviceGID)
 		if startErr != nil {
 			return output, startErr
 		}

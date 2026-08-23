@@ -565,29 +565,33 @@ func verifyAuthorizedKeyAbsent(path, publicKey string) error {
 }
 
 func reconcileGrantsUntil(ctx context.Context, manifest server.Config) {
-	records, _ := enrollment.ListClients(installlayout.ClientsDirectory)
-	timer := time.NewTimer(nextGrantReconcileDelay(time.Now().UTC(), records))
-	defer timer.Stop()
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
-		case <-timer.C:
+		case <-ticker.C:
 			now := time.Now().UTC()
 			records, listErr := enrollment.ListClients(installlayout.ClientsDirectory)
+			if listErr != nil {
+				records = nil
+			}
+			if nextGrantReconcileDelay(now, records) > time.Second {
+				continue
+			}
 			if _, err := grant.ObserveClock(installlayout.HostClockObservationPath, now); err != nil {
 				if closeErr := enterBlockedClock(manifest, err); closeErr != nil {
 					slog.Error("host clock fail-close incomplete", "err", closeErr)
 				}
-			} else if err := reconcileExpiredGrants(manifest, now); err != nil {
+				continue
+			}
+			if err := reconcileExpiredGrants(manifest, now); err != nil {
 				slog.Error("grant expiry reconcile failed", "err", err)
-			} else if err := reconcileManagedAuthorizations(manifest); err != nil {
+			}
+			if err := reconcileManagedAuthorizations(manifest); err != nil {
 				slog.Error("authorization reconcile failed", "err", err)
 			}
-			if listErr != nil {
-				records = nil
-			}
-			timer.Reset(nextGrantReconcileDelay(now, records))
 		}
 	}
 }
