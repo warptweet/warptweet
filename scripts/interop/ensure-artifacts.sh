@@ -358,8 +358,10 @@ ensure_server_deb_remote() {
 
     # Official Go toolchain (distro golang-go is far below go.mod 1.26).
     _go_ver=${WARPTWEET_INTEROP_GO_VERSION:-1.26.5}
+    # Write the remote script to a file first. OpenSSH regress tests inherit
+    # stdin and would otherwise consume the remainder of a stdin-fed script.
     # shellcheck disable=SC2086
-    ssh $_ssh_base "$_target" "export WARPTWEET_VERSION='$WARPTWEET_RELEASE_VERSION' OPENSSH_ARCHIVE='$OPENSSH_ARCHIVE' OPENSSL_ARCHIVE='$OPENSSL_ARCHIVE' REMOTE_ROOT='$_remote_root' WT_GO_VERSION='$_go_ver'; bash -euo pipefail" <<'REMOTE'
+    ssh $_ssh_base "$_target" "export WARPTWEET_VERSION='$WARPTWEET_RELEASE_VERSION' OPENSSH_ARCHIVE='$OPENSSH_ARCHIVE' OPENSSL_ARCHIVE='$OPENSSL_ARCHIVE' REMOTE_ROOT='$_remote_root' WT_GO_VERSION='$_go_ver'; cat > \"\$REMOTE_ROOT/remote-build.sh\" && bash -euo pipefail \"\$REMOTE_ROOT/remote-build.sh\"" <<'REMOTE' || ensure_die "remote server package build failed"
 cd "$REMOTE_ROOT/src"
 echo "remote nproc=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo unknown)"
 
