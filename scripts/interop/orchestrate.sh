@@ -208,18 +208,50 @@ interop_phase_forwarding
 # --- Optional lifecycle ---
 if [ "${WARPTWEET_INTEROP_RUN_LIFECYCLE}" = "1" ]; then
     _life_ok=1
-    INTEROP_CLIENT_OUT=/tmp/wt-interop-down.out INTEROP_CLIENT_ERR=/tmp/wt-interop-down.err \
-        interop_client_cmd down "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null || _life_ok=0
-    INTEROP_CLIENT_OUT=/tmp/wt-interop-rotate.out INTEROP_CLIENT_ERR=/tmp/wt-interop-rotate.err \
-        interop_client_cmd rotate "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null || _life_ok=0
-    INTEROP_CLIENT_OUT=/tmp/wt-interop-up.out INTEROP_CLIENT_ERR=/tmp/wt-interop-up.err \
-        interop_client_cmd up --once "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null || _life_ok=0
-    INTEROP_CLIENT_OUT=/tmp/wt-interop-revoke.out INTEROP_CLIENT_ERR=/tmp/wt-interop-revoke.err \
-        interop_client_cmd revoke "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null || _life_ok=0
+    _life_detail=""
+    # Rotate and revoke use the live grant path. Do not down first.
+    if ! INTEROP_CLIENT_OUT=/tmp/wt-interop-rotate.out INTEROP_CLIENT_ERR=/tmp/wt-interop-rotate.err \
+        interop_client_cmd rotate "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null; then
+        _life_ok=0
+        _life_detail="rotate: $(tr '\n' ' ' </tmp/wt-interop-rotate.err | cut -c1-160)"
+    fi
+    if [ "$_life_ok" -eq 1 ] && [ -n "${WARPTWEET_INTEROP_OPEN_ENDPOINT:-}" ]; then
+        if ! interop_payload_through_local "$WARPTWEET_INTEROP_OPEN_ENDPOINT" "warptweet-interop-payload-v1"; then
+            _life_ok=0
+            _life_detail="payload after rotate failed"
+        fi
+    fi
     if [ "$_life_ok" -eq 1 ]; then
-        interop_record_result stop-restart-rotate-revoke-upgrade positive pass "down/rotate/up/revoke completed (upgrade not in Phase A)"
+        INTEROP_CLIENT_OUT=/tmp/wt-interop-down.out INTEROP_CLIENT_ERR=/tmp/wt-interop-down.err \
+            interop_client_cmd down "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null || _life_ok=0
+        if [ "$_life_ok" -ne 1 ]; then
+            _life_detail="down failed"
+        fi
+    fi
+    if [ "$_life_ok" -eq 1 ]; then
+        INTEROP_CLIENT_OUT=/tmp/wt-interop-up.out INTEROP_CLIENT_ERR=/tmp/wt-interop-up.err \
+            interop_client_cmd up --once "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null || _life_ok=0
+        if [ "$_life_ok" -ne 1 ]; then
+            _life_detail="up failed"
+        fi
+    fi
+    if [ "$_life_ok" -eq 1 ] && [ -n "${WARPTWEET_INTEROP_OPEN_ENDPOINT:-}" ]; then
+        if ! interop_payload_through_local "$WARPTWEET_INTEROP_OPEN_ENDPOINT" "warptweet-interop-payload-v1"; then
+            _life_ok=0
+            _life_detail="payload after up failed"
+        fi
+    fi
+    if [ "$_life_ok" -eq 1 ]; then
+        if ! INTEROP_CLIENT_OUT=/tmp/wt-interop-revoke.out INTEROP_CLIENT_ERR=/tmp/wt-interop-revoke.err \
+            interop_client_cmd revoke "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null; then
+            _life_ok=0
+            _life_detail="revoke: $(tr '\n' ' ' </tmp/wt-interop-revoke.err | cut -c1-160)"
+        fi
+    fi
+    if [ "$_life_ok" -eq 1 ]; then
+        interop_record_result stop-restart-rotate-revoke-upgrade positive pass "rotate, payload, down, up, payload, revoke (upgrade not in this pass)"
     else
-        interop_record_result stop-restart-rotate-revoke-upgrade positive fail "lifecycle command failed"
+        interop_record_result stop-restart-rotate-revoke-upgrade positive fail "${_life_detail:-lifecycle command failed}"
     fi
 fi
 
