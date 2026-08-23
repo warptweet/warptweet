@@ -9,10 +9,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
 	"warptweet.com/warptweet/internal/grant"
+	"warptweet.com/warptweet/internal/installlayout"
 )
 
 const (
@@ -94,7 +96,7 @@ func PublicKeyDigest(publicKey string) string {
 }
 
 func StoreClient(directory string, record ClientRecord) error {
-	if err := os.MkdirAll(directory, 0o700); err != nil {
+	if err := os.MkdirAll(directory, 0o750); err != nil {
 		return err
 	}
 	if record.ClientID == "" || !isHexID(record.ClientID) {
@@ -104,7 +106,20 @@ func StoreClient(directory string, record ClientRecord) error {
 	if _, err := os.Lstat(path); err == nil {
 		return fmt.Errorf("client %q already exists", record.ClientID)
 	}
-	return writeJSONAtomic(path, record, 0o600)
+	return writeClientAtomic(directory, record)
+}
+
+func writeClientAtomic(directory string, record ClientRecord) error {
+	path := clientPath(directory, record.ClientID)
+	if err := writeJSONAtomic(path, record, 0o640); err != nil {
+		return err
+	}
+	if runtime.GOOS == "linux" && os.Geteuid() == 0 {
+		if err := os.Chown(path, 0, installlayout.LinuxPrivsepGID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func LoadClient(directory, clientID string) (ClientRecord, error) {
@@ -137,7 +152,7 @@ func UpdateClient(directory string, record ClientRecord) error {
 	if _, err := LoadClient(directory, record.ClientID); err != nil {
 		return err
 	}
-	return writeJSONAtomic(clientPath(directory, record.ClientID), record, 0o600)
+	return writeClientAtomic(directory, record)
 }
 
 func AuthenticateManagement(directory string, request ManagementRequest) (ClientRecord, error) {
@@ -210,7 +225,7 @@ func RevokeClient(directory string, request ManagementRequest, now time.Time, re
 	if record.Status == ClientStatusActive {
 		record.Status = ClientStatusRevocationPending
 		record.OperationStartedAt = now.Format(time.RFC3339Nano)
-		if err := writeJSONAtomic(clientPath(directory, record.ClientID), record, 0o600); err != nil {
+		if err := writeClientAtomic(directory, record); err != nil {
 			return ClientRecord{}, err
 		}
 	}
@@ -239,7 +254,7 @@ func RevokeClient(directory string, request ManagementRequest, now time.Time, re
 	record.Status = ClientStatusRevoked
 	record.RevokedAt = now.Format(time.RFC3339Nano)
 	record.OperationStartedAt = ""
-	if err := writeJSONAtomic(clientPath(directory, record.ClientID), record, 0o600); err != nil {
+	if err := writeClientAtomic(directory, record); err != nil {
 		return ClientRecord{}, err
 	}
 	return record, nil
@@ -290,7 +305,7 @@ func RevokeClientAsHost(directory, clientID string, now time.Time, removeAuthori
 	if record.Status == ClientStatusActive || record.Status == ClientStatusRotationPending {
 		record.Status = ClientStatusRevocationPending
 		record.OperationStartedAt = now.Format(time.RFC3339Nano)
-		if err := writeJSONAtomic(clientPath(directory, record.ClientID), record, 0o600); err != nil {
+		if err := writeClientAtomic(directory, record); err != nil {
 			return ClientRecord{}, err
 		}
 	}
@@ -323,7 +338,7 @@ func RevokeClientAsHost(directory, clientID string, now time.Time, removeAuthori
 	record.Status = ClientStatusRevoked
 	record.RevokedAt = now.Format(time.RFC3339Nano)
 	record.OperationStartedAt = ""
-	if err := writeJSONAtomic(clientPath(directory, record.ClientID), record, 0o600); err != nil {
+	if err := writeClientAtomic(directory, record); err != nil {
 		return ClientRecord{}, err
 	}
 	return record, nil
@@ -387,7 +402,7 @@ func RotateClientPublicKey(directory string, request ManagementRequest, newPubli
 		record.PendingManagementTokenSHA256 = nextHash
 		record.Status = ClientStatusRotationPending
 		record.OperationStartedAt = now.Format(time.RFC3339Nano)
-		if err := writeJSONAtomic(clientPath(directory, record.ClientID), record, 0o600); err != nil {
+		if err := writeClientAtomic(directory, record); err != nil {
 			return ClientRecord{}, err
 		}
 	} else if record.PendingPublicKey != newPublicKey || !constantTimeDigestEqual(record.PendingManagementTokenSHA256, nextHash) {
@@ -410,7 +425,7 @@ func RotateClientPublicKey(directory string, request ManagementRequest, newPubli
 	record.OperationStartedAt = ""
 	record.Status = ClientStatusActive
 	record.Generation = now.Format("20060102T150405Z")
-	if err := writeJSONAtomic(clientPath(directory, record.ClientID), record, 0o600); err != nil {
+	if err := writeClientAtomic(directory, record); err != nil {
 		return ClientRecord{}, err
 	}
 	return record, nil
@@ -476,7 +491,7 @@ func ExpireClient(directory string, clientID string, now time.Time, ops grant.Ex
 		}
 		record.Status = ClientStatusExpirationPending
 		record.OperationStartedAt = now.Format(time.RFC3339Nano)
-		if err := writeJSONAtomic(clientPath(directory, record.ClientID), record, 0o600); err != nil {
+		if err := writeClientAtomic(directory, record); err != nil {
 			return ClientRecord{}, err
 		}
 		plan.Status = record.Status
@@ -498,7 +513,7 @@ func ExpireClient(directory string, clientID string, now time.Time, ops grant.Ex
 	record.Status = ClientStatusExpired
 	record.ExpiredAt = now.Format(time.RFC3339Nano)
 	record.OperationStartedAt = ""
-	if err := writeJSONAtomic(clientPath(directory, record.ClientID), record, 0o600); err != nil {
+	if err := writeClientAtomic(directory, record); err != nil {
 		return ClientRecord{}, err
 	}
 	return record, nil
@@ -574,7 +589,7 @@ func completePendingRevocation(
 	current.Status = ClientStatusRevoked
 	current.RevokedAt = now.UTC().Format(time.RFC3339Nano)
 	current.OperationStartedAt = ""
-	if err := writeJSONAtomic(clientPath(directory, current.ClientID), current, 0o600); err != nil {
+	if err := writeClientAtomic(directory, current); err != nil {
 		return ClientRecord{}, err
 	}
 	return current, nil

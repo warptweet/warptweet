@@ -253,7 +253,7 @@ func (authority *Authority) lock() error {
 	if authority.LockPath == "" {
 		return nil
 	}
-	if err := os.MkdirAll(filepath.Dir(authority.LockPath), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(authority.LockPath), 0o770); err != nil {
 		return err
 	}
 	file, err := os.OpenFile(authority.LockPath, os.O_CREATE|os.O_RDWR, 0o600)

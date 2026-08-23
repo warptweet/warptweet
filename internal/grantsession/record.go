@@ -89,7 +89,7 @@ func writeRecord(path string, record Record) error {
 	if len(contents) == 0 || len(contents) > MaxRecordBytes {
 		return fmt.Errorf("grant session document is empty or oversized")
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o770); err != nil {
 		return err
 	}
 	temp, err := os.CreateTemp(filepath.Dir(path), ".wt-session-*")

@@ -29,7 +29,11 @@ func inspectProcess(pid int) (ProcessIdentity, error) {
 	if err != nil {
 		return ProcessIdentity{}, err
 	}
-	exe, err := os.Readlink(filepath.Join("/proc", strconv.Itoa(pid), "exe"))
+	procDir := filepath.Join("/proc", strconv.Itoa(pid))
+	if pid == os.Getpid() {
+		procDir = "/proc/self"
+	}
+	exe, err := os.Readlink(filepath.Join(procDir, "exe"))
 	if err != nil {
 		return ProcessIdentity{}, fmt.Errorf("read process exe: %w", err)
 	}
@@ -56,7 +60,11 @@ func currentBootID() (string, error) {
 }
 
 func linuxStartTime(pid int) (string, error) {
-	contents, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat"))
+	statPath := filepath.Join("/proc", strconv.Itoa(pid), "stat")
+	if pid == os.Getpid() {
+		statPath = "/proc/self/stat"
+	}
+	contents, err := os.ReadFile(statPath)
 	if err != nil {
 		return "", err
 	}

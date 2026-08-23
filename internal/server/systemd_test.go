@@ -32,7 +32,7 @@ func TestWarpTweetSSHDUnitUsesBundledValidatedConfiguration(t *testing.T) {
 		"RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK",
 		"ReadOnlyPaths=/opt/warptweet /etc/warptweet /run/warptweet/hostsign /var/lib/warptweet/authorized_keys /var/lib/warptweet/clients",
 		"ReadWritePaths=/run/warptweet/sshd /run/warptweet/server /var/lib/warptweet/sessions -/run/utmp -/var/log/btmp -/var/log/lastlog",
-		"ExecStartPre=+/bin/sh -c 'umask 077; cat /proc/sys/kernel/random/boot_id > /var/lib/warptweet/sessions/boot.id'",
+		"ExecStartPre=+/bin/sh -c 'umask 027; cat /proc/sys/kernel/random/boot_id > /var/lib/warptweet/sessions/boot.id; chgrp warptweet-sshd /var/lib/warptweet/sessions /var/lib/warptweet/sessions/boot.id; chmod 0770 /var/lib/warptweet/sessions; chmod 0640 /var/lib/warptweet/sessions/boot.id'",
 		"ExecStartPre=/opt/warptweet/bin/warptweet server data-plane --preflight-only",
 	)
 

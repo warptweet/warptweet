@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -746,8 +747,13 @@ func ensureHostDirectories() error {
 	if err := ensureDirectoryMode(inviteDirectory, 0o700); err != nil {
 		return err
 	}
-	if err := ensureDirectoryMode(installlayout.GrantSessionsDirectory, 0o700); err != nil {
+	if err := ensureDirectoryMode(installlayout.GrantSessionsDirectory, 0o770); err != nil {
 		return err
+	}
+	if runtime.GOOS == "linux" && os.Geteuid() == 0 {
+		if err := os.Chown(installlayout.GrantSessionsDirectory, 0, installlayout.LinuxPrivsepGID); err != nil {
+			return err
+		}
 	}
 	if err := ensureDirectoryMode(installlayout.ServerEnrollmentDirectory, 0o700); err != nil {
 		return err
