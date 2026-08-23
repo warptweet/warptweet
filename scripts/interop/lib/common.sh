@@ -130,8 +130,14 @@ interop_load_config() {
     fi
     : "${WARPTWEET_INTEROP_SERVER_LISTEN:?WARPTWEET_INTEROP_SERVER_LISTEN is required (ip:port)}"
     : "${WARPTWEET_INTEROP_ECHO_PORT:=18432}"
-    : "${WARPTWEET_INTEROP_CLIENT_NAME:=interop-mac}"
+    if [ -z "${WARPTWEET_INTEROP_CLIENT_NAME:-}" ]; then
+        WARPTWEET_INTEROP_CLIENT_NAME=interop-mac-$(date -u +%Y%m%dT%H%M%SZ | tr 'A-Z' 'a-z')
+    fi
+    if [ -z "${WARPTWEET_INTEROP_CLIENT_LISTEN_PORT:-}" ]; then
+        WARPTWEET_INTEROP_CLIENT_LISTEN_PORT=$((18433 + $(date -u +%s) % 1400))
+    fi
     : "${WARPTWEET_INTEROP_RUN_LIFECYCLE:=0}"
+    export WARPTWEET_INTEROP_CLIENT_NAME WARPTWEET_INTEROP_CLIENT_LISTEN_PORT WARPTWEET_INTEROP_RUN_LIFECYCLE
 
     interop_is_hex40 "$WARPTWEET_SOURCE_COMMIT" || interop_die "WARPTWEET_SOURCE_COMMIT must be 40 lowercase hex"
     interop_is_hex64 "$WARPTWEET_CLIENT_PACKAGE_SHA256" || interop_die "bad client package sha256"

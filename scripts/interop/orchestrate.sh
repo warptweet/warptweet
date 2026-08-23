@@ -29,6 +29,8 @@ WT_REPO_ROOT=$(CDPATH= cd -- "$WT_SCRIPT_DIRECTORY/../.." && pwd)
 . "$WARPTWEET_INTEROP_ROOT/lib/evidence.sh"
 # shellcheck disable=SC1091
 . "$WARPTWEET_INTEROP_ROOT/lib/privilege.sh"
+# shellcheck disable=SC1091
+. "$WARPTWEET_INTEROP_ROOT/lib/cases.sh"
 
 usage() {
     cat <<'EOF'
@@ -175,6 +177,8 @@ if [ -z "$_open" ]; then
     interop_die "no local open endpoint"
 fi
 interop_log "local open $_open"
+WARPTWEET_INTEROP_OPEN_ENDPOINT=$_open
+export WARPTWEET_INTEROP_OPEN_ENDPOINT
 
 # Best-effort readiness signal: status phase Ready or payload success.
 if INTEROP_CLIENT_OUT=/tmp/wt-interop-status.json INTEROP_CLIENT_ERR=/tmp/wt-interop-status.err \
@@ -195,7 +199,11 @@ else
     interop_record_result deterministic-target-payload positive fail "echo payload mismatch or connection failed"
 fi
 
-# Data-plane algorithm cases remain not_run in Phase A (filled by evidence.sh).
+interop_phase_algorithms
+interop_phase_agent_skill
+interop_phase_invite_fail_closed
+interop_phase_second_route
+interop_phase_forwarding
 
 # --- Optional lifecycle ---
 if [ "${WARPTWEET_INTEROP_RUN_LIFECYCLE}" = "1" ]; then

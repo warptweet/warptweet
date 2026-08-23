@@ -235,8 +235,8 @@ func (c *connection) handleKexInit(payload []byte) error {
 
 func (c *connection) handleNewKeys() error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	if c.phase != kexAwaitNewKeys || c.pendingIn == nil {
+		c.mu.Unlock()
 		return fmt.Errorf("NEWKEYS before key derivation")
 	}
 	c.in = c.pendingIn
@@ -246,10 +246,20 @@ func (c *connection) handleNewKeys() error {
 		// OpenSSH PROTOCOL 1.10: seq reset persists for every NEWKEYS.
 		c.inSeq = 0
 	}
+	initial := c.initialKEX
 	c.initialKEX = false
 	c.phase = kexReady
 	c.bytesOut = 0
 	c.win.Broadcast()
+	c.mu.Unlock()
+	if len(c.policy.Profile.Ciphers) > 0 {
+		slog.Info("dataplane_kex",
+			"kex", c.policy.Profile.KeyExchangeAlgorithm,
+			"host_key", c.policy.Profile.AuthenticationKeyType,
+			"cipher", c.policy.Profile.Ciphers[0],
+			"initial", initial,
+		)
+	}
 	return nil
 }
 
