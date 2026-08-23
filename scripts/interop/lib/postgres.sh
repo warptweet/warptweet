@@ -99,10 +99,17 @@ interop_reset_host_grants() {
 set -eu
 CTRL=/opt/warptweet/bin/warptweet
 [ -x "$CTRL" ] || exit 0
+# Revoke needs the data-plane control socket so Terminate can drop sessions.
+if command -v systemctl >/dev/null 2>&1; then
+    systemctl start warptweet-hostsign.service >/dev/null 2>&1 || true
+    systemctl start warptweet-sshd.service >/dev/null 2>&1 || true
+    sleep 1
+fi
 if [ -d /var/lib/warptweet/clients ]; then
     for f in /var/lib/warptweet/clients/*.json; do
         [ -f "$f" ] || continue
         id=$(basename "$f" .json)
+        "$CTRL" server revoke "$id" || true
         "$CTRL" server revoke "$id" || true
     done
 fi

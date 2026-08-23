@@ -259,6 +259,8 @@ interop_verify_package_signatures() {
                 dpkg-sig --verify "$_server_pkg" >/dev/null 2>&1 || _ok=0
             elif command -v debsig-verify >/dev/null 2>&1; then
                 debsig-verify "$_server_pkg" >/dev/null 2>&1 || _ok=0
+            elif [ -f "$_server_pkg.asc" ] && command -v gpg >/dev/null 2>&1; then
+                gpg --verify "$_server_pkg.asc" "$_server_pkg" >/dev/null 2>&1 || _ok=0
             else
                 return 1
             fi
