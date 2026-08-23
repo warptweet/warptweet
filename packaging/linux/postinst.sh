@@ -79,10 +79,9 @@ install -d -o root -g root -m 0755 /var/lib/warptweet/authorized_keys
 install -d -o root -g root -m 0755 /var/empty/warptweet-sshd
 install -d -o root -g root -m 0755 /var/lib/warptweet
 install -d -o root -g root -m 0700 /var/lib/warptweet/invites
-install -d -o root -g root -m 0700 /var/lib/warptweet/clients
 install -d -o root -g root -m 0700 /var/lib/warptweet/server
 install -d -o root -g warptweet-sshd -m 0770 /var/lib/warptweet/sessions
-install -d -o root -g warptweet-sshd -m 0750 /var/lib/warptweet/clients
+install -d -o root -g warptweet-sshd -m 2750 /var/lib/warptweet/clients
 install -d -o root -g root -m 0755 /run/warptweet
 install -d -o root -g root -m 0750 /run/warptweet/server
 install -d -o root -g root -m 0750 /run/warptweet/sshd

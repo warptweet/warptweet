@@ -9,12 +9,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
 	"warptweet.com/warptweet/internal/grant"
-	"warptweet.com/warptweet/internal/installlayout"
 )
 
 const (
@@ -96,7 +94,7 @@ func PublicKeyDigest(publicKey string) string {
 }
 
 func StoreClient(directory string, record ClientRecord) error {
-	if err := os.MkdirAll(directory, 0o750); err != nil {
+	if err := os.MkdirAll(directory, 0o2750); err != nil {
 		return err
 	}
 	if record.ClientID == "" || !isHexID(record.ClientID) {
@@ -110,16 +108,7 @@ func StoreClient(directory string, record ClientRecord) error {
 }
 
 func writeClientAtomic(directory string, record ClientRecord) error {
-	path := clientPath(directory, record.ClientID)
-	if err := writeJSONAtomic(path, record, 0o640); err != nil {
-		return err
-	}
-	if runtime.GOOS == "linux" && os.Geteuid() == 0 {
-		if err := os.Chown(path, 0, installlayout.LinuxPrivsepGID); err != nil {
-			return err
-		}
-	}
-	return nil
+	return writeJSONAtomic(clientPath(directory, record.ClientID), record, 0o640)
 }
 
 func LoadClient(directory, clientID string) (ClientRecord, error) {
