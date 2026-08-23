@@ -109,6 +109,7 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 		createdEnrollmentIdentity    bool
 		renewedEnrollmentCertificate bool
 		manifest                     server.Config
+		restartDataPlane             bool
 	)
 	if err := withHostStateLock(func() error {
 		if grant.ClockIsBlocked(installlayout.HostClockBlockedPath) {
@@ -146,6 +147,7 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 		if err := refuseHostTargetChange(targetEndpoint); err != nil {
 			return err
 		}
+		restartDataPlane = hostTargetChanged(targetEndpoint)
 		written, writeErr := writeHostManifest(listenEndpoint, targetEndpoint)
 		if writeErr != nil {
 			return writeErr
@@ -161,7 +163,7 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 	if err := reconcileManagedAuthorizations(manifest); err != nil {
 		return fmt.Errorf("reconcile managed authorizations: %w", err)
 	}
-	dataPlaneStatus, err := ensureSSHDStarted(ctx, manifest)
+	dataPlaneStatus, err := ensureSSHDStarted(ctx, manifest, restartDataPlane)
 	if err != nil {
 		return fmt.Errorf("start WarpTweet data plane: %w", err)
 	}
@@ -696,6 +698,15 @@ func withHostStateLock(fn func() error) error {
 	return err
 }
 
+func hostTargetChanged(targetEndpoint netip.AddrPort) bool {
+	existing, err := server.Load(installlayout.ServerManifestPath)
+	if err != nil {
+		return false
+	}
+	current := netip.AddrPortFrom(existing.Target.Address, uint16(existing.Target.Port))
+	return current != targetEndpoint
+}
+
 func refuseHostTargetChange(targetEndpoint netip.AddrPort) error {
 	existing, err := server.Load(installlayout.ServerManifestPath)
 	if err != nil {
@@ -890,7 +901,7 @@ func writeHostManifest(listenEndpoint, targetEndpoint netip.AddrPort) (server.Co
 	return manifest, nil
 }
 
-func ensureSSHDStarted(ctx context.Context, manifest server.Config) (string, error) {
+func ensureSSHDStarted(ctx context.Context, manifest server.Config, restart bool) (string, error) {
 	endpoint := netip.AddrPortFrom(manifest.Listen.Address, uint16(manifest.Listen.Port))
 	for _, unitPath := range []string{
 		"/lib/systemd/system/warptweet-sshd.service",
@@ -907,7 +918,11 @@ func ensureSSHDStarted(ctx context.Context, manifest server.Config) (string, err
 		if output, err := enable.CombinedOutput(); err != nil {
 			return "", fmt.Errorf("enable warptweet-sshd.service: %w (%s)", err, strings.TrimSpace(string(output)))
 		}
-		cmd := exec.CommandContext(ctx, "systemctl", "start", "warptweet-sshd.service")
+		action := "start"
+		if restart {
+			action = "restart"
+		}
+		cmd := exec.CommandContext(ctx, "systemctl", action, "warptweet-sshd.service")
 		cmd.Env = []string{"LANG=C", "LC_ALL=C"}
 		if output, err := cmd.CombinedOutput(); err != nil {
 			return "", fmt.Errorf("start warptweet-sshd.service: %w (%s)", err, strings.TrimSpace(string(output)))

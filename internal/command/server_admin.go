@@ -211,7 +211,7 @@ func runServerClockRecover(ctx context.Context, arguments []string, stdout, stde
 	if err := grant.ClearBlockedClock(installlayout.HostClockBlockedPath); err != nil {
 		return err
 	}
-	if _, err := ensureSSHDStarted(ctx, manifest); err != nil {
+	if _, err := ensureSSHDStarted(ctx, manifest, false); err != nil {
 		return fmt.Errorf("restart data plane: %w", err)
 	}
 	return writeJSON(stdout, map[string]any{"status": "clock_recovered"})
