@@ -133,6 +133,54 @@ func TestMaterializeEnrollInputsWritesProof(t *testing.T) {
 	}
 }
 
+func TestRotateAndRevokeDoNotStopTheTunnelFirst(t *testing.T) {
+	t.Parallel()
+
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	root := filepath.Dir(file)
+	for _, name := range []string{"server.go", "server_linux.go"} {
+		contents := string(readFile(t, filepath.Join(root, name)))
+		block := actionBlock(contents, "ActionRotate, ActionRevoke")
+		if block == "" {
+			t.Fatalf("%s missing rotate/revoke action block", name)
+		}
+		if strings.Contains(block, "stopTunnel") || strings.Contains(block, "projectTunnel") {
+			t.Fatalf("%s still stops the tunnel before rotate/revoke", name)
+		}
+		if !strings.Contains(block, "executeController") {
+			t.Fatalf("%s rotate/revoke does not invoke the controller", name)
+		}
+	}
+}
+
+func actionBlock(source, label string) string {
+	index := strings.Index(source, "case "+label+":")
+	if index < 0 {
+		return ""
+	}
+	rest := source[index:]
+	body := rest[len("case "+label+":"):]
+	end := len(body)
+	for _, marker := range []string{"\n\tcase ", "\n\tdefault:"} {
+		if at := strings.Index(body, marker); at >= 0 && at < end {
+			end = at
+		}
+	}
+	return body[:end]
+}
+
+func readFile(t *testing.T, path string) []byte {
+	t.Helper()
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return contents
+}
+
 func TestSocketPathMatchesPlatformLayout(t *testing.T) {
 	t.Parallel()
 

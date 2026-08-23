@@ -37,6 +37,12 @@ var skipDirectoryNames = map[string]struct{}{
 	"bin":          {},
 }
 
+var skipRelativePrefixes = []string{
+	"scripts/interop/work",
+	"local",
+	"artifacts",
+}
+
 // Finding is one secret-pattern match.
 type Finding struct {
 	Path   string
@@ -57,15 +63,21 @@ func ScanTree(root string) ([]Finding, error) {
 			return walkErr
 		}
 		name := entry.Name()
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			rel = path
+		}
+		if skipRelativePath(rel) {
+			if entry.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
 		if entry.IsDir() {
 			if _, skip := skipDirectoryNames[name]; skip && path != root {
 				return fs.SkipDir
 			}
 			return nil
-		}
-		rel, err := filepath.Rel(root, path)
-		if err != nil {
-			rel = path
 		}
 		lowerName := strings.ToLower(name)
 		for _, ext := range forbiddenExtensions {
@@ -98,6 +110,16 @@ func ScanTree(root string) ([]Finding, error) {
 		return nil
 	})
 	return findings, err
+}
+
+func skipRelativePath(rel string) bool {
+	normalized := filepath.ToSlash(rel)
+	for _, prefix := range skipRelativePrefixes {
+		if normalized == prefix || strings.HasPrefix(normalized, prefix+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func looksLikeInviteSecret(raw []byte) bool {

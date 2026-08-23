@@ -123,8 +123,8 @@ func TestInviteCreateAndRevokeWithoutPackage(t *testing.T) {
 	if document["kind"] != enrollment.KindInvite {
 		t.Fatalf("kind=%v", document["kind"])
 	}
-	if _, err := enrollment.Revoke(directory, invite.InviteID, now.Add(time.Minute)); err != nil {
-		t.Fatalf("Revoke: %v", err)
+	if _, err := enrollment.Cancel(directory, invite.InviteID, now.Add(time.Minute)); err != nil {
+		t.Fatalf("Cancel: %v", err)
 	}
 }
 

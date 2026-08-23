@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"warptweet.com/warptweet/internal/composite"
 	"warptweet.com/warptweet/internal/opensshkey"
 )
 
@@ -32,14 +33,17 @@ func Serve(ctx context.Context, policy Policy, stdout io.Writer) error {
 	if err != nil {
 		return err
 	}
-	clients, err := authorizedRawKeys(authRaw)
-	if err != nil {
+	if _, err := authorizedRawKeys(authRaw); err != nil {
 		return err
 	}
 	listener, err := net.Listen("tcp", policy.Listen.String())
 	if err != nil {
 		return fmt.Errorf("listen on %s: %w", policy.Listen, err)
 	}
+	return serveListener(ctx, listener, policy, stdout, hostKey)
+}
+
+func serveListener(ctx context.Context, listener net.Listener, policy Policy, stdout io.Writer, hostKey composite.PrivateKey) error {
 	var mu sync.Mutex
 	conns := map[net.Conn]struct{}{}
 	closeTracked := func() {
@@ -99,6 +103,9 @@ func Serve(ctx context.Context, policy Policy, stdout io.Writer) error {
 			_ = conn.Close()
 			closeTracked()
 			return nil
+		default:
+			_ = conn.Close()
+			continue
 		}
 		mu.Lock()
 		if ctx.Err() != nil {
@@ -117,7 +124,7 @@ func Serve(ctx context.Context, policy Policy, stdout io.Writer) error {
 				<-slots
 			}()
 			_ = conn.SetDeadline(time.Now().Add(handshakeTimeout))
-			_ = serveConnection(conn, policy, hostKey, clients, sessions)
+			_ = serveConnection(conn, policy, hostKey, sessions)
 		}(conn)
 	}
 }

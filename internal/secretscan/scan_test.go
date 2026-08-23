@@ -60,6 +60,27 @@ func TestScanTreeDetectsEncryptedPKCS8(t *testing.T) {
 	}
 }
 
+func TestScanTreeSkipsGitignoredWorkspaces(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	work := filepath.Join(root, "scripts", "interop", "work")
+	if err := os.MkdirAll(work, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	invite := []byte(`{"kind":"warptweet.invite","nonce":"0123456789abcdef0123456789abcdef","mac":"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}`)
+	if err := os.WriteFile(filepath.Join(work, "local.wtinvite"), invite, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	findings, err := ScanTree(root)
+	if err != nil {
+		t.Fatalf("ScanTree: %v", err)
+	}
+	if len(findings) != 0 {
+		t.Fatalf("gitignored workspace findings: %+v", findings)
+	}
+}
+
 func TestRepositoryHasNoSecretMaterial(t *testing.T) {
 	t.Parallel()
 

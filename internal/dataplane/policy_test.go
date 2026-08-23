@@ -57,7 +57,7 @@ func TestPolicyAdvertisesExactProfileAlgorithms(t *testing.T) {
 	}
 }
 
-func mustPolicy(t *testing.T) Policy {
+func mustPolicy(t testing.TB) Policy {
 	t.Helper()
 	config := server.Config{
 		Kind:                        server.ManifestKind,

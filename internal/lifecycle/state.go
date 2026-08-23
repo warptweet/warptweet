@@ -61,25 +61,38 @@ func (store Store) lockPath(tunnelID string) string {
 	return filepath.Join(store.tunnelDir(tunnelID), "lock")
 }
 
+func (store Store) adminLockPath(tunnelID string) string {
+	return filepath.Join(store.tunnelDir(tunnelID), "admin.lock")
+}
+
 func (store Store) pidPath(tunnelID string) string {
 	return filepath.Join(store.tunnelDir(tunnelID), "pid")
 }
 
-// Lock acquires an exclusive advisory lock for one tunnel.
+// Lock acquires an exclusive advisory lock for one tunnel runtime.
 func (store Store) Lock(tunnelID string) (*os.File, error) {
+	return store.lockFile(tunnelID, store.lockPath(tunnelID), "runtime")
+}
+
+// AdminLock serializes rotate and revoke without taking the runtime lock.
+func (store Store) AdminLock(tunnelID string) (*os.File, error) {
+	return store.lockFile(tunnelID, store.adminLockPath(tunnelID), "admin")
+}
+
+func (store Store) lockFile(tunnelID, path, kind string) (*os.File, error) {
 	if err := validateTunnelID(tunnelID); err != nil {
 		return nil, err
 	}
 	if err := os.MkdirAll(store.tunnelDir(tunnelID), 0o700); err != nil {
 		return nil, err
 	}
-	file, err := os.OpenFile(store.lockPath(tunnelID), os.O_CREATE|os.O_RDWR, 0o600)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
 	}
 	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		_ = file.Close()
-		return nil, fmt.Errorf("tunnel %q is busy: %w", tunnelID, err)
+		return nil, fmt.Errorf("tunnel %q %s is busy: %w", tunnelID, kind, err)
 	}
 	return file, nil
 }

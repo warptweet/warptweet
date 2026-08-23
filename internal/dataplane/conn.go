@@ -60,7 +60,6 @@ type connection struct {
 	reader               *bufio.Reader
 	policy               Policy
 	hostKey              composite.PrivateKey
-	clients              [][]byte
 	clearIn, clearOut    bool
 	in, out              packetCodec
 	inSeq, outSeq        uint64
@@ -79,22 +78,23 @@ type connection struct {
 }
 
 type sshChannel struct {
-	localID  uint32
-	remoteID uint32
-	window   uint32
-	maxPkt   uint32
-	consumed uint32
-	closed   bool
-	backend  net.Conn
+	localID    uint32
+	remoteID   uint32
+	window     uint32
+	maxPkt     uint32
+	recvWindow uint32
+	maxRecv    uint32
+	consumed   uint32
+	closed     bool
+	backend    net.Conn
 }
 
-func serveConnection(raw net.Conn, policy Policy, hostKey composite.PrivateKey, clients [][]byte, sessions *sessionTable) error {
+func serveConnection(raw net.Conn, policy Policy, hostKey composite.PrivateKey, sessions *sessionTable) error {
 	c := &connection{
 		conn:     raw,
 		reader:   bufio.NewReader(raw),
 		policy:   policy,
 		hostKey:  hostKey,
-		clients:  clients,
 		clearIn:  true,
 		clearOut: true,
 		channels: map[uint32]*sshChannel{},
@@ -214,7 +214,9 @@ func (c *connection) handleKEX(payload []byte) error {
 	hostBlob := hostKeyBlob(hostPub)
 	secret := sshString(shared)
 	hash := exchangeHash(c.clientID, c.serverID, c.clientKex, c.serverKex, hostBlob, clientPub, serverPub, secret)
-	c.sessionID = append([]byte(nil), hash...)
+	if len(c.sessionID) == 0 {
+		c.sessionID = append([]byte(nil), hash...)
+	}
 	sigRaw, err := c.hostKey.Sign(hash)
 	if err != nil {
 		return err
@@ -367,7 +369,15 @@ func newConnectionID() (string, error) {
 }
 
 func (c *connection) knownClient(rawPub []byte) bool {
-	for _, known := range c.clients {
+	raw, err := os.ReadFile(c.policy.AuthorizedKeysPath)
+	if err != nil {
+		return false
+	}
+	clients, err := authorizedRawKeys(raw)
+	if err != nil {
+		return false
+	}
+	for _, known := range clients {
 		if string(known) == string(rawPub) {
 			return true
 		}

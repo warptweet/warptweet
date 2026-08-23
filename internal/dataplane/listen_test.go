@@ -3,6 +3,7 @@ package dataplane
 import (
 	"bufio"
 	"context"
+	"encoding/base64"
 	"net"
 	"net/netip"
 	"os"
@@ -89,5 +90,34 @@ func TestServeExchangesIdentification(t *testing.T) {
 	case <-errCh:
 	case <-time.After(time.Second):
 		t.Fatal("Serve did not return")
+	}
+}
+
+func TestKnownClientConsultsLiveAuthorizedKeys(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	authPath := filepath.Join(dir, "authorized_keys")
+	if err := os.WriteFile(authPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	key, err := composite.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawPub, err := key.Public()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := &connection{policy: Policy{AuthorizedKeysPath: authPath}}
+	if c.knownClient(rawPub) {
+		t.Fatal("empty authorized_keys accepted a client key")
+	}
+	line := composite.Algorithm + " " + base64.StdEncoding.EncodeToString(hostKeyBlob(rawPub)) + "\n"
+	if err := os.WriteFile(authPath, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !c.knownClient(rawPub) {
+		t.Fatal("live authorized_keys did not accept the enrolled key")
 	}
 }

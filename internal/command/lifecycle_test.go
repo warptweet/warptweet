@@ -10,8 +10,10 @@ import (
 	"testing"
 	"time"
 
+	"warptweet.com/warptweet/internal/enrollment"
 	"warptweet.com/warptweet/internal/lifecycle"
 	"warptweet.com/warptweet/internal/profile"
+	"warptweet.com/warptweet/internal/server"
 )
 
 func TestLifecycleUsageMentionsCommands(t *testing.T) {
@@ -179,5 +181,39 @@ func TestUninstallRequiresPreserveIdentity(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "--preserve-identity") {
 		t.Fatalf("stderr=%s", stderr.String())
+	}
+}
+
+func TestManagedTunnelRunning(t *testing.T) {
+	t.Parallel()
+
+	if !managedTunnelRunning(lifecycle.State{PID: os.Getpid(), Phase: lifecycle.PhaseReady}) {
+		t.Fatal("ready tunnel should count as running")
+	}
+	if managedTunnelRunning(lifecycle.State{PID: os.Getpid(), Phase: lifecycle.PhaseStopped}) {
+		t.Fatal("stopped tunnel should not count as running")
+	}
+	if managedTunnelRunning(lifecycle.State{Phase: lifecycle.PhaseReady}) {
+		t.Fatal("ready state without pid should not count as running")
+	}
+	if managedTunnelRunning(lifecycle.State{PID: 1 << 30, Phase: lifecycle.PhaseReady}) {
+		t.Fatal("missing process should not count as running")
+	}
+}
+
+func TestEnrollmentDoesNotRestartDataPlane(t *testing.T) {
+	dir := t.TempDir()
+	marker := filepath.Join(dir, "systemctl-called")
+	fake := filepath.Join(dir, "systemctl")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\nprintf called > '"+marker+"'\nexit 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	_, err := acceptAndAuthorize(server.Config{}, "host-key", enrollment.EnrollmentRequest{}, time.Now().UTC())
+	if err == nil {
+		t.Fatal("expected enrollment to fail without host state")
+	}
+	if _, statErr := os.Stat(marker); statErr == nil {
+		t.Fatal("enrollment invoked systemctl")
 	}
 }

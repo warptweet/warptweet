@@ -1,4 +1,4 @@
-.PHONY: build check check-go fmt-check script-check gosec site-build site-check site-down site-preview site-up test test-enrollment-control-plane test-openssh-integration test-race vet interop interop-help linux-rc
+.PHONY: bench build check check-go fmt-check script-check gosec site-build site-check site-down site-preview site-up test test-enrollment-control-plane test-openssh-integration test-race vet interop interop-help linux-rc
 
 GOCACHE ?= /private/tmp/warptweet-go-build
 SITE_DEV_HOST ?= 127.0.0.1
@@ -26,6 +26,9 @@ gosec:
 
 test:
 	GOCACHE=$(GOCACHE) go test ./...
+
+bench:
+	./scripts/run-bench.sh
 
 test-enrollment-control-plane:
 	./scripts/test-enrollment-control-plane.sh

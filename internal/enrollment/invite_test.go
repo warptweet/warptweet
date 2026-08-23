@@ -108,15 +108,114 @@ func TestRevokeInvite(t *testing.T) {
 	if err := Store(directory, record); err != nil {
 		t.Fatalf("Store: %v", err)
 	}
-	revoked, err := Revoke(directory, invite.InviteID, now.Add(time.Minute))
+	cancelled, err := Cancel(directory, invite.InviteID, now.Add(time.Minute))
 	if err != nil {
-		t.Fatalf("Revoke: %v", err)
+		t.Fatalf("Cancel: %v", err)
 	}
-	if revoked.Status != StatusRevoked {
-		t.Fatalf("status = %q", revoked.Status)
+	if cancelled.Status != StatusCancelled {
+		t.Fatalf("status = %q", cancelled.Status)
 	}
 	if _, err := Consume(directory, invite.InviteID, "client", now.Add(2*time.Minute)); err == nil {
-		t.Fatal("Consume accepted revoked invite")
+		t.Fatal("Consume accepted cancelled invite")
+	}
+	if _, err := Revoke(directory, invite.InviteID, now.Add(3*time.Minute)); err == nil {
+		t.Fatal("Revoke accepted an unconsumed invite")
+	}
+}
+
+func TestRevokeConsumedInvite(t *testing.T) {
+	t.Parallel()
+
+	secret, err := GenerateSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 12, 13, 0, 0, 0, time.UTC)
+	invite, record, err := Create(CreateInput{
+		ClientName:              "laptop-3",
+		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
+		ServerPort:              2222,
+		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
+		TargetPort:              5432,
+		Principal:               "warptweet",
+		ProfileID:               "profile-v1",
+		ArtifactProfileID:       "linux-amd64",
+		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
+		Now:                     now,
+		Secret:                  secret,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	if err := Store(directory, record); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Consume(directory, invite.InviteID, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", now.Add(time.Minute)); err != nil {
+		t.Fatalf("Consume: %v", err)
+	}
+	revoked, err := Revoke(directory, invite.InviteID, now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revoked.Status != StatusRevoked {
+		t.Fatalf("status=%s", revoked.Status)
+	}
+	again, err := Revoke(directory, invite.InviteID, now.Add(3*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Status != StatusRevoked {
+		t.Fatalf("idempotent status=%s", again.Status)
+	}
+}
+
+func TestCancelExpiredUnconsumedInvite(t *testing.T) {
+	t.Parallel()
+
+	secret, err := GenerateSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 22, 20, 0, 0, 0, time.UTC)
+	invite, record, err := Create(CreateInput{
+		ClientName:              "expired-invite",
+		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
+		ServerPort:              2222,
+		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
+		TargetPort:              5432,
+		Principal:               "warptweet",
+		ProfileID:               "profile-v1",
+		ArtifactProfileID:       "linux-amd64",
+		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
+		Now:                     now,
+		Secret:                  secret,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	if err := Store(directory, record); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Consume(directory, invite.InviteID, "client", now.Add(48*time.Hour)); err == nil {
+		t.Fatal("Consume accepted an expired invite")
+	}
+	loaded, err := Load(directory, invite.InviteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Status != StatusExpired || loaded.ClientID != "" {
+		t.Fatalf("expired invite=%+v", loaded)
+	}
+	cancelled, err := Cancel(directory, invite.InviteID, now.Add(49*time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cancelled.Status != StatusCancelled {
+		t.Fatalf("status=%s", cancelled.Status)
 	}
 }
 

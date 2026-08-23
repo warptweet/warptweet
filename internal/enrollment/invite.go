@@ -75,10 +75,11 @@ type Record struct {
 }
 
 const (
-	StatusIssued   = "issued"
-	StatusConsumed = "consumed"
-	StatusRevoked  = "revoked"
-	StatusExpired  = "expired"
+	StatusIssued    = "issued"
+	StatusConsumed  = "consumed"
+	StatusCancelled = "cancelled"
+	StatusRevoked   = "revoked"
+	StatusExpired   = "expired"
 )
 
 // CreateInput is the operator-facing invite request.
@@ -282,7 +283,35 @@ func Consume(directory, inviteID, clientID string, now time.Time) (Record, error
 	return record, nil
 }
 
-// Revoke marks an invite revoked.
+// Cancel marks an unconsumed invite cancelled. It does not revoke a grant.
+func Cancel(directory, inviteID string, now time.Time) (Record, error) {
+	unlock, err := lockInvite(directory, inviteID)
+	if err != nil {
+		return Record{}, err
+	}
+	defer unlock()
+	record, err := Load(directory, inviteID)
+	if err != nil {
+		return Record{}, err
+	}
+	if record.Status == StatusCancelled {
+		return record, nil
+	}
+	if record.Status == StatusConsumed || record.Status == StatusRevoked {
+		return Record{}, fmt.Errorf("invite %s is %s; cancel applies only to unconsumed invitations", inviteID, record.Status)
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	record.Status = StatusCancelled
+	record.RevokedAt = now.Format(time.RFC3339Nano)
+	if err := writeJSONAtomic(recordPath(directory, inviteID), record, 0o600); err != nil {
+		return Record{}, err
+	}
+	return record, nil
+}
+
+// Revoke marks a consumed invite revoked after the grant itself is revoked.
 func Revoke(directory, inviteID string, now time.Time) (Record, error) {
 	record, err := Load(directory, inviteID)
 	if err != nil {
@@ -290,6 +319,9 @@ func Revoke(directory, inviteID string, now time.Time) (Record, error) {
 	}
 	if record.Status == StatusRevoked {
 		return record, nil
+	}
+	if record.Status == StatusIssued || record.Status == StatusCancelled {
+		return Record{}, fmt.Errorf("invite %s is %s; revoke applies only after consumption", inviteID, record.Status)
 	}
 	if now.IsZero() {
 		now = time.Now().UTC()

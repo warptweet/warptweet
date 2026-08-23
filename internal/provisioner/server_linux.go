@@ -137,9 +137,6 @@ func executeRequest(ctx context.Context, request Request) (string, error) {
 	case ActionDown:
 		return projectTunnel(ctx, request.TunnelID, false)
 	case ActionRotate, ActionRevoke:
-		if _, err := projectTunnel(ctx, request.TunnelID, false); err != nil {
-			return "", err
-		}
 		return executeController(ctx, request.Action, request.TunnelID)
 	default:
 		if isTunnelStartAction(request.Action) {

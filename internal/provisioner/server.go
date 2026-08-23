@@ -155,9 +155,6 @@ func executeRequest(ctx context.Context, request Request, serviceUID, serviceGID
 	case ActionDown:
 		return stopTunnel(ctx, request.TunnelID)
 	case ActionRotate, ActionRevoke:
-		if _, err := stopTunnel(ctx, request.TunnelID); err != nil {
-			return "", err
-		}
 		return executeController(ctx, request.Action, request.TunnelID)
 	default:
 		if isTunnelStartAction(request.Action) {
@@ -231,11 +228,15 @@ func startTunnel(ctx context.Context, tunnelID string, once bool, serviceUID, se
 			_ = runLaunchctl(ctx, "bootout", "system/"+label)
 		}
 	}()
+	// Backdate startedAt so a readiness write that races kickstart is still treated as current.
 	startedAt := time.Now().UTC().Add(-time.Second)
+	current, _ := store.Read(tunnelID)
 	if err := store.Write(lifecycle.State{
-		TunnelID:     tunnelID,
-		Phase:        lifecycle.PhaseStarting,
-		TargetHealth: lifecycle.TargetHealthNotChecked,
+		TunnelID:       tunnelID,
+		Phase:          lifecycle.PhaseStarting,
+		ListenEndpoint: current.ListenEndpoint,
+		Generation:     current.Generation,
+		TargetHealth:   lifecycle.TargetHealthNotChecked,
 	}); err != nil {
 		return "", err
 	}

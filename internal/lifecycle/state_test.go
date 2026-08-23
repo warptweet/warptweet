@@ -19,6 +19,14 @@ func TestStoreWriteReadAndLock(t *testing.T) {
 	if _, err := store.Lock("database-primary"); err == nil {
 		t.Fatal("second lock should fail")
 	}
+	admin, err := store.AdminLock("database-primary")
+	if err != nil {
+		t.Fatalf("AdminLock during runtime lock: %v", err)
+	}
+	if _, err := store.AdminLock("database-primary"); err == nil {
+		t.Fatal("second admin lock should fail")
+	}
+	Unlock(admin)
 
 	if err := store.Write(State{
 		TunnelID:       "database-primary",

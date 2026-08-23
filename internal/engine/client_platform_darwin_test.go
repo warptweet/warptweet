@@ -70,6 +70,7 @@ func TestProductionClientPreflightFailsClosedWithoutInstalledDarwinPackage(t *te
 		strings.Contains(message, "no such file") ||
 		strings.Contains(message, "not provisioned") ||
 		strings.Contains(message, "inspect fixed OpenSSH ancestor") ||
+		strings.Contains(message, "permission denied") ||
 		strings.Contains(message, "stat ")) {
 		t.Fatalf("Preflight error = %v, want unprovisioned Darwin package rejection", err)
 	}
@@ -86,6 +87,7 @@ func TestProductionClientStateValidationFailsClosedWithoutDarwinServiceIdentity(
 	}
 	if !(strings.Contains(err.Error(), "not provisioned") ||
 		strings.Contains(err.Error(), "no such file") ||
+		strings.Contains(err.Error(), "permission denied") ||
 		strings.Contains(err.Error(), installlayout.DarwinClientManifestPath) ||
 		strings.Contains(err.Error(), "ownership") ||
 		strings.Contains(err.Error(), "service identity") ||

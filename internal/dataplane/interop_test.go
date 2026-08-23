@@ -26,99 +26,9 @@ import (
 func TestLoopbackDirectTCPIP(t *testing.T) {
 	t.Parallel()
 
-	backend, backendAddr := startEchoBackend(t)
-	defer backend.Close()
-
-	hostKey, err := composite.Generate()
-	if err != nil {
-		t.Fatal(err)
-	}
-	userKey, err := composite.Generate()
-	if err != nil {
-		t.Fatal(err)
-	}
-	dir := t.TempDir()
-	hostPEM, err := opensshkey.MarshalPrivate(hostKey, "host")
-	if err != nil {
-		t.Fatal(err)
-	}
-	hostPath := filepath.Join(dir, "host")
-	if err := os.WriteFile(hostPath, hostPEM, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	userPub, err := userKey.Public()
-	if err != nil {
-		t.Fatal(err)
-	}
-	authPath := filepath.Join(dir, "authorized_keys")
-	line := composite.Algorithm + " " + base64.StdEncoding.EncodeToString(hostKeyBlob(userPub)) + "\n"
-	if err := os.WriteFile(authPath, []byte(line), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	listenAddr := listener.Addr().(*net.TCPAddr)
-	_ = listener.Close()
-
-	policy := mustPolicy(t)
-	policy.Listen = netip.MustParseAddrPort(listenAddr.String())
-	policy.Target = backendAddr
-	policy.HostKeyPath = hostPath
-	policy.AuthorizedKeysPath = authPath
-
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- Serve(ctx, policy, nil)
-	}()
-	t.Cleanup(func() {
-		cancel()
-		select {
-		case <-errCh:
-		case <-time.After(2 * time.Second):
-		}
-	})
-
-	var conn net.Conn
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		select {
-		case serveErr := <-errCh:
-			t.Fatalf("Serve returned early: %v", serveErr)
-		default:
-		}
-		conn, err = net.DialTimeout("tcp", policy.Listen.String(), 100*time.Millisecond)
-		if err == nil {
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if conn == nil {
-		t.Fatalf("dial data plane: %v", err)
-	}
-	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
-
-	client := &loopbackClient{
-		conn:     conn,
-		reader:   bufio.NewReader(conn),
-		clearIn:  true,
-		clearOut: true,
-		clientID: "SSH-2.0-WarpTweetTest",
-		userKey:  userKey,
-		policy:   policy,
-	}
-	if err := client.handshake(); err != nil {
-		t.Fatal(err)
-	}
-	if err := client.authenticate(); err != nil {
-		t.Fatal(err)
-	}
-	remoteID, err := client.openDirectTCPIP(policy.Target)
+	client, policy := startAuthenticatedLoopback(t)
+	defer client.conn.Close()
+	remoteID, localID, err := client.openDirectTCPIP(policy.Target)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,7 +36,7 @@ func TestLoopbackDirectTCPIP(t *testing.T) {
 	if err := client.sendData(remoteID, payload); err != nil {
 		t.Fatal(err)
 	}
-	got, err := client.recvData(0)
+	got, err := client.recvData(localID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,11 +51,13 @@ type loopbackClient struct {
 	clearIn, clearOut    bool
 	in, out              packetCodec
 	inSeq, outSeq        uint64
+	nextLocal            uint32
 	clientID, serverID   string
 	clientKex, serverKex []byte
 	sessionID            []byte
 	userKey              composite.PrivateKey
 	policy               Policy
+	recvBuf              map[uint32][]byte
 }
 
 func (c *loopbackClient) handshake() error {
@@ -306,10 +218,12 @@ func (c *loopbackClient) authenticate() error {
 	return nil
 }
 
-func (c *loopbackClient) openDirectTCPIP(dest netip.AddrPort) (uint32, error) {
+func (c *loopbackClient) openDirectTCPIP(dest netip.AddrPort) (remoteID, localID uint32, err error) {
+	localID = c.nextLocal
+	c.nextLocal++
 	pkt := []byte{sshMsgChannelOpen}
 	pkt = append(pkt, sshString([]byte(channelDirectTCPIP))...)
-	pkt = binary.BigEndian.AppendUint32(pkt, 0)
+	pkt = binary.BigEndian.AppendUint32(pkt, localID)
 	pkt = binary.BigEndian.AppendUint32(pkt, 2<<20)
 	pkt = binary.BigEndian.AppendUint32(pkt, 32<<10)
 	pkt = append(pkt, sshString([]byte(dest.Addr().String()))...)
@@ -317,24 +231,24 @@ func (c *loopbackClient) openDirectTCPIP(dest netip.AddrPort) (uint32, error) {
 	pkt = append(pkt, sshString([]byte("127.0.0.1"))...)
 	pkt = binary.BigEndian.AppendUint32(pkt, 0)
 	if err := c.write(pkt); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	confirm, err := c.read()
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	if len(confirm) == 0 || confirm[0] != sshMsgChannelOpenConfirm {
-		return 0, fmt.Errorf("expected CHANNEL_OPEN_CONFIRMATION, got %v", msgType(confirm))
+		return 0, 0, fmt.Errorf("expected CHANNEL_OPEN_CONFIRMATION, got %v", msgType(confirm))
 	}
 	recipient, rest, err := consumeUint32(confirm[1:])
-	if err != nil || recipient != 0 {
-		return 0, fmt.Errorf("channel confirmation recipient")
+	if err != nil || recipient != localID {
+		return 0, 0, fmt.Errorf("channel confirmation recipient")
 	}
-	sender, _, err := consumeUint32(rest)
+	remoteID, _, err = consumeUint32(rest)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
-	return sender, nil
+	return remoteID, localID, nil
 }
 
 func (c *loopbackClient) sendData(remoteID uint32, data []byte) error {
@@ -342,6 +256,51 @@ func (c *loopbackClient) sendData(remoteID uint32, data []byte) error {
 	pkt = binary.BigEndian.AppendUint32(pkt, remoteID)
 	pkt = append(pkt, sshString(data)...)
 	return c.write(pkt)
+}
+
+func (c *loopbackClient) closeRemote(remoteID uint32) error {
+	pkt := []byte{sshMsgChannelClose}
+	pkt = binary.BigEndian.AppendUint32(pkt, remoteID)
+	return c.write(pkt)
+}
+
+func (c *loopbackClient) creditWindow(remoteID, add uint32) error {
+	pkt := []byte{sshMsgChannelWindowAdjust}
+	pkt = binary.BigEndian.AppendUint32(pkt, remoteID)
+	pkt = binary.BigEndian.AppendUint32(pkt, add)
+	return c.write(pkt)
+}
+
+func (c *loopbackClient) recvExact(localID, remoteID uint32, want int) ([]byte, error) {
+	if c.recvBuf == nil {
+		c.recvBuf = map[uint32][]byte{}
+	}
+	var out []byte
+	if buf := c.recvBuf[localID]; len(buf) > 0 {
+		n := want
+		if n > len(buf) {
+			n = len(buf)
+		}
+		out = append(out, buf[:n]...)
+		c.recvBuf[localID] = buf[n:]
+	}
+	for len(out) < want {
+		chunk, err := c.recvData(localID)
+		if err != nil {
+			return nil, err
+		}
+		if err := c.creditWindow(remoteID, uint32(len(chunk))); err != nil {
+			return nil, err
+		}
+		need := want - len(out)
+		if len(chunk) <= need {
+			out = append(out, chunk...)
+			continue
+		}
+		out = append(out, chunk[:need]...)
+		c.recvBuf[localID] = append(append([]byte{}, c.recvBuf[localID]...), chunk[need:]...)
+	}
+	return out, nil
 }
 
 func (c *loopbackClient) recvData(localID uint32) ([]byte, error) {
@@ -408,7 +367,109 @@ func (c *loopbackClient) read() ([]byte, error) {
 	return payload, nil
 }
 
-func startEchoBackend(t *testing.T) (net.Listener, netip.AddrPort) {
+type loopbackServer struct {
+	policy  Policy
+	userKey composite.PrivateKey
+	errCh   <-chan error
+}
+
+func startAuthenticatedLoopback(t testing.TB) (*loopbackClient, Policy) {
+	t.Helper()
+	server := startLoopbackServer(t)
+	client := server.dial(t)
+	t.Cleanup(func() { _ = client.conn.Close() })
+	return client, server.policy
+}
+
+func startLoopbackServer(t testing.TB) loopbackServer {
+	t.Helper()
+
+	_, backendAddr := startEchoBackend(t)
+	hostKey, err := composite.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	userKey, err := composite.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	hostPEM, err := opensshkey.MarshalPrivate(hostKey, "host")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostPath := filepath.Join(dir, "host")
+	if err := os.WriteFile(hostPath, hostPEM, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	userPub, err := userKey.Public()
+	if err != nil {
+		t.Fatal(err)
+	}
+	authPath := filepath.Join(dir, "authorized_keys")
+	line := composite.Algorithm + " " + base64.StdEncoding.EncodeToString(hostKeyBlob(userPub)) + "\n"
+	if err := os.WriteFile(authPath, []byte(line), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listenAddr := listener.Addr().(*net.TCPAddr)
+	policy := mustPolicy(t)
+	policy.Listen = netip.MustParseAddrPort(listenAddr.String())
+	policy.Target = backendAddr
+	policy.HostKeyPath = hostPath
+	policy.AuthorizedKeysPath = authPath
+	hostPEMBytes, err := os.ReadFile(hostPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsedHost, err := opensshkey.ParsePrivate(hostPEMBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- serveListener(ctx, listener, policy, nil, parsedHost)
+	}()
+	t.Cleanup(func() {
+		cancel()
+		select {
+		case <-errCh:
+		case <-time.After(2 * time.Second):
+		}
+	})
+	return loopbackServer{policy: policy, userKey: userKey, errCh: errCh}
+}
+
+func (s loopbackServer) dial(t testing.TB) *loopbackClient {
+	t.Helper()
+	conn, err := net.DialTimeout("tcp", s.policy.Listen.String(), time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
+	client := &loopbackClient{
+		conn:     conn,
+		reader:   bufio.NewReader(conn),
+		clearIn:  true,
+		clearOut: true,
+		clientID: "SSH-2.0-WarpTweetTest",
+		userKey:  s.userKey,
+		policy:   s.policy,
+	}
+	if err := client.handshake(); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.authenticate(); err != nil {
+		t.Fatal(err)
+	}
+	return client
+}
+
+func startEchoBackend(t testing.TB) (net.Listener, netip.AddrPort) {
 	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -441,4 +502,30 @@ func msgType(payload []byte) any {
 		return "empty"
 	}
 	return payload[0]
+}
+
+func TestRecvExactKeepsSurplus(t *testing.T) {
+	t.Parallel()
+
+	c := &loopbackClient{recvBuf: map[uint32][]byte{3: []byte("abcdef")}}
+	got, err := c.recvExact(3, 9, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "ab" {
+		t.Fatalf("got=%q", got)
+	}
+	if string(c.recvBuf[3]) != "cdef" {
+		t.Fatalf("buf=%q", c.recvBuf[3])
+	}
+	got, err = c.recvExact(3, 9, 3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "cde" {
+		t.Fatalf("got=%q", got)
+	}
+	if string(c.recvBuf[3]) != "f" {
+		t.Fatalf("buf=%q", c.recvBuf[3])
+	}
 }

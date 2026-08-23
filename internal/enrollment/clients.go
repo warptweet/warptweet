@@ -245,9 +245,90 @@ func RevokeClient(directory string, request ManagementRequest, now time.Time, re
 	return record, nil
 }
 
-// RotateClientPublicKey persists rotation intent before changing
-// authorization. The client selects the next capability, allowing exact
-// response-loss retries without transmitting any server-generated secret.
+// RevokeClientAsHost revokes a grant without the client bearer token.
+func RevokeClientAsHost(directory, clientID string, now time.Time, removeAuthorization func(string) error, enforcement SessionEnforcement) (ClientRecord, error) {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	if !IsHexID(clientID) {
+		return ClientRecord{}, fmt.Errorf("%w: client_id must be a hexadecimal identifier", ErrInvalidInvite)
+	}
+	unlock, err := lockClient(directory, clientID)
+	if err != nil {
+		return ClientRecord{}, err
+	}
+	defer unlock()
+	record, err := LoadClient(directory, clientID)
+	if err != nil {
+		return ClientRecord{}, fmt.Errorf("%w: unknown client", ErrInvalidInvite)
+	}
+	if record.Status == ClientStatusRevoked {
+		if removeAuthorization != nil {
+			if err := removeAuthorization(record.PublicKey); err != nil {
+				return ClientRecord{}, err
+			}
+		}
+		if enforcement.TerminateSession != nil {
+			if err := enforcement.TerminateSession(record.ClientID, "", ""); err != nil {
+				return ClientRecord{}, err
+			}
+		}
+		if enforcement.VerifySessionGone != nil {
+			if err := enforcement.VerifySessionGone(record.ClientID, "", ""); err != nil {
+				return ClientRecord{}, err
+			}
+		}
+		return record, nil
+	}
+	if record.Status != ClientStatusActive && record.Status != ClientStatusRevocationPending &&
+		record.Status != ClientStatusExpirationPending && record.Status != ClientStatusRotationPending {
+		return ClientRecord{}, fmt.Errorf("%w: client status is %q", ErrInvalidInvite, record.Status)
+	}
+	if removeAuthorization == nil {
+		return ClientRecord{}, fmt.Errorf("remove authorization callback is required")
+	}
+	if record.Status == ClientStatusActive || record.Status == ClientStatusRotationPending {
+		record.Status = ClientStatusRevocationPending
+		record.OperationStartedAt = now.Format(time.RFC3339Nano)
+		if err := writeJSONAtomic(clientPath(directory, record.ClientID), record, 0o600); err != nil {
+			return ClientRecord{}, err
+		}
+	}
+	if err := removeAuthorization(record.PublicKey); err != nil {
+		return ClientRecord{}, err
+	}
+	if record.PendingPublicKey != "" && record.PendingPublicKey != record.PublicKey {
+		if err := removeAuthorization(record.PendingPublicKey); err != nil {
+			return ClientRecord{}, err
+		}
+	}
+	if enforcement.TerminateSession != nil {
+		if err := enforcement.TerminateSession(record.ClientID, "", ""); err != nil {
+			return ClientRecord{}, err
+		}
+	}
+	if enforcement.VerifySessionGone != nil {
+		if err := enforcement.VerifySessionGone(record.ClientID, "", ""); err != nil {
+			return ClientRecord{}, err
+		}
+	}
+	burned := make([]byte, ManagementTokenBytes)
+	if _, err := rand.Read(burned); err != nil {
+		return ClientRecord{}, fmt.Errorf("generate burned management token: %w", err)
+	}
+	record.PreviousManagementTokenSHA256 = record.ManagementTokenSHA256
+	record.ManagementTokenSHA256 = HashManagementToken(hex.EncodeToString(burned))
+	record.PendingPublicKey = ""
+	record.PendingManagementTokenSHA256 = ""
+	record.Status = ClientStatusRevoked
+	record.RevokedAt = now.Format(time.RFC3339Nano)
+	record.OperationStartedAt = ""
+	if err := writeJSONAtomic(clientPath(directory, record.ClientID), record, 0o600); err != nil {
+		return ClientRecord{}, err
+	}
+	return record, nil
+}
+
 func RotateClientPublicKey(directory string, request ManagementRequest, newPublicKey string, now time.Time, replaceAuthorization func(string, string) error) (ClientRecord, error) {
 	if now.IsZero() {
 		now = time.Now().UTC()
@@ -333,6 +414,24 @@ func RotateClientPublicKey(directory string, request ManagementRequest, newPubli
 		return ClientRecord{}, err
 	}
 	return record, nil
+}
+
+func EvictPreviousKeySessions(record ClientRecord, enforcement SessionEnforcement) error {
+	if record.PreviousPublicKey == "" {
+		return nil
+	}
+	oldDigest := PublicKeyDigest(record.PreviousPublicKey)
+	if enforcement.TerminateSession != nil {
+		if err := enforcement.TerminateSession(record.ClientID, "", oldDigest); err != nil {
+			return err
+		}
+	}
+	if enforcement.VerifySessionGone != nil {
+		if err := enforcement.VerifySessionGone(record.ClientID, "", oldDigest); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // ExpireClient runs the host expiry transaction for one grant generation.

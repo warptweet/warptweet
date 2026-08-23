@@ -151,6 +151,170 @@ func TestAcceptStoresClientAndRevokeBurnsToken(t *testing.T) {
 	}
 }
 
+func TestRevokeClientAsHostDoesNotNeedBearerToken(t *testing.T) {
+	t.Parallel()
+
+	secret, err := GenerateSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 22, 20, 0, 0, 0, time.UTC)
+	invite, record, err := Create(CreateInput{
+		ClientName:              "host-revoke",
+		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
+		ServerPort:              2222,
+		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
+		TargetPort:              5432,
+		Principal:               "warptweet",
+		ProfileID:               profile.CurrentID,
+		ArtifactProfileID:       "linux-amd64",
+		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
+		Now:                     now,
+		Secret:                  secret,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invites := t.TempDir()
+	clients := t.TempDir()
+	if err := Store(invites, record); err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := Accept(AcceptInput{
+		Directory:        invites,
+		ClientsDirectory: clients,
+		Request: EnrollmentRequest{
+			InviteID:        invite.InviteID,
+			Nonce:           invite.Nonce,
+			ClientName:      invite.ClientName,
+			PublicKey:       testCompositePublicKey(),
+			ProfileID:       profile.CurrentID,
+			TunnelID:        "host-revoke",
+			ListenAddress:   "127.0.0.1",
+			ListenPort:      15432,
+			ManagementToken: testManagementToken,
+		},
+		HostPublicKey:        invite.HostPublicKey,
+		Principal:            invite.Principal,
+		ProfileID:            profile.CurrentID,
+		TargetAddress:        invite.TargetAddress,
+		TargetPort:           invite.TargetPort,
+		ServerAddress:        invite.ServerAddress,
+		Now:                  now.Add(time.Minute),
+		InstallAuthorization: func(string, time.Time) error { return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RevokeClientAsHost(clients, accepted.ClientID, now.Add(2*time.Minute), nil, SessionEnforcement{}); err == nil {
+		t.Fatal("nil removeAuthorization accepted")
+	}
+	unchanged, err := LoadClient(clients, accepted.ClientID)
+	if err != nil || unchanged.Status != ClientStatusActive {
+		t.Fatalf("nil callback mutated record: %+v %v", unchanged, err)
+	}
+	var removed bool
+	revoked, err := RevokeClientAsHost(clients, accepted.ClientID, now.Add(2*time.Minute), func(string) error {
+		removed = true
+		return nil
+	}, SessionEnforcement{
+		TerminateSession:  func(string, string, string) error { return nil },
+		VerifySessionGone: func(string, string, string) error { return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !removed || revoked.Status != ClientStatusRevoked {
+		t.Fatalf("removed=%v status=%s", removed, revoked.Status)
+	}
+	if revoked.ManagementTokenSHA256 == HashManagementToken(testManagementToken) {
+		t.Fatal("host revoke did not burn the management token")
+	}
+}
+
+func TestRevokeClientAsHostRemovesPendingRotationKey(t *testing.T) {
+	t.Parallel()
+
+	secret, err := GenerateSecret()
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, 8, 22, 21, 0, 0, 0, time.UTC)
+	invite, record, err := Create(CreateInput{
+		ClientName:              "pending-rotate",
+		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
+		ServerPort:              2222,
+		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
+		TargetPort:              5432,
+		Principal:               "warptweet",
+		ProfileID:               profile.CurrentID,
+		ArtifactProfileID:       "linux-amd64",
+		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
+		Now:                     now,
+		Secret:                  secret,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	invites := t.TempDir()
+	clients := t.TempDir()
+	if err := Store(invites, record); err != nil {
+		t.Fatal(err)
+	}
+	accepted, err := Accept(AcceptInput{
+		Directory:        invites,
+		ClientsDirectory: clients,
+		Request: EnrollmentRequest{
+			InviteID:        invite.InviteID,
+			Nonce:           invite.Nonce,
+			ClientName:      invite.ClientName,
+			PublicKey:       testCompositePublicKey(),
+			ProfileID:       profile.CurrentID,
+			TunnelID:        "pending-rotate",
+			ListenAddress:   "127.0.0.1",
+			ListenPort:      15432,
+			ManagementToken: testManagementToken,
+		},
+		HostPublicKey:        invite.HostPublicKey,
+		Principal:            invite.Principal,
+		ProfileID:            profile.CurrentID,
+		TargetAddress:        invite.TargetAddress,
+		TargetPort:           invite.TargetPort,
+		ServerAddress:        invite.ServerAddress,
+		Now:                  now.Add(time.Minute),
+		InstallAuthorization: func(string, time.Time) error { return nil },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := RotateClientPublicKey(clients, ManagementRequest{
+		ClientID:            accepted.ClientID,
+		ManagementToken:     testManagementToken,
+		TunnelID:            "pending-rotate",
+		NextManagementToken: testNextManagementToken,
+	}, testCompositePublicKeyRotated(), now.Add(2*time.Minute), func(string, string) error {
+		return errors.New("leave rotation pending")
+	}); err == nil {
+		t.Fatal("expected pending rotation")
+	}
+	var removed []string
+	revoked, err := RevokeClientAsHost(clients, accepted.ClientID, now.Add(3*time.Minute), func(publicKey string) error {
+		removed = append(removed, publicKey)
+		return nil
+	}, SessionEnforcement{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if revoked.Status != ClientStatusRevoked || revoked.PendingPublicKey != "" || revoked.PendingManagementTokenSHA256 != "" {
+		t.Fatalf("revoked pending fields remain: %+v", revoked)
+	}
+	if len(removed) != 2 {
+		t.Fatalf("removed keys=%d, want current and pending", len(removed))
+	}
+}
+
 func TestReconcilePendingRevocationsCompletesStuckRecord(t *testing.T) {
 	t.Parallel()
 
@@ -326,6 +490,27 @@ func TestRotateClientIssuesNewToken(t *testing.T) {
 	}
 	if updated.PublicKey != secondKey {
 		t.Fatalf("public key not updated")
+	}
+	var evicted []string
+	if err := EvictPreviousKeySessions(updated, SessionEnforcement{
+		TerminateSession: func(clientID, generation, publicKeySHA256 string) error {
+			if clientID != result.ClientID || publicKeySHA256 != PublicKeyDigest(firstKey) {
+				t.Fatalf("evicted unexpected session client=%s key=%s", clientID, publicKeySHA256)
+			}
+			evicted = append(evicted, publicKeySHA256)
+			return nil
+		},
+		VerifySessionGone: func(clientID, generation, publicKeySHA256 string) error {
+			if len(evicted) == 0 {
+				t.Fatal("VerifySessionGone ran before TerminateSession")
+			}
+			return nil
+		},
+	}); err != nil {
+		t.Fatalf("EvictPreviousKeySessions: %v", err)
+	}
+	if len(evicted) != 1 {
+		t.Fatalf("old-key sessions evicted %d times, want 1", len(evicted))
 	}
 	if _, err := RotateClientPublicKey(
 		clients,

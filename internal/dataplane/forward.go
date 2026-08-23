@@ -1,9 +1,11 @@
 package dataplane
 
 import (
+	"context"
 	"encoding/binary"
 	"net"
 	"net/netip"
+	"time"
 )
 
 func (c *connection) handleChannelOpen(payload []byte) error {
@@ -40,7 +42,23 @@ func (c *connection) handleChannelOpen(payload []byte) error {
 	if err != nil {
 		return err
 	}
-	_ = rest
+	if port > 65535 {
+		return c.channelOpenFailure(sender, "destination port out of range")
+	}
+	_, rest, err = consumeSSHString(rest)
+	if err != nil {
+		return err
+	}
+	origPort, rest, err := consumeUint32(rest)
+	if err != nil {
+		return err
+	}
+	if len(rest) != 0 {
+		return c.disconnect("trailing channel-open payload")
+	}
+	if origPort > 65535 {
+		return c.channelOpenFailure(sender, "originator port out of range")
+	}
 	addr, err := netip.ParseAddr(string(host))
 	if err != nil {
 		return c.channelOpenFailure(sender, "destination is not a numeric address")
@@ -49,7 +67,8 @@ func (c *connection) handleChannelOpen(payload []byte) error {
 	if err := c.policy.allowDirectTCPIP(dest); err != nil {
 		return c.channelOpenFailure(sender, err.Error())
 	}
-	backend, err := net.Dial("tcp", dest.String())
+	dialer := net.Dialer{Timeout: 5 * time.Second}
+	backend, err := dialer.DialContext(context.Background(), "tcp", dest.String())
 	if err != nil {
 		return c.channelOpenFailure(sender, err.Error())
 	}
@@ -57,11 +76,13 @@ func (c *connection) handleChannelOpen(payload []byte) error {
 	localID := c.nextLocal
 	c.nextLocal++
 	ch := &sshChannel{
-		localID:  localID,
-		remoteID: sender,
-		window:   window,
-		maxPkt:   maxPkt,
-		backend:  backend,
+		localID:    localID,
+		remoteID:   sender,
+		window:     window,
+		maxPkt:     maxPkt,
+		recvWindow: 2 << 20,
+		maxRecv:    32 << 10,
+		backend:    backend,
 	}
 	c.channels[localID] = ch
 	c.mu.Unlock()
@@ -148,13 +169,28 @@ func (c *connection) handleChannelData(payload []byte) error {
 	}
 	c.mu.Lock()
 	ch := c.channels[localID]
-	c.mu.Unlock()
 	if ch == nil || ch.backend == nil {
+		c.mu.Unlock()
 		return nil
 	}
-	n, err := ch.backend.Write(data)
+	size := uint32(len(data))
+	if size > ch.maxRecv || size > ch.recvWindow {
+		c.mu.Unlock()
+		return c.disconnect("channel data exceeds window")
+	}
+	ch.recvWindow -= size
+	backend := ch.backend
+	c.mu.Unlock()
+	n, err := backend.Write(data)
 	if err != nil {
-		return err
+		c.mu.Lock()
+		closed := ch.closed
+		c.mu.Unlock()
+		if closed {
+			return nil
+		}
+		c.closeChannel(localID)
+		return nil
 	}
 	c.mu.Lock()
 	ch.consumed += uint32(n)
@@ -164,6 +200,7 @@ func (c *connection) handleChannelData(payload []byte) error {
 		return nil
 	}
 	ch.consumed = 0
+	ch.recvWindow += adjust
 	remoteID := ch.remoteID
 	c.mu.Unlock()
 	pkt := []byte{sshMsgChannelWindowAdjust}
@@ -182,13 +219,18 @@ func (c *connection) handleWindowAdjust(payload []byte) error {
 		return err
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	ch := c.channels[localID]
 	if ch == nil {
+		c.mu.Unlock()
 		return nil
+	}
+	if add > ^uint32(0)-ch.window {
+		c.mu.Unlock()
+		return c.disconnect("channel window overflow")
 	}
 	ch.window += add
 	c.win.Broadcast()
+	c.mu.Unlock()
 	return nil
 }
 

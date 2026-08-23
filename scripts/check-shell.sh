@@ -18,16 +18,38 @@ list_scripts() {
         -type f | LC_ALL=C sort
 }
 
+script_dialect() {
+    WT_SHEBANG=$(sed -n '1s/^#![[:space:]]*//p' "$1")
+    case "$WT_SHEBANG" in
+        /bin/bash | /bin/bash\ * | /usr/bin/bash | /usr/bin/bash\ * | \
+        /usr/bin/env\ bash | /usr/bin/env\ bash\ * | \
+        /usr/bin/env\ -S\ bash | /usr/bin/env\ -S\ bash\ *)
+            echo bash
+            ;;
+        *)
+            echo sh
+            ;;
+    esac
+}
+
 if [ "${1:-}" = "--list" ]; then
     if [ "$#" -ne 1 ]; then
-        echo "usage: $0 [--list]" >&2
+        echo "usage: $0 [--list|--classify FILE]" >&2
         exit 64
     fi
     list_scripts
     exit 0
 fi
+if [ "${1:-}" = "--classify" ]; then
+    if [ "$#" -ne 2 ]; then
+        echo "usage: $0 [--list|--classify FILE]" >&2
+        exit 64
+    fi
+    script_dialect "$2"
+    exit 0
+fi
 if [ "$#" -ne 0 ]; then
-    echo "usage: $0 [--list]" >&2
+    echo "usage: $0 [--list|--classify FILE]" >&2
     exit 64
 fi
 
@@ -111,8 +133,32 @@ if ! list_scripts | grep -q .; then
     exit 66
 fi
 
-list_scripts | tr '\n' '\0' | xargs -0 "$WT_BINARY" \
-    -s sh \
-    --norc \
-    --severity=warning \
-    --exclude=SC1007,SC1091
+WT_POSIX_SCRIPTS=$(mktemp)
+WT_BASH_SCRIPTS=$(mktemp)
+trap 'rm -rf "$WT_TMP" "$WT_POSIX_SCRIPTS" "$WT_BASH_SCRIPTS"' EXIT
+: >"$WT_POSIX_SCRIPTS"
+: >"$WT_BASH_SCRIPTS"
+list_scripts | while IFS= read -r WT_SCRIPT; do
+    case "$(script_dialect "$WT_SCRIPT")" in
+        bash)
+            printf '%s\n' "$WT_SCRIPT" >>"$WT_BASH_SCRIPTS"
+            ;;
+        *)
+            printf '%s\n' "$WT_SCRIPT" >>"$WT_POSIX_SCRIPTS"
+            ;;
+    esac
+done
+if [ -s "$WT_POSIX_SCRIPTS" ]; then
+    tr '\n' '\0' <"$WT_POSIX_SCRIPTS" | xargs -0 "$WT_BINARY" \
+        -s sh \
+        --norc \
+        --severity=warning \
+        --exclude=SC1007,SC1091
+fi
+if [ -s "$WT_BASH_SCRIPTS" ]; then
+    tr '\n' '\0' <"$WT_BASH_SCRIPTS" | xargs -0 "$WT_BINARY" \
+        -s bash \
+        --norc \
+        --severity=warning \
+        --exclude=SC1007,SC1091
+fi

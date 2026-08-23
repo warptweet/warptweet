@@ -185,7 +185,7 @@ func newEnrollmentHandler(manifest server.Config, hostPublicKey string, enrollPo
 				return nil, err
 			}
 			return acceptAndAuthorize(manifest, hostPublicKey, enrollRequest, time.Now().UTC())
-		})
+		}, nil)
 	})
 	return mux
 }
@@ -194,12 +194,13 @@ func newManagementHandler(manifest server.Config, hostPublicKey string) http.Han
 	limiter := newEnrollmentRateLimiter(enrollmentRateLimitWindow, enrollmentRateLimitMax)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/v1/revoke", func(writer http.ResponseWriter, request *http.Request) {
+		authority := productionGrantAuthority()
+		var revoked enrollment.ClientRecord
 		writeEnrollmentJSON(writer, request, "revoke", limiter, func(body []byte) (any, error) {
 			var manage enrollment.ManagementRequest
 			if err := json.Unmarshal(body, &manage); err != nil {
 				return nil, err
 			}
-			authority := productionGrantAuthority()
 			record, err := enrollment.RevokeClient(
 				installlayout.ClientsDirectory,
 				manage,
@@ -207,23 +208,33 @@ func newManagementHandler(manifest server.Config, hostPublicKey string) http.Han
 				func(publicKey string) error {
 					return removeAuthorizedKeyForPublicKey(manifest.AuthorizedKeysPath, publicKey)
 				},
-				enrollment.SessionEnforcement{
-					TerminateSession:  authority.Terminate,
-					VerifySessionGone: authority.VerifyGone,
-				},
+				enrollment.SessionEnforcement{},
 			)
 			if err != nil {
 				return nil, err
 			}
+			revoked = record
 			return map[string]any{
 				"status":     "revoked",
 				"client_id":  record.ClientID,
 				"tunnel_id":  record.TunnelID,
 				"revoked_at": record.RevokedAt,
 			}, nil
+		}, func() {
+			if revoked.ClientID == "" {
+				return
+			}
+			if err := authority.Terminate(revoked.ClientID, "", ""); err != nil {
+				slog.Error("revoke session terminate failed", "client_id", revoked.ClientID, "err", err)
+			}
+			if err := authority.VerifyGone(revoked.ClientID, "", ""); err != nil {
+				slog.Error("revoke session still present", "client_id", revoked.ClientID, "err", err)
+			}
 		})
 	})
 	mux.HandleFunc("/v1/rotate", func(writer http.ResponseWriter, request *http.Request) {
+		authority := productionGrantAuthority()
+		var rotated enrollment.ClientRecord
 		writeEnrollmentJSON(writer, request, "rotate", limiter, func(body []byte) (any, error) {
 			var manage enrollment.ManagementRequest
 			if err := json.Unmarshal(body, &manage); err != nil {
@@ -256,6 +267,7 @@ func newManagementHandler(manifest server.Config, hostPublicKey string) http.Han
 			if err != nil {
 				return nil, err
 			}
+			rotated = record
 			return enrollment.EnrollmentProof{
 				InviteID:                     record.InviteID,
 				ClientID:                     record.ClientID,
@@ -271,6 +283,13 @@ func newManagementHandler(manifest server.Config, hostPublicKey string) http.Han
 				ServerAddress:                record.ServerAddress,
 				EnrollPort:                   enrollment.DefaultEnrollmentPort,
 			}, nil
+		}, func() {
+			if err := enrollment.EvictPreviousKeySessions(rotated, enrollment.SessionEnforcement{
+				TerminateSession:  authority.Terminate,
+				VerifySessionGone: authority.VerifyGone,
+			}); err != nil {
+				slog.Error("rotate old-key eviction failed", "client_id", rotated.ClientID, "err", err)
+			}
 		})
 	})
 	return mux
@@ -282,6 +301,7 @@ func writeEnrollmentJSON(
 	operation string,
 	limiter *enrollmentRateLimiter,
 	handle func([]byte) (any, error),
+	afterSuccess func(),
 ) {
 	source := requestSource(request)
 	if request.Method != http.MethodPost {
@@ -324,6 +344,12 @@ func writeEnrollmentJSON(
 	encoder := json.NewEncoder(writer)
 	encoder.SetEscapeHTML(false)
 	_ = encoder.Encode(result)
+	if flusher, ok := writer.(http.Flusher); ok {
+		flusher.Flush()
+	}
+	if afterSuccess != nil {
+		afterSuccess()
+	}
 }
 
 type tokenBucket struct {
@@ -437,22 +463,7 @@ func acceptAndAuthorize(
 	if err != nil {
 		return proof, err
 	}
-	if err := reloadDataPlane(); err != nil {
-		return proof, fmt.Errorf("reload data plane: %w", err)
-	}
 	return proof, nil
-}
-
-func reloadDataPlane() error {
-	if _, err := exec.LookPath("systemctl"); err != nil {
-		return nil
-	}
-	cmd := exec.Command("systemctl", "restart", "warptweet-sshd.service")
-	cmd.Env = []string{"LANG=C", "LC_ALL=C"}
-	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("systemctl restart warptweet-sshd.service: %w", err)
-	}
-	return nil
 }
 
 func acceptAndAuthorizeLocked(

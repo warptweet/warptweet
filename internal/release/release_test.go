@@ -210,6 +210,42 @@ func TestShellCheckCoversEveryPOSIXScript(t *testing.T) {
 	}
 }
 
+func TestShellCheckClassifiesBashShebangsWithArguments(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX scripts are Unix build inputs")
+	}
+
+	root := repositoryRoot(t)
+	checker := filepath.Join(root, "scripts", "check-shell.sh")
+	dir := t.TempDir()
+	cases := []struct {
+		shebang string
+		want    string
+	}{
+		{"#!/bin/bash -e", "bash"},
+		{"#!/usr/bin/bash -euo pipefail", "bash"},
+		{"#!/usr/bin/env bash", "bash"},
+		{"#!/usr/bin/env bash -e", "bash"},
+		{"#!/usr/bin/env -S bash -e", "bash"},
+		{"#!/bin/sh", "sh"},
+	}
+	for _, test := range cases {
+		path := filepath.Join(dir, strings.ReplaceAll(test.shebang, "/", "_"))
+		if err := os.WriteFile(path, []byte(test.shebang+"\ntrue\n"), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		command := exec.Command(checker, "--classify", path)
+		command.Dir = root
+		output, err := command.Output()
+		if err != nil {
+			t.Fatalf("classify %q: %v", test.shebang, err)
+		}
+		if got := strings.TrimSpace(string(output)); got != test.want {
+			t.Fatalf("shebang %q dialect=%q, want %q", test.shebang, got, test.want)
+		}
+	}
+}
+
 func TestOpenSSHRegressionBuildAccountPolicyIsDeterministic(t *testing.T) {
 	t.Parallel()
 

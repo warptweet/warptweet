@@ -63,22 +63,74 @@ func runServerRevoke(arguments []string, stdout, stderr io.Writer) error {
 	if !enrollment.IsHexID(id) {
 		return errors.New("revoke id must be a hexadecimal identifier")
 	}
-	if record, err := enrollment.Load(inviteDirectory, id); err == nil {
-		revoked, err := enrollment.Revoke(inviteDirectory, id, time.Now().UTC())
+	now := time.Now().UTC()
+	record, err := enrollment.Load(inviteDirectory, id)
+	if err == nil {
+		if record.Status == enrollment.StatusIssued || record.Status == enrollment.StatusCancelled ||
+			(record.Status == enrollment.StatusExpired && record.ClientID == "") {
+			cancelled, err := enrollment.Cancel(inviteDirectory, id, now)
+			if err != nil {
+				return err
+			}
+			return writeJSON(stdout, map[string]any{
+				"status":    "cancelled",
+				"invite_id": cancelled.InviteID,
+				"prior":     record.Status,
+			})
+		}
+		if record.ClientID == "" {
+			return errors.New("consumed invite has no client_id")
+		}
+		client, err := revokeGrantAsHost(record.ClientID, now)
+		if err != nil {
+			return err
+		}
+		if _, err := enrollment.Revoke(inviteDirectory, id, now); err != nil {
+			return err
+		}
+		return writeJSON(stdout, map[string]any{
+			"status":    "revoked",
+			"invite_id": id,
+			"client_id": client.ClientID,
+			"prior":     record.Status,
+		})
+	}
+	if !os.IsNotExist(err) {
+		return err
+	}
+	if _, err := enrollment.LoadClient(installlayout.ClientsDirectory, id); err == nil {
+		client, err := revokeGrantAsHost(id, now)
 		if err != nil {
 			return err
 		}
 		return writeJSON(stdout, map[string]any{
 			"status":    "revoked",
-			"invite_id": revoked.InviteID,
-			"client_id": revoked.ClientID,
-			"prior":     record.Status,
+			"client_id": client.ClientID,
 		})
-	}
-	if _, err := enrollment.LoadClient(installlayout.ClientsDirectory, id); err == nil {
-		return errors.New("server revoke of an enrolled grant requires the client management token via POST /v1/revoke")
+	} else if !os.IsNotExist(err) {
+		return err
 	}
 	return fmt.Errorf("unknown invite or client %q", id)
+}
+
+func revokeGrantAsHost(clientID string, now time.Time) (enrollment.ClientRecord, error) {
+	manifest, err := server.Load(installlayout.ServerManifestPath)
+	if err != nil {
+		return enrollment.ClientRecord{}, err
+	}
+	authority := productionGrantAuthority()
+	return enrollment.RevokeClientAsHost(
+		installlayout.ClientsDirectory,
+		clientID,
+		now,
+		func(publicKey string) error {
+			return removeAuthorizedKeyForPublicKey(manifest.AuthorizedKeysPath, publicKey)
+		},
+		enrollment.SessionEnforcement{
+			TerminateSession:  authority.Terminate,
+			VerifySessionGone: authority.VerifyGone,
+		},
+	)
 }
 
 func runServerStatus(ctx context.Context, arguments []string, stdout, stderr io.Writer) error {

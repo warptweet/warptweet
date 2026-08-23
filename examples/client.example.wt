@@ -1,7 +1,7 @@
 {
   "kind": "warptweet.client-tunnels",
   "schema_version": 1,
-  "profile_id": "warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519",
+  "profile_id": "warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519-chacha20",
   "ssh_binary_sha256": "REPLACE_WITH_64_LOWERCASE_HEXADECIMAL_CHARACTERS",
   "server": {
     "address": "192.0.2.10",

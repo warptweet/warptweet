@@ -561,7 +561,7 @@ func runRotate(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		return err
 	}
 	store := lifecycle.Store{Root: layout.ClientRuntimeRoot}
-	lock, err := store.Lock(tunnelID)
+	lock, err := store.AdminLock(tunnelID)
 	if err != nil {
 		return err
 	}
@@ -589,14 +589,21 @@ func runRotate(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	if err != nil {
 		return err
 	}
-	proof, err := enrollment.SubmitRotate(ctx, "127.0.0.1", mgmtPort, "", enrollment.ManagementRequest{
+	rotateReq := enrollment.ManagementRequest{
 		ClientID:            receipt.ClientID,
 		ManagementToken:     pending.CurrentManagementToken,
 		TunnelID:            tunnelID,
 		NewPublicKey:        publicKey,
 		NextManagementToken: pending.NextManagementToken,
-	})
-	if err != nil {
+	}
+	proof, err := enrollment.SubmitRotate(ctx, "127.0.0.1", mgmtPort, "", rotateReq)
+	if err != nil && ctx.Err() == nil {
+		first := err
+		proof, err = enrollment.SubmitRotate(ctx, "127.0.0.1", mgmtPort, "", rotateReq)
+		if err != nil {
+			return fmt.Errorf("host rotate: %w (first attempt: %v)", err, first)
+		}
+	} else if err != nil {
 		return fmt.Errorf("host rotate: %w", err)
 	}
 	failCleanup := func(err error) error {
@@ -649,6 +656,26 @@ func runRotate(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	if err := os.RemoveAll(stageRoot); err != nil {
 		return failCleanup(fmt.Errorf("remove completed pending rotation: %w", err))
 	}
+	state, _ := store.Read(tunnelID)
+	result := map[string]any{
+		"status":        "rotated",
+		"tunnel_id":     tunnelID,
+		"client_id":     receipt.ClientID,
+		"generation":    generationID,
+		"target_health": lifecycle.TargetHealthNotChecked,
+	}
+	if managedTunnelRunning(state) {
+		state.Generation = generationID
+		if err := store.Write(state); err != nil {
+			return failCleanup(err)
+		}
+		if err := projectManagedTunnel(ctx, tunnelID, false); err == nil {
+			if err := projectManagedTunnel(ctx, tunnelID, true); err == nil {
+				result["running"] = true
+				return writeJSON(stdout, result)
+			}
+		}
+	}
 	if err := stopTunnelProcess(ctx, store, tunnelID); err != nil {
 		return failCleanup(err)
 	}
@@ -658,14 +685,8 @@ func runRotate(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		TargetHealth: lifecycle.TargetHealthNotChecked,
 		Generation:   generationID,
 	})
-	return writeJSON(stdout, map[string]any{
-		"status":        "rotated",
-		"tunnel_id":     tunnelID,
-		"client_id":     receipt.ClientID,
-		"generation":    generationID,
-		"target_health": lifecycle.TargetHealthNotChecked,
-		"next":          "warptweet up " + tunnelID,
-	})
+	result["next"] = "warptweet up " + tunnelID
+	return writeJSON(stdout, result)
 }
 
 func runRevokeTunnel(ctx context.Context, arguments []string, stdout, stderr io.Writer) error {
@@ -690,7 +711,7 @@ func runRevokeTunnel(ctx context.Context, arguments []string, stdout, stderr io.
 		return err
 	}
 	store := lifecycle.Store{Root: layout.ClientRuntimeRoot}
-	lock, err := store.Lock(tunnelID)
+	lock, err := store.AdminLock(tunnelID)
 	if err != nil {
 		return err
 	}
@@ -983,6 +1004,18 @@ func managementLocalPort(store lifecycle.Store, tunnelID string) (uint16, error)
 		return 0, fmt.Errorf("route %s listen port %q cannot host a management forward", tunnelID, portText)
 	}
 	return uint16(port) + 1, nil
+}
+
+func managedTunnelRunning(state lifecycle.State) bool {
+	if state.PID <= 0 || !processAlivePID(state.PID) {
+		return false
+	}
+	switch state.Phase {
+	case lifecycle.PhaseStarting, lifecycle.PhaseAwaitingReadiness, lifecycle.PhaseReady, lifecycle.PhaseBackoff:
+		return true
+	default:
+		return false
+	}
 }
 
 func (receipt enrollmentReceipt) enrollPortOrDefault() uint16 {
