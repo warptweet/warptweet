@@ -74,6 +74,19 @@ func TestValidateReportV3Rejections(t *testing.T) {
 		"wrong checklist digest":   func(r *ReportV3) { r.ContractChecklistSHA256 = strings.Repeat("d", 64) },
 		"missing client dials":     func(r *ReportV3) { r.Networking.ClientDials = r.Networking.ClientDials[:1] },
 		"client dial bind address": func(r *ReportV3) { r.Networking.ClientDials[0].Host = "192.0.2.55" },
+		"unspecified observed match": func(r *ReportV3) {
+			r.Networking.ObservedListeners.Data = "0.0.0.0:2222"
+			r.Networking.ObservedListeners.MatchBinds = true
+		},
+		"match_binds false when equal": func(r *ReportV3) { r.Networking.ObservedListeners.MatchBinds = false },
+		"invite mismatch flag": func(r *ReportV3) {
+			r.Networking.InviteDials.Data.Host = "192.0.2.9"
+			r.Networking.InviteDialsMatchPublished = true
+		},
+		"dirty tree claimed clean": func(r *ReportV3) {
+			r.CleanTreeProof = "dirty-abcd"
+			r.Networking.CleanTree = true
+		},
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -266,6 +279,36 @@ func TestGCENetworkingCellRejectsDNATAndBindEqualsDial(t *testing.T) {
 	if err := ValidateReportV3(checklist, report); err == nil {
 		t.Fatal("accepted GCE cell with lo alias")
 	}
+	report = sampleNetworkingReportV3(checklist, "gce-one-to-one-nat")
+	report.Networking.ObservedListeners.Data = "0.0.0.0:2222"
+	report.Networking.ObservedListeners.MatchBinds = true
+	if err := ValidateReportV3(checklist, report); err == nil {
+		t.Fatal("accepted GCE cell with unspecified observed listener")
+	}
+	report = sampleNetworkingReportV3(checklist, "gce-one-to-one-nat")
+	report.Networking.InviteDials.Data.Host = report.Networking.Binds.Data.Address
+	report.Networking.InviteDialsMatchPublished = false
+	if err := ValidateReportV3(checklist, report); err == nil {
+		t.Fatal("accepted GCE cell whose invite dials are the bind")
+	}
+}
+
+func TestCleanTreeProofRejectsDirtyToken(t *testing.T) {
+	t.Parallel()
+
+	checklist, err := LoadChecklistV3(DefaultChecklistV3Path(repositoryRoot(t)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := sampleReportV3(checklist)
+	report.CleanTreeProof = "dirty-ffff"
+	report.Networking.CleanTree = false
+	if err := ValidateReportV3(checklist, report); err != nil {
+		t.Fatalf("dirty proof with clean_tree false should validate: %v", err)
+	}
+	if CompleteV3(report) {
+		t.Fatal("dirty tree completed v3 evidence")
+	}
 }
 
 func TestPassthroughNLBOptionalAndProxyForbidden(t *testing.T) {
@@ -335,6 +378,7 @@ func TestV3SchemaForbidsAdditionalPropertiesAndProxyModels(t *testing.T) {
 		`"enrollment_resolved_addr"`,
 		`"data_resolved_addr"`,
 		`"published_endpoint_generation"`,
+		`"invite_dials"`,
 		`"operator_firewall_assumptions"`,
 		`"operator_load_balancer_assumptions"`,
 		`"passthrough_nlb"`,
@@ -430,6 +474,8 @@ func sampleNetworkingReportV3(checklist ChecklistV3, cellID string) ReportV3 {
 		report.Networking.DataResolvedAddr = "2001:db8::2"
 		report.Networking.EnrollmentResolvedAddr = "2001:db8::2"
 	}
+	report.Networking.InviteDials = report.Networking.Dials
+	report.Networking.InviteDialsMatchPublished = true
 	return report
 }
 
@@ -497,6 +543,10 @@ func sampleDirectNetworking() NetworkingEvidence {
 			Enrollment: BindEvidence{Address: "203.0.113.10", Port: 29722},
 		},
 		Dials: ServiceDialEvidence{
+			Data:       DialEvidence{Host: "203.0.113.10", Port: 2222},
+			Enrollment: DialEvidence{Host: "203.0.113.10", Port: 29722},
+		},
+		InviteDials: ServiceDialEvidence{
 			Data:       DialEvidence{Host: "203.0.113.10", Port: 2222},
 			Enrollment: DialEvidence{Host: "203.0.113.10", Port: 29722},
 		},

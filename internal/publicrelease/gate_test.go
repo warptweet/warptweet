@@ -241,6 +241,8 @@ func completeV3IndexReports(checklist releaseevidence.ChecklistV3) []releaseevid
 			report.Networking.ClientDials[1].Host = "enroll.example.com"
 			report.Networking.ClientDials[1].Port = 443
 		}
+		report.Networking.InviteDials = report.Networking.Dials
+		report.Networking.InviteDialsMatchPublished = true
 		reports = append(reports, report)
 	}
 	return reports
@@ -308,6 +310,10 @@ func sampleDirectNetworking(cellID string) releaseevidence.NetworkingEvidence {
 			Enrollment: releaseevidence.BindEvidence{Address: "203.0.113.10", Port: 29722},
 		},
 		Dials: releaseevidence.ServiceDialEvidence{
+			Data:       releaseevidence.DialEvidence{Host: "203.0.113.10", Port: 2222},
+			Enrollment: releaseevidence.DialEvidence{Host: "203.0.113.10", Port: 29722},
+		},
+		InviteDials: releaseevidence.ServiceDialEvidence{
 			Data:       releaseevidence.DialEvidence{Host: "203.0.113.10", Port: 2222},
 			Enrollment: releaseevidence.DialEvidence{Host: "203.0.113.10", Port: 29722},
 		},

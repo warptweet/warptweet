@@ -72,7 +72,10 @@ interop_emit_evidence() {
         return 2
     fi
 
-    interop_fill_networking_defaults || true
+    if ! interop_fill_networking_defaults; then
+        interop_log "networking observations failed closed; evidence not written"
+        return 2
+    fi
 
     _draft="$WARPTWEET_INTEROP_WORK/evidence-draft.json"
     rm -f "$_draft"
@@ -98,6 +101,14 @@ def env(name, default=""):
 
 def as_bool(name, default="false"):
     return env(name, default).lower() == "true"
+
+def require_bool(name):
+    value = env(name).lower()
+    if value == "true":
+        return True
+    if value == "false":
+        return False
+    raise SystemExit("missing required observation %s" % name)
 
 def hostport(value, default_port):
     value = value.strip()
@@ -131,9 +142,23 @@ model = env("WARPTWEET_INTEROP_PUBLICATION_MODEL")
 if not model:
     model = "one_to_one_nat" if advertise and advertise != listen else "direct"
 generation = int(env("WARPTWEET_INTEROP_PUBLISHED_ENDPOINT_GENERATION", "1") or "1")
-observed_data = env("WARPTWEET_INTEROP_OBSERVED_DATA_LISTENER") or f"{bind_host}:{bind_port}"
-observed_enroll = env("WARPTWEET_INTEROP_OBSERVED_ENROLL_LISTENER") or f"{enroll_bind_host}:{enroll_bind_port}"
-match_binds = as_bool("WARPTWEET_INTEROP_LISTENERS_MATCH_BINDS", "true")
+observed_data = env("WARPTWEET_INTEROP_OBSERVED_DATA_LISTENER")
+observed_enroll = env("WARPTWEET_INTEROP_OBSERVED_ENROLL_LISTENER")
+if not observed_data or not observed_enroll:
+    raise SystemExit("observed listeners were not captured from the guest")
+match_binds = require_bool("WARPTWEET_INTEROP_LISTENERS_MATCH_BINDS")
+test_dnat_absent = require_bool("WARPTWEET_INTEROP_TEST_DNAT_ABSENT")
+loopback_alias_absent = require_bool("WARPTWEET_INTEROP_LOOPBACK_ALIAS_ABSENT")
+invite_match = require_bool("WARPTWEET_INTEROP_INVITE_DIALS_MATCH")
+invite_data_host = env("WARPTWEET_INTEROP_INVITE_DATA_HOST")
+invite_enroll_host = env("WARPTWEET_INTEROP_INVITE_ENROLL_HOST")
+try:
+    invite_data_port = int(env("WARPTWEET_INTEROP_INVITE_DATA_PORT"))
+    invite_enroll_port = int(env("WARPTWEET_INTEROP_INVITE_ENROLL_PORT"))
+except ValueError:
+    raise SystemExit("invite dials were not captured") from None
+if not invite_data_host or not invite_enroll_host:
+    raise SystemExit("invite dials were not captured")
 clean_proof = env("WARPTWEET_CLEAN_TREE_PROOF", "not_recorded")
 clean_tree = clean_proof in ("clean", "git-status-empty")
 package_only = as_bool("WARPTWEET_INTEROP_PACKAGE_TO_PACKAGE", "false")
@@ -180,7 +205,11 @@ document = {
         "publication_model": model,
         "published_endpoint_generation": generation,
         "invite_schema_version": 3,
-        "invite_dials_match_published": as_bool("WARPTWEET_INTEROP_INVITE_DIALS_MATCH", "true"),
+        "invite_dials_match_published": invite_match,
+        "invite_dials": {
+            "data": {"host": invite_data_host, "port": invite_data_port},
+            "enrollment": {"host": invite_enroll_host, "port": invite_enroll_port},
+        },
         "binds": {
             "data": {"address": bind_host, "port": bind_port},
             "enrollment": {"address": enroll_bind_host, "port": enroll_bind_port},
@@ -194,8 +223,8 @@ document = {
             "enrollment": observed_enroll,
             "match_binds": match_binds,
         },
-        "test_dnat_absent": as_bool("WARPTWEET_INTEROP_TEST_DNAT_ABSENT", "true"),
-        "loopback_alias_absent": as_bool("WARPTWEET_INTEROP_LOOPBACK_ALIAS_ABSENT", "true"),
+        "test_dnat_absent": test_dnat_absent,
+        "loopback_alias_absent": loopback_alias_absent,
         "client_dials": [
             {"leg": "data", "host": data_host, "port": data_port, "status": dial_status},
             {"leg": "enrollment", "host": enroll_dial_host, "port": enroll_dial_port, "status": dial_status},
@@ -252,7 +281,44 @@ PY
     return 0
 }
 
+interop_classify_gce_cell() {
+    _adv=${WARPTWEET_INTEROP_SERVER_ADVERTISE:-}
+    _listen=${WARPTWEET_INTEROP_SERVER_LISTEN:-}
+    _client=${WARPTWEET_CLIENT_ARTIFACT_PROFILE_ID:-}
+    _server=${WARPTWEET_SERVER_ARTIFACT_PROFILE_ID:-}
+    if [ -z "$_adv" ] || [ "$_adv" = "$_listen" ]; then
+        return 0
+    fi
+    if [ "$_client" != "darwin-arm64" ] || [ "$_server" != "linux-arm64" ]; then
+        return 0
+    fi
+    if ! python3 -c 'import ipaddress,sys; ipaddress.ip_address(sys.argv[1])' "$(interop_hostport_host "$_adv")" >/dev/null 2>&1; then
+        return 0
+    fi
+    _classes=${WARPTWEET_INTEROP_CELL_CLASSES:-}
+    if [ -z "$_classes" ]; then
+        WARPTWEET_INTEROP_CELL_CLASSES=matrix,networking
+    else
+        case ",$_classes," in
+            *,networking,*) ;;
+            *) WARPTWEET_INTEROP_CELL_CLASSES="${_classes},networking" ;;
+        esac
+        case ",$WARPTWEET_INTEROP_CELL_CLASSES," in
+            *,matrix,*) ;;
+            *) WARPTWEET_INTEROP_CELL_CLASSES="matrix,$WARPTWEET_INTEROP_CELL_CLASSES" ;;
+        esac
+    fi
+    if [ -z "${WARPTWEET_INTEROP_NETWORKING_CELL_ID:-}" ]; then
+        WARPTWEET_INTEROP_NETWORKING_CELL_ID=gce-one-to-one-nat
+    fi
+    if [ -z "${WARPTWEET_INTEROP_PUBLICATION_MODEL:-}" ]; then
+        WARPTWEET_INTEROP_PUBLICATION_MODEL=one_to_one_nat
+    fi
+    export WARPTWEET_INTEROP_CELL_CLASSES WARPTWEET_INTEROP_NETWORKING_CELL_ID WARPTWEET_INTEROP_PUBLICATION_MODEL
+}
+
 interop_fill_networking_defaults() {
+    interop_classify_gce_cell
     if [ -z "${WARPTWEET_INTEROP_CLIENT_DIAL_STATUS:-}" ]; then
         if grep -q '"id":"invite-enroll-single-use".*"status":"pass"' "$WARPTWEET_INTEROP_RESULTS_FILE" 2>/dev/null; then
             WARPTWEET_INTEROP_CLIENT_DIAL_STATUS=pass
@@ -265,41 +331,258 @@ interop_fill_networking_defaults() {
         fi
         export WARPTWEET_INTEROP_CLIENT_DIAL_STATUS WARPTWEET_INTEROP_SPKI_STATUS WARPTWEET_INTEROP_HOST_KEY_STATUS
     fi
+    if [ -z "${WARPTWEET_INTEROP_SERVER_LISTEN:-}" ]; then
+        interop_log "LISTEN bind is required for networking observations"
+        return 1
+    fi
+    _data_port=$(interop_hostport_port "$WARPTWEET_INTEROP_SERVER_LISTEN")
+    _enroll_port=29722
+    if [ -n "${WARPTWEET_INTEROP_ENROLL_LISTEN:-}" ]; then
+        _enroll_port=$(interop_hostport_port "$WARPTWEET_INTEROP_ENROLL_LISTEN")
+    fi
     if [ -z "${WARPTWEET_INTEROP_PUBLISHED_ENDPOINT_GENERATION:-}" ]; then
-        _gen=$(interop_ssh "sudo python3 -c \"import json; print(json.load(open('/etc/warptweet/server.wt')).get('network',{}).get('published_endpoint_generation',1))\"" 2>/dev/null || true)
+        _gen=$(interop_ssh "sudo python3 -c \"import json; print(json.load(open('/etc/warptweet/server.wt')).get('network',{}).get('published_endpoint_generation',1))\"" ) || _gen=
         case "$_gen" in
             ''|*[!0-9]*) _gen=1 ;;
         esac
         WARPTWEET_INTEROP_PUBLISHED_ENDPOINT_GENERATION=$_gen
         export WARPTWEET_INTEROP_PUBLISHED_ENDPOINT_GENERATION
     fi
-    if [ -z "${WARPTWEET_INTEROP_TEST_DNAT_ABSENT:-}" ] || [ -z "${WARPTWEET_INTEROP_LOOPBACK_ALIAS_ABSENT:-}" ]; then
-        _probe=$(interop_ssh "sudo sh -s" <<'REMOTE' 2>/dev/null || true
-set -eu
-if command -v iptables >/dev/null 2>&1; then
-    iptables -t nat -S 2>/dev/null | grep -E 'DNAT|REDIRECT' && echo HAS_DNAT || echo NO_DNAT
-else
-    echo NO_DNAT
-fi
-ip -o addr show lo 2>/dev/null | awk '{print $4}'
+    if ! _probe=$(
+        interop_ssh "sudo env WT_DATA_PORT=${_data_port} WT_ENROLL_PORT=${_enroll_port} python3 -" <<'REMOTE'
+import os, re, shutil, subprocess
+
+def run(cmd):
+    try:
+        return subprocess.check_output(cmd, stderr=subprocess.DEVNULL, text=True)
+    except Exception:
+        return None
+
+def iptables_status():
+    if not shutil.which("iptables"):
+        return "MISSING"
+    out = run(["iptables", "-t", "nat", "-S"])
+    if out is None:
+        return "MISSING"
+    if re.search(r"\b(DNAT|REDIRECT|NETMAP)\b", out):
+        return "HAS_DNAT"
+    return "NO_DNAT"
+
+def nft_status():
+    if not shutil.which("nft"):
+        return "MISSING"
+    out = run(["nft", "list", "ruleset"])
+    if out is None:
+        return "MISSING"
+    if re.search(r"\b(dnat|redirect)\b", out, re.I):
+        return "HAS_DNAT"
+    return "NO_DNAT"
+
+def lo_addrs():
+    out = run(["ip", "-o", "addr", "show", "lo"]) or ""
+    return re.findall(r"inet6? ([0-9a-fA-F:.]+)/", out)
+
+def parse_local(local):
+    local = local.strip()
+    if local.startswith("["):
+        host = local[1:local.index("]")]
+        port = int(local.rsplit(":", 1)[-1])
+        return host, port
+    host, port_s = local.rsplit(":", 1)
+    return host, int(port_s)
+
+def unspecified(host):
+    return host in ("0.0.0.0", "*", "::", "::0")
+
+def format_listener(host, port):
+    if ":" in host:
+        return "[%s]:%s" % (host, port)
+    return "%s:%s" % (host, port)
+
+def listener_for(port):
+    out = run(["ss", "-lntH"]) or run(["ss", "-lnt"]) or run(["netstat", "-lnt"]) or ""
+    candidates = []
+    for line in out.splitlines():
+        for part in line.split():
+            try:
+                host, parsed_port = parse_local(part)
+            except Exception:
+                continue
+            if parsed_port == port:
+                candidates.append((host, parsed_port))
+    if not candidates:
+        return ""
+    for host, parsed_port in candidates:
+        if not unspecified(host):
+            return format_listener(host, parsed_port)
+    host, parsed_port = candidates[0]
+    return format_listener(host, parsed_port)
+
+print("IPTABLES=" + iptables_status())
+print("NFT=" + nft_status())
+print("LO=" + " ".join(lo_addrs()))
+print("DATA_LISTENER=" + listener_for(int(os.environ["WT_DATA_PORT"])))
+print("ENROLL_LISTENER=" + listener_for(int(os.environ["WT_ENROLL_PORT"])))
 REMOTE
-        )
-        if printf '%s\n' "$_probe" | grep -q HAS_DNAT; then
-            WARPTWEET_INTEROP_TEST_DNAT_ABSENT=false
-        else
-            WARPTWEET_INTEROP_TEST_DNAT_ABSENT=${WARPTWEET_INTEROP_TEST_DNAT_ABSENT:-true}
-        fi
-        _adv=${WARPTWEET_INTEROP_SERVER_ADVERTISE:-}
-        if [ -n "$_adv" ]; then
-            _adv_host=$(interop_hostport_host "$_adv")
-            if printf '%s\n' "$_probe" | grep -F "$_adv_host" >/dev/null 2>&1; then
-                WARPTWEET_INTEROP_LOOPBACK_ALIAS_ABSENT=false
-            else
-                WARPTWEET_INTEROP_LOOPBACK_ALIAS_ABSENT=${WARPTWEET_INTEROP_LOOPBACK_ALIAS_ABSENT:-true}
-            fi
-        else
-            WARPTWEET_INTEROP_LOOPBACK_ALIAS_ABSENT=${WARPTWEET_INTEROP_LOOPBACK_ALIAS_ABSENT:-true}
-        fi
-        export WARPTWEET_INTEROP_TEST_DNAT_ABSENT WARPTWEET_INTEROP_LOOPBACK_ALIAS_ABSENT
+    ); then
+        interop_log "guest networking probe failed"
+        return 1
     fi
+    _iptables=$(printf '%s\n' "$_probe" | sed -n 's/^IPTABLES=//p' | tail -n 1)
+    _nft=$(printf '%s\n' "$_probe" | sed -n 's/^NFT=//p' | tail -n 1)
+    _lo=$(printf '%s\n' "$_probe" | sed -n 's/^LO=//p' | tail -n 1)
+    _obs_data=$(printf '%s\n' "$_probe" | sed -n 's/^DATA_LISTENER=//p' | tail -n 1)
+    _obs_enroll=$(printf '%s\n' "$_probe" | sed -n 's/^ENROLL_LISTENER=//p' | tail -n 1)
+    if [ -z "$_iptables" ] || [ -z "$_nft" ]; then
+        interop_log "guest DNAT probe did not print iptables and nft results"
+        return 1
+    fi
+    if [ "$_iptables" = "NO_DNAT" ] && [ "$_nft" = "NO_DNAT" ]; then
+        WARPTWEET_INTEROP_TEST_DNAT_ABSENT=true
+    else
+        WARPTWEET_INTEROP_TEST_DNAT_ABSENT=false
+    fi
+    if ! printf '%s\n' "$_probe" | grep -q '^LO='; then
+        interop_log "guest loopback addresses were not observed"
+        return 1
+    fi
+    if [ -z "$_lo" ]; then
+        interop_log "guest loopback address list was empty"
+        return 1
+    fi
+    if [ -z "$_obs_data" ] || [ -z "$_obs_enroll" ]; then
+        interop_log "guest listeners were not observed on bind ports"
+        return 1
+    fi
+    WARPTWEET_INTEROP_OBSERVED_DATA_LISTENER=$_obs_data
+    WARPTWEET_INTEROP_OBSERVED_ENROLL_LISTENER=$_obs_enroll
+    _bind_host=$(interop_hostport_host "$WARPTWEET_INTEROP_SERVER_LISTEN")
+    _bind_port=$(interop_hostport_port "$WARPTWEET_INTEROP_SERVER_LISTEN")
+    if [ -n "${WARPTWEET_INTEROP_ENROLL_LISTEN:-}" ]; then
+        _enroll_bind_host=$(interop_hostport_host "$WARPTWEET_INTEROP_ENROLL_LISTEN")
+        _enroll_bind_port=$(interop_hostport_port "$WARPTWEET_INTEROP_ENROLL_LISTEN")
+    else
+        _enroll_bind_host=$_bind_host
+        _enroll_bind_port=29722
+    fi
+    WARPTWEET_INTEROP_LISTENERS_MATCH_BINDS=$(
+        python3 - "$_obs_data" "$_bind_host" "$_bind_port" "$_obs_enroll" "$_enroll_bind_host" "$_enroll_bind_port" <<'PY'
+import ipaddress, sys
+
+def canon(value, host, port):
+    def parse(text):
+        text = text.strip()
+        if text.startswith("["):
+            h = text[1:text.index("]")]
+            p = int(text.rsplit(":", 1)[-1])
+            return h, p
+        h, p = text.rsplit(":", 1)
+        return h, int(p)
+    try:
+        if value:
+            host, port = parse(value)
+        addr = ipaddress.ip_address(host)
+        if getattr(addr, "ipv4_mapped", None):
+            addr = addr.ipv4_mapped
+        if addr.is_unspecified:
+            return None
+        return "%s/%s" % (addr.compressed, port)
+    except Exception:
+        return None
+
+obs_data, bind_host, bind_port, obs_enroll, enroll_host, enroll_port = sys.argv[1:7]
+ok = canon(obs_data, "", 0) == canon("", bind_host, int(bind_port)) and canon(obs_enroll, "", 0) == canon("", enroll_host, int(enroll_port))
+print("true" if ok else "false")
+PY
+    )
+    _alias_host=$(interop_hostport_host "$(interop_published_data_dial)")
+    WARPTWEET_INTEROP_LOOPBACK_ALIAS_ABSENT=$(
+        python3 - "$_lo" "$_alias_host" <<'PY'
+import ipaddress, sys
+raw, target = sys.argv[1], sys.argv[2]
+try:
+    want = ipaddress.ip_address(target)
+    if getattr(want, "ipv4_mapped", None):
+        want = want.ipv4_mapped
+except Exception:
+    print("false")
+    raise SystemExit
+if want.is_loopback:
+    print("true")
+    raise SystemExit
+for item in raw.split():
+    try:
+        addr = ipaddress.ip_address(item)
+        if getattr(addr, "ipv4_mapped", None):
+            addr = addr.ipv4_mapped
+    except Exception:
+        continue
+    if addr == want:
+        print("false")
+        raise SystemExit
+print("true")
+PY
+    )
+    if [ -z "${WARPTWEET_INTEROP_INVITE:-}" ] || [ ! -s "$WARPTWEET_INTEROP_INVITE" ]; then
+        interop_log "invite file is required to compare published dials"
+        return 1
+    fi
+    _invite_fields=$(
+        python3 - "$WARPTWEET_INTEROP_INVITE" "$(interop_published_data_dial)" "$(interop_published_enroll_dial)" <<'PY'
+import ipaddress, json, sys
+
+def parse_hostport(value):
+    value = value.strip()
+    if value.startswith("["):
+        return value[1:value.index("]")], int(value.rsplit(":", 1)[-1])
+    host, port = value.rsplit(":", 1)
+    return host, int(port)
+
+def canon_host(host):
+    try:
+        addr = ipaddress.ip_address(host)
+        if getattr(addr, "ipv4_mapped", None):
+            addr = addr.ipv4_mapped
+        return addr.compressed
+    except Exception:
+        return host.strip().lower()
+
+invite = json.load(open(sys.argv[1], encoding="utf-8"))
+if invite.get("schema_version") != 3:
+    raise SystemExit("invite schema is not 3")
+data = invite["data"]
+enroll = invite["enrollment"]
+pub_data_host, pub_data_port = parse_hostport(sys.argv[2])
+pub_enroll_host, pub_enroll_port = parse_hostport(sys.argv[3])
+match = (
+    canon_host(data["host"]) == canon_host(pub_data_host)
+    and int(data["port"]) == pub_data_port
+    and canon_host(enroll["host"]) == canon_host(pub_enroll_host)
+    and int(enroll["port"]) == pub_enroll_port
+)
+print(data["host"])
+print(int(data["port"]))
+print(enroll["host"])
+print(int(enroll["port"]))
+print("true" if match else "false")
+PY
+    ) || {
+        interop_log "invite schema-3 dials could not be read"
+        return 1
+    }
+    WARPTWEET_INTEROP_INVITE_DATA_HOST=$(printf '%s\n' "$_invite_fields" | sed -n '1p')
+    WARPTWEET_INTEROP_INVITE_DATA_PORT=$(printf '%s\n' "$_invite_fields" | sed -n '2p')
+    WARPTWEET_INTEROP_INVITE_ENROLL_HOST=$(printf '%s\n' "$_invite_fields" | sed -n '3p')
+    WARPTWEET_INTEROP_INVITE_ENROLL_PORT=$(printf '%s\n' "$_invite_fields" | sed -n '4p')
+    WARPTWEET_INTEROP_INVITE_DIALS_MATCH=$(printf '%s\n' "$_invite_fields" | sed -n '5p')
+    if [ -z "$WARPTWEET_INTEROP_INVITE_DATA_HOST" ] || [ -z "$WARPTWEET_INTEROP_INVITE_DIALS_MATCH" ]; then
+        interop_log "invite dial comparison produced no observation"
+        return 1
+    fi
+    export WARPTWEET_INTEROP_TEST_DNAT_ABSENT WARPTWEET_INTEROP_LOOPBACK_ALIAS_ABSENT
+    export WARPTWEET_INTEROP_OBSERVED_DATA_LISTENER WARPTWEET_INTEROP_OBSERVED_ENROLL_LISTENER
+    export WARPTWEET_INTEROP_LISTENERS_MATCH_BINDS
+    export WARPTWEET_INTEROP_INVITE_DATA_HOST WARPTWEET_INTEROP_INVITE_DATA_PORT
+    export WARPTWEET_INTEROP_INVITE_ENROLL_HOST WARPTWEET_INTEROP_INVITE_ENROLL_PORT
+    export WARPTWEET_INTEROP_INVITE_DIALS_MATCH
 }

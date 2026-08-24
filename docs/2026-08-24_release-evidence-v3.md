@@ -43,11 +43,16 @@ matrix by itself.
 
 ## Networking fields
 
-Every v3 report carries binds, dials, observed listeners, absence of test
-DNAT and loopback aliases, client dial results with error class, SPKI and
-host-key results, `published_endpoint_generation`, `enrollment_resolved_addr`,
-`data_resolved_addr`, operator firewall and load-balancer assumptions,
-package-only, and clean tree.
+Every v3 report carries binds, dials, invite dials, observed listeners,
+absence of test DNAT and loopback aliases, client dial results with error
+class, SPKI and host-key results, `published_endpoint_generation`,
+`enrollment_resolved_addr`, `data_resolved_addr`, operator firewall and
+load-balancer assumptions, package-only, and clean tree.
+
+`match_binds` is true only when observed listener `address:port` values
+canonicalize to the recorded binds. `invite_dials_match_published` is true
+only when the minted invite locators equal the published dials.
+`clean_tree` is true only for `clean` / `git-status-empty` proofs.
 
 Client error classes stay on the client and in evidence:
 `dns_resolution`, `tcp_connect`, `tls_negotiate`, `tls_spki`,
@@ -59,6 +64,11 @@ Client error classes stay on the client and in evidence:
 - `WARPTWEET_INTEROP_SERVER_ADVERTISE` is unset by default.
 - `--advertise` is passed only when advertise is set.
 - Mac TCP uses published dials.
+- Guest observations fail closed: iptables and nft must both print `NO_DNAT`,
+  loopback must be listed, and `ss`/`netstat` listeners must be captured.
+  `match_binds` and `test_dnat_absent` are never defaulted to true.
+- darwin-arm64 × linux-arm64 with IP `ADVERTISE` ≠ `LISTEN` is classified as
+  the `gce-one-to-one-nat` networking cell.
 - There is no in-tree `wt-gcp-bind` DNAT unit.
 
 ## Website gate

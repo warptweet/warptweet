@@ -207,6 +207,7 @@
         "published_endpoint_generation",
         "invite_schema_version",
         "invite_dials_match_published",
+        "invite_dials",
         "binds",
         "dials",
         "observed_listeners",
@@ -246,6 +247,15 @@
         },
         "invite_dials_match_published": {
           "type": "boolean"
+        },
+        "invite_dials": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["data", "enrollment"],
+          "properties": {
+            "data": { "$ref": "#/$defs/dialEndpoint" },
+            "enrollment": { "$ref": "#/$defs/dialEndpoint" }
+          }
         },
         "binds": {
           "type": "object",

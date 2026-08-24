@@ -214,4 +214,27 @@ func TestInteropListenIsBindAdvertiseIsExplicit(t *testing.T) {
 		!strings.Contains(common, "never default ADVERTISE=LISTEN") {
 		t.Error("common.sh must state that ADVERTISE is never defaulted to LISTEN")
 	}
+	evidence := string(readFile(t, filepath.Join(root, "scripts", "interop", "lib", "evidence.sh")))
+	for _, forbidden := range []string{
+		`as_bool("WARPTWEET_INTEROP_LISTENERS_MATCH_BINDS", "true")`,
+		`as_bool("WARPTWEET_INTEROP_TEST_DNAT_ABSENT", "true")`,
+		`as_bool("WARPTWEET_INTEROP_LOOPBACK_ALIAS_ABSENT", "true")`,
+		`as_bool("WARPTWEET_INTEROP_INVITE_DIALS_MATCH", "true")`,
+		"interop_fill_networking_defaults || true",
+	} {
+		if strings.Contains(evidence, forbidden) {
+			t.Errorf("evidence.sh defaults an observation fail-open: %s", forbidden)
+		}
+	}
+	for _, required := range []string{
+		"gce-one-to-one-nat",
+		`["nft", "list", "ruleset"]`,
+		"IPTABLES=",
+		"require_bool",
+		"invite schema is not 3",
+	} {
+		if !strings.Contains(evidence, required) {
+			t.Errorf("evidence.sh omits %q", required)
+		}
+	}
 }

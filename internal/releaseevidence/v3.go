@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -157,6 +158,7 @@ type NetworkingEvidence struct {
 	PublishedEndpointGeneration     uint64                    `json:"published_endpoint_generation"`
 	InviteSchemaVersion             int                       `json:"invite_schema_version"`
 	InviteDialsMatchPublished       bool                      `json:"invite_dials_match_published"`
+	InviteDials                     ServiceDialEvidence       `json:"invite_dials"`
 	Binds                           ServiceBindEvidence       `json:"binds"`
 	Dials                           ServiceDialEvidence       `json:"dials"`
 	ObservedListeners               ObservedListenersEvidence `json:"observed_listeners"`
@@ -437,6 +439,9 @@ func ValidateReportV3(checklist ChecklistV3, report ReportV3) error {
 	if report.CleanTreeProof == "not_recorded" {
 		return fmt.Errorf("clean_tree_proof must be recorded")
 	}
+	if err := validateCleanTree(report); err != nil {
+		return err
+	}
 	if report.RouteCount < 0 {
 		return fmt.Errorf("route_count must be non-negative")
 	}
@@ -576,6 +581,12 @@ func validateNetworkingEvidence(checklist ChecklistV3, report ReportV3) error {
 	if err := validateDialEvidence("enrollment", net.Dials.Enrollment); err != nil {
 		return err
 	}
+	if err := validateDialEvidence("invite data", net.InviteDials.Data); err != nil {
+		return err
+	}
+	if err := validateDialEvidence("invite enrollment", net.InviteDials.Enrollment); err != nil {
+		return err
+	}
 	if bindKey(net.Binds.Data) == bindKey(net.Binds.Enrollment) {
 		return fmt.Errorf("data and enrollment binds must not share the same address:port")
 	}
@@ -584,6 +595,20 @@ func validateNetworkingEvidence(checklist ChecklistV3, report ReportV3) error {
 	}
 	if strings.TrimSpace(net.ObservedListeners.Data) == "" || strings.TrimSpace(net.ObservedListeners.Enrollment) == "" {
 		return fmt.Errorf("observed listeners are required")
+	}
+	listenersMatch := observedListenersMatchBinds(net)
+	if net.ObservedListeners.MatchBinds != listenersMatch {
+		if net.ObservedListeners.MatchBinds {
+			return fmt.Errorf("observed listeners do not match binds")
+		}
+		return fmt.Errorf("match_binds is false but observed listeners match binds")
+	}
+	inviteMatch := inviteDialsMatchPublished(net)
+	if net.InviteDialsMatchPublished != inviteMatch {
+		if net.InviteDialsMatchPublished {
+			return fmt.Errorf("invite dials do not match published dials")
+		}
+		return fmt.Errorf("invite_dials_match_published is false but invite dials match published dials")
 	}
 	if err := validateClientDials(net); err != nil {
 		return err
@@ -614,7 +639,7 @@ func validateNetworkingEvidence(checklist ChecklistV3, report ReportV3) error {
 		if cell.RequiresBindNeDataDial && bindEqualsDial(net.Binds.Data, net.Dials.Data) {
 			return fmt.Errorf("networking cell %q requires data bind ≠ data dial", cell.ID)
 		}
-		if cell.RequiresGuestListenersMatchBind && !net.ObservedListeners.MatchBinds {
+		if cell.RequiresGuestListenersMatchBind && !listenersMatch {
 			return fmt.Errorf("networking cell %q requires guest listeners to match binds", cell.ID)
 		}
 		if cell.ForbidsTestDNAT && !net.TestDNATAbsent {
@@ -625,6 +650,9 @@ func validateNetworkingEvidence(checklist ChecklistV3, report ReportV3) error {
 		}
 		if cell.RequiresInviteSchema != 0 && net.InviteSchemaVersion != cell.RequiresInviteSchema {
 			return fmt.Errorf("networking cell %q requires invite schema %d", cell.ID, cell.RequiresInviteSchema)
+		}
+		if cell.ID == networkingCellGCEOneToOne && !inviteMatch {
+			return fmt.Errorf("networking cell %q requires invite schema-3 dials to match published dials", cell.ID)
 		}
 	} else if net.CellID != "" {
 		if _, ok := networkingCellByID(checklist, net.CellID); !ok {
@@ -799,6 +827,71 @@ func bindEqualsDial(bind BindEvidence, dial DialEvidence) bool {
 	return bindKey(bind) == dialKey(dial)
 }
 
+func observedListenersMatchBinds(net NetworkingEvidence) bool {
+	return listenerMatchesBind(net.ObservedListeners.Data, net.Binds.Data) &&
+		listenerMatchesBind(net.ObservedListeners.Enrollment, net.Binds.Enrollment)
+}
+
+func inviteDialsMatchPublished(net NetworkingEvidence) bool {
+	return dialKey(net.InviteDials.Data) == dialKey(net.Dials.Data) &&
+		dialKey(net.InviteDials.Enrollment) == dialKey(net.Dials.Enrollment)
+}
+
+func listenerMatchesBind(observed string, bind BindEvidence) bool {
+	parsed, err := parseListener(observed)
+	if err != nil {
+		return false
+	}
+	return bindKey(parsed) == bindKey(bind)
+}
+
+func parseListener(value string) (BindEvidence, error) {
+	value = strings.TrimSpace(value)
+	var host, portText string
+	if strings.HasPrefix(value, "[") {
+		end := strings.Index(value, "]")
+		if end < 0 || end+1 >= len(value) || value[end+1] != ':' {
+			return BindEvidence{}, fmt.Errorf("invalid IPv6 listener %q", value)
+		}
+		host = value[1:end]
+		portText = value[end+2:]
+	} else {
+		index := strings.LastIndex(value, ":")
+		if index <= 0 || index == len(value)-1 {
+			return BindEvidence{}, fmt.Errorf("invalid listener %q", value)
+		}
+		host = value[:index]
+		portText = value[index+1:]
+	}
+	port, err := strconv.ParseUint(portText, 10, 16)
+	if err != nil || port < 1 {
+		return BindEvidence{}, fmt.Errorf("invalid listener port %q", value)
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return BindEvidence{}, fmt.Errorf("listener host must be a numeric IP: %q", value)
+	}
+	if addr.IsUnspecified() {
+		return BindEvidence{}, fmt.Errorf("unspecified listener %q does not match a concrete bind", value)
+	}
+	return BindEvidence{Address: addr.Unmap().String(), Port: uint16(port)}, nil
+}
+
+func cleanTreeProofAccepted(proof string) bool {
+	return proof == "clean" || proof == "git-status-empty"
+}
+
+func validateCleanTree(report ReportV3) error {
+	accepted := cleanTreeProofAccepted(report.CleanTreeProof)
+	if report.Networking.CleanTree && !accepted {
+		return fmt.Errorf("clean_tree requires clean_tree_proof of clean or git-status-empty")
+	}
+	if accepted && !report.Networking.CleanTree {
+		return fmt.Errorf("clean_tree_proof %q requires networking.clean_tree", report.CleanTreeProof)
+	}
+	return nil
+}
+
 func isIPLiteral(host string) bool {
 	_, err := netip.ParseAddr(host)
 	return err == nil
@@ -816,7 +909,10 @@ func CompleteV3(report ReportV3) bool {
 	}
 	return report.PackageToPackage && !report.SourceTreeSubstitution &&
 		report.Networking.PackageOnly && report.Networking.CleanTree &&
-		report.Networking.TestDNATAbsent && report.Networking.LoopbackAliasAbsent
+		cleanTreeProofAccepted(report.CleanTreeProof) &&
+		report.Networking.TestDNATAbsent && report.Networking.LoopbackAliasAbsent &&
+		observedListenersMatchBinds(report.Networking) &&
+		inviteDialsMatchPublished(report.Networking)
 }
 
 // CompleteNetworking reports whether topology evidence for a networking cell passed.
@@ -825,10 +921,11 @@ func CompleteNetworking(report ReportV3) bool {
 	if !report.PackageToPackage || report.SourceTreeSubstitution {
 		return false
 	}
-	if !net.PackageOnly || !net.CleanTree || !net.TestDNATAbsent || !net.LoopbackAliasAbsent {
+	if !net.PackageOnly || !net.CleanTree || !cleanTreeProofAccepted(report.CleanTreeProof) ||
+		!net.TestDNATAbsent || !net.LoopbackAliasAbsent {
 		return false
 	}
-	if !net.InviteDialsMatchPublished || !net.ObservedListeners.MatchBinds {
+	if !inviteDialsMatchPublished(net) || !observedListenersMatchBinds(net) {
 		return false
 	}
 	if net.SPKIResult.Status != "pass" || net.HostKeyResult.Status != "pass" {

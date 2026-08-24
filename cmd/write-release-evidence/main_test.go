@@ -106,6 +106,10 @@ func sampleFromChecklist(checklist releaseevidence.ChecklistV3) releaseevidence.
 				Data:       releaseevidence.DialEvidence{Host: "203.0.113.10", Port: 2222},
 				Enrollment: releaseevidence.DialEvidence{Host: "203.0.113.10", Port: 29722},
 			},
+			InviteDials: releaseevidence.ServiceDialEvidence{
+				Data:       releaseevidence.DialEvidence{Host: "203.0.113.10", Port: 2222},
+				Enrollment: releaseevidence.DialEvidence{Host: "203.0.113.10", Port: 29722},
+			},
 			ObservedListeners: releaseevidence.ObservedListenersEvidence{
 				Data:       "203.0.113.10:2222",
 				Enrollment: "203.0.113.10:29722",

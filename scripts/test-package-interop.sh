@@ -388,6 +388,10 @@ document = {
             "data": {"host": "127.0.0.1", "port": 2222},
             "enrollment": {"host": "127.0.0.1", "port": 29722},
         },
+        "invite_dials": {
+            "data": {"host": "127.0.0.1", "port": 2222},
+            "enrollment": {"host": "127.0.0.1", "port": 29722},
+        },
         "observed_listeners": {
             "data": "127.0.0.1:2222",
             "enrollment": "127.0.0.1:29722",
