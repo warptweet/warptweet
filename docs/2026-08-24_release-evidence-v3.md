@@ -64,9 +64,13 @@ Client error classes stay on the client and in evidence:
 - `WARPTWEET_INTEROP_SERVER_ADVERTISE` is unset by default.
 - `--advertise` is passed only when advertise is set.
 - Mac TCP uses published dials.
-- Guest observations fail closed: iptables and nft must both print `NO_DNAT`,
-  loopback must be listed, and `ss`/`netstat` listeners must be captured.
-  `match_binds` and `test_dnat_absent` are never defaulted to true.
+- Guest observations fail closed: iptables and nft must both be queried.
+  `test_dnat_absent` is true only when neither table rewrites the published
+  data/enrollment locator (LISTEN/ADVERTISE ports or advertise address).
+  Docker DNAT of loopback Postgres (`127.0.0.1:5432`) is ignored. Missing
+  tools remain fail-closed. Loopback must be listed, and `ss`/`netstat`
+  listeners must be captured. `match_binds` and `test_dnat_absent` are never
+  defaulted to true.
 - darwin-arm64 × linux-arm64 with IP `ADVERTISE` ≠ `LISTEN` is classified as
   the `gce-one-to-one-nat` networking cell.
 - There is no in-tree `wt-gcp-bind` DNAT unit.

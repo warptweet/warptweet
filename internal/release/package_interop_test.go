@@ -2,6 +2,7 @@ package release_test
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -228,7 +229,8 @@ func TestInteropListenIsBindAdvertiseIsExplicit(t *testing.T) {
 	}
 	for _, required := range []string{
 		"gce-one-to-one-nat",
-		`["nft", "list", "ruleset"]`,
+		"publication_dnat.py",
+		"live_table_status",
 		"IPTABLES=",
 		"require_bool",
 		"invite schema is not 3",
@@ -236,5 +238,20 @@ func TestInteropListenIsBindAdvertiseIsExplicit(t *testing.T) {
 		if !strings.Contains(evidence, required) {
 			t.Errorf("evidence.sh omits %q", required)
 		}
+	}
+}
+
+func TestPublicationDNATClassifierIgnoresDockerPostgres(t *testing.T) {
+	t.Parallel()
+
+	root := repositoryRoot(t)
+	path := filepath.Join(root, "scripts", "interop", "lib", "publication_dnat.py")
+	cmd := exec.Command("python3", path, "--self-test")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("publication_dnat --self-test: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "publication_dnat_self_test_ok") {
+		t.Fatalf("self-test output %q", out)
 	}
 }

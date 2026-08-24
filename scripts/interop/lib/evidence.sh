@@ -348,35 +348,33 @@ interop_fill_networking_defaults() {
         WARPTWEET_INTEROP_PUBLISHED_ENDPOINT_GENERATION=$_gen
         export WARPTWEET_INTEROP_PUBLISHED_ENDPOINT_GENERATION
     fi
+    _listen_host=$(interop_hostport_host "$WARPTWEET_INTEROP_SERVER_LISTEN")
+    _advertise_host=
+    _advertise_port=
+    if [ -n "${WARPTWEET_INTEROP_SERVER_ADVERTISE:-}" ]; then
+        _advertise_host=$(interop_hostport_host "$WARPTWEET_INTEROP_SERVER_ADVERTISE")
+        _advertise_port=$(interop_hostport_port "$WARPTWEET_INTEROP_SERVER_ADVERTISE")
+    fi
+    _enroll_listen_host=$_listen_host
+    _enroll_advertise_host=
+    _enroll_advertise_port=
+    if [ -n "${WARPTWEET_INTEROP_ENROLL_LISTEN:-}" ]; then
+        _enroll_listen_host=$(interop_hostport_host "$WARPTWEET_INTEROP_ENROLL_LISTEN")
+    fi
+    if [ -n "${WARPTWEET_INTEROP_ENROLL_ADVERTISE:-}" ]; then
+        _enroll_advertise_host=$(interop_hostport_host "$WARPTWEET_INTEROP_ENROLL_ADVERTISE")
+        _enroll_advertise_port=$(interop_hostport_port "$WARPTWEET_INTEROP_ENROLL_ADVERTISE")
+    fi
+    _target_port=${WARPTWEET_INTEROP_TARGET_PORT:-5432}
+    _dnat_lib=${WARPTWEET_INTEROP_ROOT:-}/lib/publication_dnat.py
+    if [ ! -f "$_dnat_lib" ]; then
+        interop_log "publication DNAT classifier missing: $_dnat_lib"
+        return 1
+    fi
     if ! _probe=$(
-        interop_ssh "sudo env WT_DATA_PORT=${_data_port} WT_ENROLL_PORT=${_enroll_port} python3 -" <<'REMOTE'
-import os, re, shutil, subprocess
-
-def run(cmd):
-    try:
-        return subprocess.check_output(cmd, stderr=subprocess.DEVNULL, text=True)
-    except Exception:
-        return None
-
-def iptables_status():
-    if not shutil.which("iptables"):
-        return "MISSING"
-    out = run(["iptables", "-t", "nat", "-S"])
-    if out is None:
-        return "MISSING"
-    if re.search(r"\b(DNAT|REDIRECT|NETMAP)\b", out):
-        return "HAS_DNAT"
-    return "NO_DNAT"
-
-def nft_status():
-    if not shutil.which("nft"):
-        return "MISSING"
-    out = run(["nft", "list", "ruleset"])
-    if out is None:
-        return "MISSING"
-    if re.search(r"\b(dnat|redirect)\b", out, re.I):
-        return "HAS_DNAT"
-    return "NO_DNAT"
+        {
+            cat "$_dnat_lib"
+            cat <<'REMOTE'
 
 def lo_addrs():
     out = run(["ip", "-o", "addr", "show", "lo"]) or ""
@@ -418,12 +416,15 @@ def listener_for(port):
     host, parsed_port = candidates[0]
     return format_listener(host, parsed_port)
 
-print("IPTABLES=" + iptables_status())
-print("NFT=" + nft_status())
+spec = spec_from_env(os.environ)
+iptables_st, nft_st = live_table_status(spec)
+print("IPTABLES=" + iptables_st)
+print("NFT=" + nft_st)
 print("LO=" + " ".join(lo_addrs()))
 print("DATA_LISTENER=" + listener_for(int(os.environ["WT_DATA_PORT"])))
 print("ENROLL_LISTENER=" + listener_for(int(os.environ["WT_ENROLL_PORT"])))
 REMOTE
+        } | interop_ssh "sudo env WT_DATA_PORT=${_data_port} WT_ENROLL_PORT=${_enroll_port} WT_LISTEN_HOST=${_listen_host} WT_ADVERTISE_HOST=${_advertise_host} WT_ADVERTISE_PORT=${_advertise_port} WT_ENROLL_LISTEN_HOST=${_enroll_listen_host} WT_ENROLL_ADVERTISE_HOST=${_enroll_advertise_host} WT_ENROLL_ADVERTISE_PORT=${_enroll_advertise_port} WT_TARGET_PORT=${_target_port} python3 -"
     ); then
         interop_log "guest networking probe failed"
         return 1
