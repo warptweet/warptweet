@@ -214,6 +214,30 @@ func TestDecodeRejectsSchemaVersion1Document(t *testing.T) {
 	}
 }
 
+func TestDecodeRejectsNonUint16BindPort(t *testing.T) {
+	t.Parallel()
+
+	valid := marshalManifest(t, validConfig())
+	tests := []struct {
+		name string
+		port string
+	}{
+		{name: "negative", port: "-1"},
+		{name: "overflow", port: "65536"},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			manifest := strings.Replace(valid, `"port":2222`, `"port":`+test.port, 1)
+			_, err := Decode(strings.NewReader(manifest))
+			if err == nil {
+				t.Fatalf("Decode accepted bind port %s", test.port)
+			}
+		})
+	}
+}
+
 func TestDecodeRunsSecurityValidation(t *testing.T) {
 	t.Parallel()
 

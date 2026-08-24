@@ -26,6 +26,7 @@ func TestLinuxNetlinkConstantsMatchKernel(t *testing.T) {
 		{"RTA_DST", rtaDst, int(unix.RTA_DST)},
 		{"RTA_OIF", rtaOif, int(unix.RTA_OIF)},
 		{"RTA_PREFSRC", rtaPrefSrc, int(unix.RTA_PREFSRC)},
+		{"RTA_TABLE", rtaTable, int(unix.RTA_TABLE)},
 		{"RT_TABLE_MAIN", rtTableMain, int(unix.RT_TABLE_MAIN)},
 	}
 	for _, test := range tests {
@@ -50,11 +51,11 @@ func TestLinuxLookupCardinality(t *testing.T) {
 		t.Fatalf("dump: %v", err)
 	}
 	dumpN := countNewRoute(dump)
-	if dumpN > 1 && lookupN == dumpN {
-		t.Fatalf("lookup cardinality %d matched dump %d; lookup used dump semantics (lookup %s dump %s)", lookupN, dumpN, lookup.Evidence, dump.Evidence)
+	if dumpN <= 1 {
+		t.Fatalf("dump returned %d RTM_NEWROUTE, need several to distinguish lookup from dump (lookup %s dump %s)", dumpN, lookup.Evidence, dump.Evidence)
 	}
-	if lookupN > dumpN && dumpN > 0 {
-		t.Fatalf("lookup returned more RTM_NEWROUTE (%d) than dump (%d)", lookupN, dumpN)
+	if lookupN == dumpN {
+		t.Fatalf("lookup cardinality %d matched dump %d; lookup used dump semantics (lookup %s dump %s)", lookupN, dumpN, lookup.Evidence, dump.Evidence)
 	}
 }
 

@@ -9,13 +9,13 @@ import (
 // BindEndpoint is a concrete local socket. Address is always a numeric IP.
 type BindEndpoint struct {
 	Address netip.Addr `json:"address"`
-	Port    Port       `json:"port"`
+	Port    uint16     `json:"port"`
 }
 
 // DialEndpoint is a published locator. Host is an IP literal or DNS name.
 type DialEndpoint struct {
 	Host DialHost `json:"host"`
-	Port Port     `json:"port"`
+	Port uint16   `json:"port"`
 }
 
 // ServiceEndpoints is one published service: local bind and client dial.
@@ -32,8 +32,7 @@ type Network struct {
 }
 
 // PublishedEndpointSet is the atomic published locator carried by invite,
-// proof, receipts, and routes. JSON names the revision
-// published_endpoint_generation; do not call it generation.
+// proof, receipts, and routes.
 type PublishedEndpointSet struct {
 	Generation uint64
 	Data       DialEndpoint
@@ -48,29 +47,25 @@ type HostIdentity struct {
 
 // PublicationNetwork publishes the bind addresses as IP locators and starts
 // published_endpoint_generation at 1.
-func PublicationNetwork(dataAddr netip.Addr, dataPort, enrollPort Port) Network {
+func PublicationNetwork(dataAddr netip.Addr, dataPort, enrollPort uint16) Network {
 	dataListen := BindEndpoint{Address: dataAddr, Port: dataPort}
 	enrollListen := BindEndpoint{Address: dataAddr, Port: enrollPort}
 	return Network{
 		PublishedEndpointGeneration: 1,
 		Data: ServiceEndpoints{
 			Listen: dataListen,
-			Dial:   dialFromBind(dataListen),
+			Dial:   DialFromBind(dataListen),
 		},
 		Enrollment: ServiceEndpoints{
 			Listen: enrollListen,
-			Dial:   dialFromBind(enrollListen),
+			Dial:   DialFromBind(enrollListen),
 		},
 	}
 }
 
 // AddrPort is the canonical unmapped listen address and port.
 func (endpoint BindEndpoint) AddrPort() netip.AddrPort {
-	port := uint16(0)
-	if endpoint.Port > 0 && endpoint.Port <= 65535 {
-		port = uint16(endpoint.Port)
-	}
-	return netip.AddrPortFrom(canonicalAddress(endpoint.Address), port)
+	return netip.AddrPortFrom(canonicalAddress(endpoint.Address), endpoint.Port)
 }
 
 // PublishedSet returns the locator pair and its revision.
@@ -88,21 +83,26 @@ func SamePublishedLocators(left, right PublishedEndpointSet) bool {
 	return sameDialEndpoint(left.Data, right.Data) && sameDialEndpoint(left.Enrollment, right.Enrollment)
 }
 
-// ProposeNetwork builds the schema-2 network for one host invocation.
-// Omitted advertise restores stored dials. Bind-only edits do not bump
-// published_endpoint_generation. A locator change increments it once after
-// the caller refuses live inventory and before the atomic manifest write.
-func ProposeNetwork(dataListen, enrollListen BindEndpoint, stored *Network) (Network, bool, error) {
-	dataDial := dialFromBind(dataListen)
-	enrollDial := dialFromBind(enrollListen)
+// DialFromBind publishes a bind address as an IP locator on the same port.
+func DialFromBind(listen BindEndpoint) DialEndpoint {
+	return DialEndpoint{
+		Host: IPDialHost(listen.Address),
+		Port: listen.Port,
+	}
+}
+
+// ProposeNetwork writes the requested binds and dials. A stored generation of
+// 0 is invalid. Locator change increments published_endpoint_generation once.
+func ProposeNetwork(dataListen, enrollListen BindEndpoint, dataDial, enrollDial DialEndpoint, stored *Network) (Network, bool, error) {
 	generation := uint64(1)
 	if stored != nil {
-		dataDial = stored.Data.Dial
-		enrollDial = stored.Enrollment.Dial
-		generation = stored.PublishedEndpointGeneration
-		if generation == 0 {
-			generation = 1
+		if stored.PublishedEndpointGeneration == 0 {
+			return Network{}, false, invalidField(
+				"Network.PublishedEndpointGeneration",
+				"must be at least 1",
+			)
 		}
+		generation = stored.PublishedEndpointGeneration
 	}
 	proposed := Network{
 		PublishedEndpointGeneration: generation,
@@ -131,23 +131,19 @@ func ProposeNetwork(dataListen, enrollListen BindEndpoint, stored *Network) (Net
 }
 
 func nextPublishedEndpointGeneration(current uint64) (uint64, error) {
+	if current == 0 {
+		return 0, invalidField(
+			"Network.PublishedEndpointGeneration",
+			"must be at least 1",
+		)
+	}
 	if current == math.MaxUint64 {
 		return 0, invalidField(
 			"Network.PublishedEndpointGeneration",
 			"cannot increment past uint64 maximum",
 		)
 	}
-	if current == 0 {
-		return 1, nil
-	}
 	return current + 1, nil
-}
-
-func dialFromBind(listen BindEndpoint) DialEndpoint {
-	return DialEndpoint{
-		Host: IPDialHost(listen.Address),
-		Port: listen.Port,
-	}
 }
 
 func sameDialEndpoint(left, right DialEndpoint) bool {
@@ -206,11 +202,11 @@ func validateNetwork(network Network) error {
 }
 
 func validateBind(field string, endpoint BindEndpoint) error {
-	return validateEndpoint(field, Endpoint{Address: endpoint.Address, Port: endpoint.Port})
+	return validateEndpoint(field, Endpoint{Address: endpoint.Address, Port: Port(endpoint.Port)})
 }
 
 func validateDial(field string, bind BindEndpoint, dial DialEndpoint) error {
-	if dial.Port < 1 || dial.Port > 65535 {
+	if dial.Port < 1 {
 		return invalidField(field+".Port", "must be between 1 and 65535")
 	}
 	hasIP := dial.Host.IP.IsValid()

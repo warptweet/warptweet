@@ -17,9 +17,7 @@ type familyCandidate struct {
 }
 
 // Discover selects at most one bind address from the main-table default-route
-// source of each family. Zero usable candidates return an invalid address
-// (the caller falls back to 127.0.0.1). Both families unique fail closed and
-// name --listen.
+// source of each family. Both unique families fail closed and name --listen.
 func Discover(lookup RouteLookup, ifaces []Interface) (netip.Addr, error) {
 	if lookup == nil {
 		return netip.Addr{}, fmt.Errorf("inspect-network: route lookup is required; pass --listen")
@@ -66,7 +64,19 @@ func candidateForFamily(lookup RouteLookup, ifaces []Interface, family int, prob
 			n, reply.Evidence,
 		)
 	}
-	route := reply.Messages[0]
+	route, ok := singleNewRoute(reply)
+	if !ok {
+		return familyCandidate{}, fmt.Errorf(
+			"inspect-network: RTM_GETROUTE lookup returned %d RTM_NEWROUTE messages, want exactly 1; pass --listen (%s)",
+			n, reply.Evidence,
+		)
+	}
+	if route.Table != uint32(rtTableMain) {
+		return familyCandidate{}, fmt.Errorf(
+			"inspect-network: RTM_GETROUTE selected table %d, want RT_TABLE_MAIN (%d); prefsrc %s oif %d; pass --listen (%s)",
+			route.Table, rtTableMain, route.PrefSrc, route.OutIfIndex, reply.Evidence,
+		)
+	}
 	var addr netip.Addr
 	var iface Interface
 	var haveIface bool

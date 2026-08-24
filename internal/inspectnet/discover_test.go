@@ -65,6 +65,7 @@ func TestDiscoverLookupVsDumpResponse(t *testing.T) {
 		Messages: []RouteMessage{{
 			Type:       rtmNewRoute,
 			Family:     FamilyIPv4,
+			Table:      uint32(rtTableMain),
 			HasPrefSrc: true,
 			PrefSrc:    netip.MustParseAddr("10.168.0.2"),
 			HasOutIf:   true,
@@ -104,6 +105,7 @@ func TestDiscoverPrefSrcAbsentInterfaceAddressCardinality(t *testing.T) {
 			Messages: []RouteMessage{{
 				Type:       rtmNewRoute,
 				Family:     FamilyIPv4,
+				Table:      uint32(rtTableMain),
 				HasOutIf:   true,
 				OutIfIndex: 2,
 			}},
@@ -171,7 +173,7 @@ func TestDiscoverBothFamiliesUniqueFailsClosed(t *testing.T) {
 		},
 	}
 	lookup := func(family int, dst netip.Addr) (RouteReply, error) {
-		msg := RouteMessage{Type: rtmNewRoute, Family: uint8(family), HasOutIf: true, OutIfIndex: 2, HasPrefSrc: true}
+		msg := RouteMessage{Type: rtmNewRoute, Family: uint8(family), Table: uint32(rtTableMain), HasOutIf: true, OutIfIndex: 2, HasPrefSrc: true}
 		if family == FamilyIPv4 {
 			msg.PrefSrc = netip.MustParseAddr("10.168.0.2")
 		} else {
@@ -185,6 +187,41 @@ func TestDiscoverBothFamiliesUniqueFailsClosed(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "10.168.0.2") || !strings.Contains(err.Error(), "2001:db8::10") {
 		t.Fatalf("error did not print both candidates: %v", err)
+	}
+}
+
+func TestDiscoverExtraTableFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	ifaces := []Interface{{
+		Index: 2,
+		Name:  "ens4",
+		Flags: net.FlagUp,
+		Addrs: []netip.Addr{netip.MustParseAddr("10.168.0.2")},
+	}}
+	lookup := func(family int, dst netip.Addr) (RouteReply, error) {
+		if family != FamilyIPv4 {
+			return RouteReply{}, nil
+		}
+		return RouteReply{
+			Messages: []RouteMessage{{
+				Type:       rtmNewRoute,
+				Family:     FamilyIPv4,
+				Table:      100,
+				HasPrefSrc: true,
+				PrefSrc:    netip.MustParseAddr("10.168.0.2"),
+				HasOutIf:   true,
+				OutIfIndex: 2,
+			}},
+			Evidence: "table 100",
+		}, nil
+	}
+	_, err := Discover(lookup, ifaces)
+	if err == nil || !strings.Contains(err.Error(), "--listen") {
+		t.Fatalf("error = %v", err)
+	}
+	if !strings.Contains(err.Error(), "table 100") || !strings.Contains(err.Error(), "10.168.0.2") {
+		t.Fatalf("error missing kernel evidence: %v", err)
 	}
 }
 
@@ -217,6 +254,7 @@ func TestDiscoverIgnoresInterfaceNameAsExclusionAuthority(t *testing.T) {
 		}
 		return RouteReply{Messages: []RouteMessage{{
 			Type:       rtmNewRoute,
+			Table:      uint32(rtTableMain),
 			HasPrefSrc: true,
 			PrefSrc:    netip.MustParseAddr("172.17.0.1"),
 			HasOutIf:   true,
@@ -247,6 +285,7 @@ func TestDiscoverExcludesLoopbackDownAndLinkLocalOnly(t *testing.T) {
 		}
 		return RouteReply{Messages: []RouteMessage{{
 			Type:       rtmNewRoute,
+			Table:      uint32(rtTableMain),
 			HasPrefSrc: true,
 			PrefSrc:    netip.MustParseAddr("127.0.0.1"),
 			HasOutIf:   true,

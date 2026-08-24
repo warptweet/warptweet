@@ -24,6 +24,7 @@ const (
 	rtaDst     = 1
 	rtaOif     = 4
 	rtaPrefSrc = 7
+	rtaTable   = 0xf
 
 	rtTableMain = 254
 

@@ -317,20 +317,6 @@ func TestValidateRejectsUnsafeInputs(t *testing.T) {
 			field: "Network.Data.Listen.Port",
 		},
 		{
-			name: "negative listen port",
-			mutate: func(config *Config) {
-				config.Network.Data.Listen.Port = -1
-			},
-			field: "Network.Data.Listen.Port",
-		},
-		{
-			name: "oversized listen port",
-			mutate: func(config *Config) {
-				config.Network.Data.Listen.Port = 65536
-			},
-			field: "Network.Data.Listen.Port",
-		},
-		{
 			name: "zero published_endpoint_generation",
 			mutate: func(config *Config) {
 				config.Network.PublishedEndpointGeneration = 0

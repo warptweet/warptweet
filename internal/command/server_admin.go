@@ -155,7 +155,7 @@ func runServerStatus(ctx context.Context, arguments []string, stdout, stderr io.
 		status["dedicated_user"] = manifest.DedicatedUser
 		status["manifest"] = "present"
 		if addr := manifest.Network.Enrollment.Listen.Address; addr.IsValid() && !addr.IsUnspecified() {
-			if url, err := enrollment.EnrollmentURL(addr.String(), uint16(manifest.Network.Enrollment.Listen.Port)); err == nil {
+			if url, err := enrollment.EnrollmentURL(addr.String(), manifest.Network.Enrollment.Listen.Port); err == nil {
 				status["enroll_url"] = url
 			}
 		}

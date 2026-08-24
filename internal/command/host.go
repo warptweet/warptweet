@@ -894,9 +894,15 @@ func writeHostManifest(listenEndpoint, targetEndpoint netip.AddrPort) (server.Co
 	if stored != nil {
 		storedNetwork = &stored.Network
 	}
-	dataListen := server.BindEndpoint{Address: listenEndpoint.Addr(), Port: server.Port(listenEndpoint.Port())}
-	enrollListen := server.BindEndpoint{Address: listenEndpoint.Addr(), Port: server.Port(enrollment.DefaultEnrollmentPort)}
-	network, changed, err := server.ProposeNetwork(dataListen, enrollListen, storedNetwork)
+	dataListen := server.BindEndpoint{Address: listenEndpoint.Addr(), Port: listenEndpoint.Port()}
+	enrollListen := server.BindEndpoint{Address: listenEndpoint.Addr(), Port: enrollment.DefaultEnrollmentPort}
+	dataDial := server.DialFromBind(dataListen)
+	enrollDial := server.DialFromBind(enrollListen)
+	if storedNetwork != nil {
+		dataDial = storedNetwork.Data.Dial
+		enrollDial = storedNetwork.Enrollment.Dial
+	}
+	network, changed, err := server.ProposeNetwork(dataListen, enrollListen, dataDial, enrollDial, storedNetwork)
 	if err != nil {
 		return server.Config{}, err
 	}
@@ -1070,14 +1076,14 @@ func mintServerInvite(
 	if !dataDial.Host.IP.IsValid() {
 		return enrollment.Invite{}, enrollment.Record{}, errors.New("invite mint requires an IP data dial")
 	}
-	enrollPort := uint16(manifest.Network.Enrollment.Dial.Port)
+	enrollPort := manifest.Network.Enrollment.Dial.Port
 	if enrollPort == 0 {
 		enrollPort = enrollment.DefaultEnrollmentPort
 	}
 	return enrollment.Create(enrollment.CreateInput{
 		ClientName:                   clientName,
 		ServerAddress:                dataDial.Host.IP,
-		ServerPort:                   uint16(dataDial.Port),
+		ServerPort:                   dataDial.Port,
 		EnrollPort:                   enrollPort,
 		TargetAddress:                manifest.Target.Address,
 		TargetPort:                   uint16(manifest.Target.Port),

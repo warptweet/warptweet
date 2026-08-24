@@ -38,8 +38,7 @@ type Endpoint struct {
 
 // Config contains the server policy, fixed-layout asset references, and pinned
 // engine digests. Paths are not opened by Render, so provisioning remains a
-// separate step. Render consumes data listen only; published dials never enter
-// sshd_config.
+// separate step.
 type Config struct {
 	Kind                        string   `json:"kind"`
 	SchemaVersion               int      `json:"schema_version"`

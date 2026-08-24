@@ -10,7 +10,7 @@ import (
 type RouteMessage struct {
 	Type       uint16
 	Family     uint8
-	Table      uint8
+	Table      uint32
 	PrefSrc    netip.Addr
 	OutIfIndex int
 	HasPrefSrc bool
@@ -93,7 +93,7 @@ func parseNewRoute(payload []byte) (RouteMessage, error) {
 	}
 	msg := RouteMessage{
 		Family: payload[0],
-		Table:  payload[4],
+		Table:  uint32(payload[4]),
 	}
 	attrs := payload[rtmsgLen:]
 	for len(attrs) >= rtattrHdrLen {
@@ -117,6 +117,11 @@ func parseNewRoute(payload []byte) (RouteMessage, error) {
 			}
 			msg.OutIfIndex = int(binary.LittleEndian.Uint32(val[:4]))
 			msg.HasOutIf = true
+		case rtaTable:
+			if len(val) < 4 {
+				return RouteMessage{}, fmt.Errorf("short RTA_TABLE")
+			}
+			msg.Table = binary.LittleEndian.Uint32(val[:4])
 		}
 		aligned := nlmsgAlign(alen)
 		if aligned > len(attrs) {
@@ -130,9 +135,22 @@ func parseNewRoute(payload []byte) (RouteMessage, error) {
 func countNewRoute(reply RouteReply) int {
 	n := 0
 	for _, msg := range reply.Messages {
-		if msg.Type == rtmNewRoute || msg.Type == 0 {
+		if msg.Type == rtmNewRoute {
 			n++
 		}
 	}
 	return n
+}
+
+func singleNewRoute(reply RouteReply) (RouteMessage, bool) {
+	var found RouteMessage
+	n := 0
+	for _, msg := range reply.Messages {
+		if msg.Type != rtmNewRoute {
+			continue
+		}
+		found = msg
+		n++
+	}
+	return found, n == 1
 }
