@@ -34,7 +34,7 @@ warptweet uninstall --preserve-identity
 7. Render `client.wt`, `known_hosts`, empty ambient trust, and identity files.
 8. Activate the generation into the fixed client layout, or stop after staging with `--prepare-only`.
 
-MAC verification of invites remains server-side because the invite MAC key never leaves the host. Client parsing still fails closed on malformed, expired, or secret-bearing documents. Operator one-shot accept without the listener: `warptweet server accept-enrollment --request <request.json>`.
+Invites are unsigned confidential bearers. HMAC is gone (WT-SR-020); WarpTweet does not create `/etc/warptweet/invite.mac-key`. Client parsing still fails closed on malformed, expired, or secret-bearing documents. Operator one-shot accept without the listener: `warptweet server accept-enrollment --request <request.json>`.
 
 Target health is never implied by enrollment success.
 

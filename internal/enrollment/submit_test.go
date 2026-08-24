@@ -20,10 +20,6 @@ import (
 func TestSubmitEnrollmentRotateRevokeRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	secret, err := GenerateSecret()
-	if err != nil {
-		t.Fatalf("GenerateSecret: %v", err)
-	}
 	now := time.Now().UTC()
 	invitesDir := t.TempDir()
 	clientsDir := t.TempDir()
@@ -43,19 +39,20 @@ func TestSubmitEnrollmentRotateRevokeRoundTrip(t *testing.T) {
 	}
 
 	invite, record, err := Create(CreateInput{
-		ClientName:              "studio-mac",
-		ServerAddress:           netip.MustParseAddr("127.0.0.1"),
-		ServerPort:              2222,
-		EnrollPort:              enrollPort,
-		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
-		TargetPort:              5432,
-		Principal:               server.DefaultDedicatedUser,
-		ProfileID:               profile.CurrentID,
-		ArtifactProfileID:       "darwin-arm64",
-		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
-		EnrollmentTLSSPKISHA256: enrollmentPin,
-		Now:                     now,
-		Secret:                  secret,
+		ClientName:                  "studio-mac",
+		DataHost:                    "127.0.0.1",
+		DataPort:                    2222,
+		EnrollmentHost:              "127.0.0.1",
+		EnrollmentPort:              enrollPort,
+		PublishedEndpointGeneration: 1,
+		TargetAddress:               netip.MustParseAddr("198.51.100.20"),
+		TargetPort:                  5432,
+		Principal:                   server.DefaultDedicatedUser,
+		ProfileID:                   profile.CurrentID,
+		ArtifactProfileID:           "darwin-arm64",
+		HostPublicKey:               "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256:     enrollmentPin,
+		Now:                         now,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -193,10 +190,6 @@ func TestSubmitEnrollmentRotateRevokeRoundTrip(t *testing.T) {
 func TestSubmitEnrollmentFailClosedCases(t *testing.T) {
 	t.Parallel()
 
-	secret, err := GenerateSecret()
-	if err != nil {
-		t.Fatalf("GenerateSecret: %v", err)
-	}
 	now := time.Now().UTC()
 	invitesDir := t.TempDir()
 	clientsDir := t.TempDir()
@@ -215,19 +208,20 @@ func TestSubmitEnrollmentFailClosedCases(t *testing.T) {
 	}
 
 	invite, record, err := Create(CreateInput{
-		ClientName:              "node-a",
-		ServerAddress:           netip.MustParseAddr("127.0.0.1"),
-		ServerPort:              2222,
-		EnrollPort:              enrollPort,
-		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
-		TargetPort:              5432,
-		Principal:               server.DefaultDedicatedUser,
-		ProfileID:               profile.CurrentID,
-		ArtifactProfileID:       "linux-amd64",
-		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
-		EnrollmentTLSSPKISHA256: enrollmentPin,
-		Now:                     now,
-		Secret:                  secret,
+		ClientName:                  "node-a",
+		DataHost:                    "127.0.0.1",
+		DataPort:                    2222,
+		EnrollmentHost:              "127.0.0.1",
+		EnrollmentPort:              enrollPort,
+		PublishedEndpointGeneration: 1,
+		TargetAddress:               netip.MustParseAddr("198.51.100.20"),
+		TargetPort:                  5432,
+		Principal:                   server.DefaultDedicatedUser,
+		ProfileID:                   profile.CurrentID,
+		ArtifactProfileID:           "linux-amd64",
+		HostPublicKey:               "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256:     enrollmentPin,
+		Now:                         now,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)

@@ -78,9 +78,9 @@ That client result predates the current profile's static OpenSSL 3.5.7, Linux EL
 
 ## Manifests
 
-WarpTweet Tunnel Manifest is one strict JSON family with media type `application/vnd.warptweet.tunnel+json` and independently versioned kinds. `examples/client.example.wt` is `warptweet.client-tunnels` v1; it pins the fixed installed client engine digest and may contain multiple tunnel declarations, but contains no caller-selected filesystem paths. `examples/server.example.wt` is `warptweet.server-gateway` v1; it selects restricted server policy and pins the installed `sshd` plus the authenticated OpenSSH and OpenSSL bundle manifest.
+WarpTweet Tunnel Manifest is one strict JSON family with media type `application/vnd.warptweet.tunnel+json` and independently versioned kinds. `examples/client.example.wt` is `warptweet.client-tunnels` v2; it pins the fixed installed client engine digest and may contain multiple tunnel declarations, but contains no caller-selected filesystem paths. Schema 1 is rejected. `examples/server.example.wt` is `warptweet.server-gateway` v2; it selects restricted server policy and pins the installed `sshd` plus the authenticated OpenSSH and OpenSSL bundle manifest. Schema 1 is rejected.
 
-Client and server manifests begin at `schema_version: 1` and require the current exact profile ID. The exact client executable SHA-256 remains the manifest's binary pin. The executable, identity, trust, and production manifest paths are fixed installation invariants.
+Client manifests use `schema_version: 2` and server-gateway manifests use `schema_version: 2`, and both require the current exact profile ID. The exact client executable SHA-256 remains the manifest's binary pin. The executable, identity, trust, and production manifest paths are fixed installation invariants.
 
 Copy the examples to deployment-specific candidate `.wt` files and replace every documentation address and placeholder. The client example must fail validation until the exact installed `/opt/warptweet/libexec/openssh/bin/ssh` SHA-256 is inserted. The server example must fail until both the installed `sshd` digest and the installed `openssh-bundle.sha256` file digest are inserted. Neither kind may contain private-key material. The server-only `host_key_path` is a fixed filesystem reference.
 

@@ -17,24 +17,22 @@ import (
 func TestAcceptStoresClientAndRevokeBurnsToken(t *testing.T) {
 	t.Parallel()
 
-	secret, err := GenerateSecret()
-	if err != nil {
-		t.Fatalf("GenerateSecret: %v", err)
-	}
 	now := time.Date(2026, 8, 14, 20, 0, 0, 0, time.UTC)
 	invite, record, err := Create(CreateInput{
-		ClientName:              "laptop-1",
-		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
-		ServerPort:              2222,
-		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
-		TargetPort:              5432,
-		Principal:               "warptweet",
-		ProfileID:               profile.CurrentID,
-		ArtifactProfileID:       "linux-amd64",
-		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
-		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
-		Now:                     now,
-		Secret:                  secret,
+		ClientName:                  "laptop-1",
+		DataHost:                    "192.0.2.10",
+		DataPort:                    2222,
+		EnrollmentHost:              "192.0.2.10",
+		EnrollmentPort:              DefaultEnrollmentPort,
+		PublishedEndpointGeneration: 1,
+		TargetAddress:               netip.MustParseAddr("198.51.100.20"),
+		TargetPort:                  5432,
+		Principal:                   "warptweet",
+		ProfileID:                   profile.CurrentID,
+		ArtifactProfileID:           "linux-amd64",
+		HostPublicKey:               "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256:     testEnrollmentTLSSPKIPin,
+		Now:                         now,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -64,7 +62,7 @@ func TestAcceptStoresClientAndRevokeBurnsToken(t *testing.T) {
 		ProfileID:            profile.CurrentID,
 		TargetAddress:        invite.TargetAddress,
 		TargetPort:           invite.TargetPort,
-		ServerAddress:        invite.ServerAddress,
+		ServerAddress:        invite.Data.Host,
 		Now:                  now.Add(time.Minute),
 		InstallAuthorization: func(string, time.Time) error { return nil },
 	})
@@ -163,24 +161,22 @@ func TestAcceptStoresClientAndRevokeBurnsToken(t *testing.T) {
 func TestRevokeClientAsHostDoesNotNeedBearerToken(t *testing.T) {
 	t.Parallel()
 
-	secret, err := GenerateSecret()
-	if err != nil {
-		t.Fatal(err)
-	}
 	now := time.Date(2026, 8, 22, 20, 0, 0, 0, time.UTC)
 	invite, record, err := Create(CreateInput{
-		ClientName:              "host-revoke",
-		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
-		ServerPort:              2222,
-		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
-		TargetPort:              5432,
-		Principal:               "warptweet",
-		ProfileID:               profile.CurrentID,
-		ArtifactProfileID:       "linux-amd64",
-		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
-		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
-		Now:                     now,
-		Secret:                  secret,
+		ClientName:                  "host-revoke",
+		DataHost:                    "192.0.2.10",
+		DataPort:                    2222,
+		EnrollmentHost:              "192.0.2.10",
+		EnrollmentPort:              DefaultEnrollmentPort,
+		PublishedEndpointGeneration: 1,
+		TargetAddress:               netip.MustParseAddr("198.51.100.20"),
+		TargetPort:                  5432,
+		Principal:                   "warptweet",
+		ProfileID:                   profile.CurrentID,
+		ArtifactProfileID:           "linux-amd64",
+		HostPublicKey:               "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256:     testEnrollmentTLSSPKIPin,
+		Now:                         now,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -209,7 +205,7 @@ func TestRevokeClientAsHostDoesNotNeedBearerToken(t *testing.T) {
 		ProfileID:            profile.CurrentID,
 		TargetAddress:        invite.TargetAddress,
 		TargetPort:           invite.TargetPort,
-		ServerAddress:        invite.ServerAddress,
+		ServerAddress:        invite.Data.Host,
 		Now:                  now.Add(time.Minute),
 		InstallAuthorization: func(string, time.Time) error { return nil },
 	})
@@ -245,24 +241,22 @@ func TestRevokeClientAsHostDoesNotNeedBearerToken(t *testing.T) {
 func TestRevokeClientAsHostRemovesPendingRotationKey(t *testing.T) {
 	t.Parallel()
 
-	secret, err := GenerateSecret()
-	if err != nil {
-		t.Fatal(err)
-	}
 	now := time.Date(2026, 8, 22, 21, 0, 0, 0, time.UTC)
 	invite, record, err := Create(CreateInput{
-		ClientName:              "pending-rotate",
-		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
-		ServerPort:              2222,
-		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
-		TargetPort:              5432,
-		Principal:               "warptweet",
-		ProfileID:               profile.CurrentID,
-		ArtifactProfileID:       "linux-amd64",
-		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
-		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
-		Now:                     now,
-		Secret:                  secret,
+		ClientName:                  "pending-rotate",
+		DataHost:                    "192.0.2.10",
+		DataPort:                    2222,
+		EnrollmentHost:              "192.0.2.10",
+		EnrollmentPort:              DefaultEnrollmentPort,
+		PublishedEndpointGeneration: 1,
+		TargetAddress:               netip.MustParseAddr("198.51.100.20"),
+		TargetPort:                  5432,
+		Principal:                   "warptweet",
+		ProfileID:                   profile.CurrentID,
+		ArtifactProfileID:           "linux-amd64",
+		HostPublicKey:               "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256:     testEnrollmentTLSSPKIPin,
+		Now:                         now,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -291,7 +285,7 @@ func TestRevokeClientAsHostRemovesPendingRotationKey(t *testing.T) {
 		ProfileID:            profile.CurrentID,
 		TargetAddress:        invite.TargetAddress,
 		TargetPort:           invite.TargetPort,
-		ServerAddress:        invite.ServerAddress,
+		ServerAddress:        invite.Data.Host,
 		Now:                  now.Add(time.Minute),
 		InstallAuthorization: func(string, time.Time) error { return nil },
 	})
@@ -327,24 +321,22 @@ func TestRevokeClientAsHostRemovesPendingRotationKey(t *testing.T) {
 func TestReconcilePendingRevocationsCompletesStuckRecord(t *testing.T) {
 	t.Parallel()
 
-	secret, err := GenerateSecret()
-	if err != nil {
-		t.Fatalf("GenerateSecret: %v", err)
-	}
 	now := time.Date(2026, 8, 14, 20, 0, 0, 0, time.UTC)
 	invite, record, err := Create(CreateInput{
-		ClientName:              "laptop-1",
-		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
-		ServerPort:              2222,
-		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
-		TargetPort:              5432,
-		Principal:               "warptweet",
-		ProfileID:               profile.CurrentID,
-		ArtifactProfileID:       "linux-amd64",
-		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
-		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
-		Now:                     now,
-		Secret:                  secret,
+		ClientName:                  "laptop-1",
+		DataHost:                    "192.0.2.10",
+		DataPort:                    2222,
+		EnrollmentHost:              "192.0.2.10",
+		EnrollmentPort:              DefaultEnrollmentPort,
+		PublishedEndpointGeneration: 1,
+		TargetAddress:               netip.MustParseAddr("198.51.100.20"),
+		TargetPort:                  5432,
+		Principal:                   "warptweet",
+		ProfileID:                   profile.CurrentID,
+		ArtifactProfileID:           "linux-amd64",
+		HostPublicKey:               "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256:     testEnrollmentTLSSPKIPin,
+		Now:                         now,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -373,7 +365,7 @@ func TestReconcilePendingRevocationsCompletesStuckRecord(t *testing.T) {
 		ProfileID:            profile.CurrentID,
 		TargetAddress:        invite.TargetAddress,
 		TargetPort:           invite.TargetPort,
-		ServerAddress:        invite.ServerAddress,
+		ServerAddress:        invite.Data.Host,
 		Now:                  now.Add(time.Minute),
 		InstallAuthorization: func(string, time.Time) error { return nil },
 	})
@@ -417,24 +409,22 @@ func TestReconcilePendingRevocationsCompletesStuckRecord(t *testing.T) {
 func TestRotateClientIssuesNewToken(t *testing.T) {
 	t.Parallel()
 
-	secret, err := GenerateSecret()
-	if err != nil {
-		t.Fatalf("GenerateSecret: %v", err)
-	}
 	now := time.Date(2026, 8, 14, 21, 0, 0, 0, time.UTC)
 	invite, record, err := Create(CreateInput{
-		ClientName:              "studio-mac",
-		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
-		ServerPort:              2222,
-		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
-		TargetPort:              5432,
-		Principal:               "warptweet",
-		ProfileID:               profile.CurrentID,
-		ArtifactProfileID:       "linux-amd64",
-		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
-		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
-		Now:                     now,
-		Secret:                  secret,
+		ClientName:                  "studio-mac",
+		DataHost:                    "192.0.2.10",
+		DataPort:                    2222,
+		EnrollmentHost:              "192.0.2.10",
+		EnrollmentPort:              DefaultEnrollmentPort,
+		PublishedEndpointGeneration: 1,
+		TargetAddress:               netip.MustParseAddr("198.51.100.20"),
+		TargetPort:                  5432,
+		Principal:                   "warptweet",
+		ProfileID:                   profile.CurrentID,
+		ArtifactProfileID:           "linux-amd64",
+		HostPublicKey:               "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256:     testEnrollmentTLSSPKIPin,
+		Now:                         now,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -543,15 +533,14 @@ func TestRotateClientIssuesNewToken(t *testing.T) {
 func TestRotateClientRejectsHostExpiredGrant(t *testing.T) {
 	t.Parallel()
 
-	secret, err := GenerateSecret()
-	if err != nil {
-		t.Fatalf("GenerateSecret: %v", err)
-	}
 	now := time.Date(2026, 8, 14, 21, 0, 0, 0, time.UTC)
 	invite, record, err := Create(CreateInput{
 		ClientName:                   "studio-mac",
-		ServerAddress:                netip.MustParseAddr("192.0.2.10"),
-		ServerPort:                   2222,
+		DataHost:                     "192.0.2.10",
+		DataPort:                     2222,
+		EnrollmentHost:               "192.0.2.10",
+		EnrollmentPort:               DefaultEnrollmentPort,
+		PublishedEndpointGeneration:  1,
 		TargetAddress:                netip.MustParseAddr("198.51.100.20"),
 		TargetPort:                   5432,
 		Principal:                    "warptweet",
@@ -561,7 +550,6 @@ func TestRotateClientRejectsHostExpiredGrant(t *testing.T) {
 		EnrollmentTLSSPKISHA256:      testEnrollmentTLSSPKIPin,
 		AuthorizationDurationSeconds: 3600,
 		Now:                          now,
-		Secret:                       secret,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)

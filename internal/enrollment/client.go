@@ -9,6 +9,7 @@ import (
 
 	"warptweet.com/warptweet/internal/config"
 	"warptweet.com/warptweet/internal/grant"
+	"warptweet.com/warptweet/internal/locator"
 	"warptweet.com/warptweet/internal/profile"
 )
 
@@ -18,6 +19,8 @@ type ClientView struct {
 	ClientName                   string `json:"client_name"`
 	ServerAddress                string `json:"server_address"`
 	ServerPort                   uint16 `json:"server_port"`
+	EnrollmentHost               string `json:"enrollment_host"`
+	EnrollmentPort               uint16 `json:"enrollment_port"`
 	TargetAddress                string `json:"target_address"`
 	TargetPort                   uint16 `json:"target_port"`
 	Principal                    string `json:"principal"`
@@ -25,6 +28,7 @@ type ClientView struct {
 	ArtifactProfileID            string `json:"artifact_profile_id"`
 	HostPublicKey                string `json:"host_public_key"`
 	EnrollmentTLSSPKISHA256      string `json:"enrollment_tls_spki_sha256"`
+	PublishedEndpointGeneration  uint64 `json:"published_endpoint_generation"`
 	ExpiresAt                    string `json:"expires_at"`
 	AuthorizationDurationSeconds int64  `json:"authorization_duration_seconds"`
 	ListenAddress                string `json:"listen_address"`
@@ -51,7 +55,7 @@ func ParseClientInvite(raw []byte, now time.Time) (Invite, ClientView, error) {
 	if err := decodeStrictJSON(raw, &invite); err != nil {
 		return Invite{}, ClientView{}, fmt.Errorf("%w: %v", ErrInvalidInvite, err)
 	}
-	if err := validateInviteShape(invite); err != nil {
+	if err := canonicalizeStoredInvite(&invite); err != nil {
 		return Invite{}, ClientView{}, err
 	}
 	if invite.ProfileID != profile.CurrentID {
@@ -62,7 +66,6 @@ func ParseClientInvite(raw []byte, now time.Time) (Invite, ClientView, error) {
 	}
 	expires, err := time.Parse(time.RFC3339Nano, invite.ExpiresAt)
 	if err != nil {
-		// allow RFC3339 without nano
 		expires, err = time.Parse(time.RFC3339, invite.ExpiresAt)
 		if err != nil {
 			return Invite{}, ClientView{}, fmt.Errorf("%w: parse expires_at: %v", ErrInvalidInvite, err)
@@ -72,22 +75,21 @@ func ParseClientInvite(raw []byte, now time.Time) (Invite, ClientView, error) {
 		return Invite{}, ClientView{}, fmt.Errorf("%w: invite expired", ErrInvalidInvite)
 	}
 	tunnelID := sanitizeTunnelID(invite.ClientName)
-	// Legacy transfer documents may omit enroll_port; fill the product default.
-	if invite.EnrollPort == 0 {
-		invite.EnrollPort = DefaultEnrollmentPort
-	}
 	view := ClientView{
 		InviteID:                     invite.InviteID,
 		ClientName:                   invite.ClientName,
-		ServerAddress:                invite.ServerAddress,
-		ServerPort:                   invite.ServerPort,
+		ServerAddress:                invite.Data.Host,
+		ServerPort:                   invite.Data.Port,
+		EnrollmentHost:               invite.Enrollment.Host,
+		EnrollmentPort:               invite.Enrollment.Port,
 		TargetAddress:                invite.TargetAddress,
 		TargetPort:                   invite.TargetPort,
 		Principal:                    invite.Principal,
 		ProfileID:                    invite.ProfileID,
 		ArtifactProfileID:            invite.ArtifactProfileID,
 		HostPublicKey:                invite.HostPublicKey,
-		EnrollmentTLSSPKISHA256:      invite.EnrollmentTLSSPKISHA256,
+		EnrollmentTLSSPKISHA256:      invite.Enrollment.TLSSPKISHA256,
+		PublishedEndpointGeneration:  invite.PublishedEndpointGeneration,
 		ExpiresAt:                    invite.ExpiresAt,
 		AuthorizationDurationSeconds: invite.AuthorizationDurationSeconds,
 		ListenAddress:                "127.0.0.1",
@@ -99,16 +101,30 @@ func ParseClientInvite(raw []byte, now time.Time) (Invite, ClientView, error) {
 
 // EnrollmentPort returns the HTTP enrollment control port from an invite.
 func (invite Invite) EnrollmentPort() uint16 {
-	if invite.EnrollPort == 0 {
+	if invite.Enrollment.Port == 0 {
 		return DefaultEnrollmentPort
 	}
-	return invite.EnrollPort
+	return invite.Enrollment.Port
+}
+
+// EnrollmentTLSSPKISHA256 returns the invite-pinned enrollment SPKI digest.
+func (invite Invite) EnrollmentTLSSPKISHA256() string {
+	return invite.Enrollment.TLSSPKISHA256
+}
+
+// DataHost returns the published data locator host.
+func (invite Invite) DataHost() string {
+	return invite.Data.Host
+}
+
+// DataPort returns the published data locator port.
+func (invite Invite) DataPort() uint16 {
+	return invite.Data.Port
 }
 
 // BuildClientManifest renders a client .wt document from one invite and digest.
 func BuildClientManifest(invite Invite, tunnelID string, listenPort uint16, sshDigest string) (config.Config, error) {
-	serverAddr, err := netip.ParseAddr(invite.ServerAddress)
-	if err != nil {
+	if _, err := locator.ParseDialHost(invite.Data.Host); err != nil {
 		return config.Config{}, err
 	}
 	targetAddr, err := netip.ParseAddr(invite.TargetAddress)
@@ -127,9 +143,9 @@ func BuildClientManifest(invite Invite, tunnelID string, listenPort uint16, sshD
 		ProfileID:       invite.ProfileID,
 		SSHBinarySHA256: sshDigest,
 		Server: config.Server{
-			Address: serverAddr,
-			Port:    config.Port(invite.ServerPort),
-			User:    invite.Principal,
+			Host: invite.Data.Host,
+			Port: config.Port(invite.Data.Port),
+			User: invite.Principal,
 		},
 		Tunnels: []config.Tunnel{{
 			ID: tunnelID,

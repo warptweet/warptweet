@@ -6,40 +6,75 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
+	"net/netip"
 	"strings"
 	"time"
+
+	"warptweet.com/warptweet/internal/locator"
 )
 
 // SubmitEnrollment posts one enrollment request to the invite-pinned hybrid TLS
 // endpoint and returns the binding proof.
 func SubmitEnrollment(ctx context.Context, invite Invite, request EnrollmentRequest) (EnrollmentProof, error) {
-	url, err := EnrollmentURL(invite.ServerAddress, invite.EnrollmentPort())
+	proof, _, err := SubmitEnrollmentPlan(ctx, invite, request, locator.ResolveOptions{})
+	return proof, err
+}
+
+// SubmitEnrollmentPlan resolves the enrollment locator once, dials a selected
+// candidate without using the default resolver, and returns the proof plus the
+// selected address.
+func SubmitEnrollmentPlan(
+	ctx context.Context,
+	invite Invite,
+	request EnrollmentRequest,
+	options locator.ResolveOptions,
+) (EnrollmentProof, netip.Addr, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	host, err := locator.ParseDialHost(invite.Enrollment.Host)
 	if err != nil {
-		return EnrollmentProof{}, err
+		return EnrollmentProof{}, netip.Addr{}, fmt.Errorf("%w: enrollment host: %v", ErrInvalidInvite, err)
+	}
+	if host.IP.IsValid() && host.IP.IsLoopback() {
+		options.AllowLoopback = true
+	}
+	plan, err := locator.Resolve(ctx, host, options)
+	if err != nil {
+		return EnrollmentProof{}, netip.Addr{}, err
+	}
+	selected, err := locator.Select(ctx, plan, invite.EnrollmentPort(), options)
+	if err != nil {
+		return EnrollmentProof{}, netip.Addr{}, err
+	}
+	url, err := EnrollmentURL(selected.String(), invite.EnrollmentPort())
+	if err != nil {
+		return EnrollmentProof{}, netip.Addr{}, err
 	}
 	body, err := EncodeEnrollmentRequest(request)
 	if err != nil {
-		return EnrollmentProof{}, err
+		return EnrollmentProof{}, netip.Addr{}, err
 	}
-	payload, err := postJSON(ctx, url, body, invite.EnrollmentTLSSPKISHA256)
+	payload, err := postJSONTo(ctx, url, body, invite.EnrollmentTLSSPKISHA256(), selected, invite.EnrollmentPort())
 	if err != nil {
-		return EnrollmentProof{}, err
+		return EnrollmentProof{}, netip.Addr{}, err
 	}
 	var proof EnrollmentProof
 	if err := json.Unmarshal(payload, &proof); err != nil {
-		return EnrollmentProof{}, fmt.Errorf("%w: decode enrollment proof: %v", ErrInvalidInvite, err)
+		return EnrollmentProof{}, netip.Addr{}, fmt.Errorf("%w: decode enrollment proof: %v", ErrInvalidInvite, err)
 	}
 	if err := ValidateEnrollmentProof(proof, invite, request.PublicKey); err != nil {
-		return EnrollmentProof{}, err
+		return EnrollmentProof{}, netip.Addr{}, err
 	}
 	if proof.ServerAddress == "" {
-		proof.ServerAddress = invite.ServerAddress
+		proof.ServerAddress = invite.Data.Host
 	}
 	if proof.EnrollPort == 0 {
 		proof.EnrollPort = invite.EnrollmentPort()
 	}
-	return proof, nil
+	return proof, selected, nil
 }
 
 // SubmitRevoke asks the pinned host to revoke one enrolled client.
@@ -96,6 +131,10 @@ func managementURL(serverAddress string, enrollPort uint16, action, enrollmentTL
 }
 
 func postJSON(ctx context.Context, url string, body []byte, enrollmentTLSSPKISHA256 string) ([]byte, error) {
+	return postJSONTo(ctx, url, body, enrollmentTLSSPKISHA256, netip.Addr{}, 0)
+}
+
+func postJSONTo(ctx context.Context, url string, body []byte, enrollmentTLSSPKISHA256 string, selected netip.Addr, port uint16) ([]byte, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -108,6 +147,13 @@ func postJSON(ctx context.Context, url string, body []byte, enrollmentTLSSPKISHA
 	req.ContentLength = int64(len(body))
 
 	transport := &http.Transport{Proxy: nil}
+	if selected.IsValid() && port != 0 {
+		endpoint := netip.AddrPortFrom(selected, port).String()
+		transport.DialContext = func(dialCtx context.Context, network, _ string) (net.Conn, error) {
+			dialer := net.Dialer{Timeout: 2 * time.Second}
+			return dialer.DialContext(dialCtx, network, endpoint)
+		}
+	}
 	if !strings.HasPrefix(url, "http://") {
 		tlsConfig, err := PinnedClientTLSConfig(enrollmentTLSSPKISHA256, time.Now)
 		if err != nil {

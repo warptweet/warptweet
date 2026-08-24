@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"warptweet.com/warptweet/internal/grant"
+	"warptweet.com/warptweet/internal/locator"
 	"warptweet.com/warptweet/internal/strictjson"
 )
 
@@ -26,13 +27,12 @@ const (
 	// KindInvite is the invite document kind.
 	KindInvite = "warptweet.invite"
 	// CurrentSchemaVersion is the only supported invite schema.
-	CurrentSchemaVersion = 2
+	// Schema 2 is rejected. There is no decoder for prior numbers.
+	CurrentSchemaVersion = 3
 	// DefaultTTL is the maximum invite lifetime.
 	DefaultTTL = 15 * time.Minute
 	// MaxInviteBytes bounds invite JSON.
 	MaxInviteBytes = 16 << 10
-	// InviteSecretBytes is the server-local MAC key size.
-	InviteSecretBytes = 32
 	// NonceBytes is the invite nonce size.
 	NonceBytes = 16
 )
@@ -40,27 +40,39 @@ const (
 // ErrInvalidInvite identifies invite documents that fail closed.
 var ErrInvalidInvite = errors.New("invalid WarpTweet invite")
 
-// Invite is the canonical signed enrollment authorization carried to a client.
-// It contains no private-key material.
+// InviteDial is the published data-plane locator.
+type InviteDial struct {
+	Host string `json:"host"`
+	Port uint16 `json:"port"`
+}
+
+// InviteEnrollment is the published enrollment locator and SPKI pin.
+type InviteEnrollment struct {
+	Host          string `json:"host"`
+	Port          uint16 `json:"port"`
+	TLSSPKISHA256 string `json:"tls_spki_sha256"`
+}
+
+// Invite is the canonical enrollment authorization carried to a client.
+// It contains no private-key material and no bind addresses.
 type Invite struct {
-	Kind                         string `json:"kind"`
-	SchemaVersion                int    `json:"schema_version"`
-	InviteID                     string `json:"invite_id"`
-	ClientName                   string `json:"client_name"`
-	ServerAddress                string `json:"server_address"`
-	ServerPort                   uint16 `json:"server_port"`
-	EnrollPort                   uint16 `json:"enroll_port"`
-	TargetAddress                string `json:"target_address"`
-	TargetPort                   uint16 `json:"target_port"`
-	Principal                    string `json:"principal"`
-	ProfileID                    string `json:"profile_id"`
-	ArtifactProfileID            string `json:"artifact_profile_id"`
-	HostPublicKey                string `json:"host_public_key"`
-	EnrollmentTLSSPKISHA256      string `json:"enrollment_tls_spki_sha256"`
-	IssuedAt                     string `json:"issued_at"`
-	ExpiresAt                    string `json:"expires_at"`
-	AuthorizationDurationSeconds int64  `json:"authorization_duration_seconds"`
-	Nonce                        string `json:"nonce"`
+	Kind                         string           `json:"kind"`
+	SchemaVersion                int              `json:"schema_version"`
+	InviteID                     string           `json:"invite_id"`
+	ClientName                   string           `json:"client_name"`
+	Data                         InviteDial       `json:"data"`
+	Enrollment                   InviteEnrollment `json:"enrollment"`
+	PublishedEndpointGeneration  uint64           `json:"published_endpoint_generation"`
+	TargetAddress                string           `json:"target_address"`
+	TargetPort                   uint16           `json:"target_port"`
+	Principal                    string           `json:"principal"`
+	ProfileID                    string           `json:"profile_id"`
+	ArtifactProfileID            string           `json:"artifact_profile_id"`
+	HostPublicKey                string           `json:"host_public_key"`
+	IssuedAt                     string           `json:"issued_at"`
+	ExpiresAt                    string           `json:"expires_at"`
+	AuthorizationDurationSeconds int64            `json:"authorization_duration_seconds"`
+	Nonce                        string           `json:"nonce"`
 }
 
 // Record is durable server-side invite state.
@@ -83,21 +95,22 @@ const (
 // CreateInput is the operator-facing invite request.
 type CreateInput struct {
 	ClientName                          string
-	ServerAddress                       netip.Addr
-	ServerPort                          uint16
-	EnrollPort                          uint16
+	DataHost                            string
+	DataPort                            uint16
+	EnrollmentHost                      string
+	EnrollmentPort                      uint16
+	EnrollmentTLSSPKISHA256             string
+	PublishedEndpointGeneration         uint64
 	TargetAddress                       netip.Addr
 	TargetPort                          uint16
 	Principal                           string
 	ProfileID                           string
 	ArtifactProfileID                   string
 	HostPublicKey                       string
-	EnrollmentTLSSPKISHA256             string
 	TTL                                 time.Duration
 	AuthorizationDurationSeconds        int64
 	MaximumAuthorizationDurationSeconds int64
 	Now                                 time.Time
-	Secret                              []byte
 }
 
 // Create builds one single-use invite and its durable record.
@@ -133,29 +146,46 @@ func Create(input CreateInput) (Invite, Record, error) {
 		return Invite{}, Record{}, fmt.Errorf("generate invite id: %w", err)
 	}
 
-	enrollPort := input.EnrollPort
+	dataHost, err := canonicalInviteHost(input.DataHost)
+	if err != nil {
+		return Invite{}, Record{}, fmt.Errorf("%w: data host: %v", ErrInvalidInvite, err)
+	}
+	enrollHost, err := canonicalInviteHost(input.EnrollmentHost)
+	if err != nil {
+		return Invite{}, Record{}, fmt.Errorf("%w: enrollment host: %v", ErrInvalidInvite, err)
+	}
+	enrollPort := input.EnrollmentPort
 	if enrollPort == 0 {
 		enrollPort = DefaultEnrollmentPort
 	}
 	invite := Invite{
-		Kind:                         KindInvite,
-		SchemaVersion:                CurrentSchemaVersion,
-		InviteID:                     hex.EncodeToString(inviteID),
-		ClientName:                   input.ClientName,
-		ServerAddress:                input.ServerAddress.String(),
-		ServerPort:                   input.ServerPort,
-		EnrollPort:                   enrollPort,
+		Kind:          KindInvite,
+		SchemaVersion: CurrentSchemaVersion,
+		InviteID:      hex.EncodeToString(inviteID),
+		ClientName:    input.ClientName,
+		Data: InviteDial{
+			Host: dataHost,
+			Port: input.DataPort,
+		},
+		Enrollment: InviteEnrollment{
+			Host:          enrollHost,
+			Port:          enrollPort,
+			TLSSPKISHA256: strings.TrimSpace(input.EnrollmentTLSSPKISHA256),
+		},
+		PublishedEndpointGeneration:  input.PublishedEndpointGeneration,
 		TargetAddress:                input.TargetAddress.String(),
 		TargetPort:                   input.TargetPort,
 		Principal:                    input.Principal,
 		ProfileID:                    input.ProfileID,
 		ArtifactProfileID:            input.ArtifactProfileID,
 		HostPublicKey:                strings.TrimSpace(input.HostPublicKey),
-		EnrollmentTLSSPKISHA256:      strings.TrimSpace(input.EnrollmentTLSSPKISHA256),
 		IssuedAt:                     now.Format(time.RFC3339Nano),
 		ExpiresAt:                    now.Add(ttl).Format(time.RFC3339Nano),
 		AuthorizationDurationSeconds: authorizationSeconds,
 		Nonce:                        hex.EncodeToString(nonce),
+	}
+	if err := validateInviteShape(invite); err != nil {
+		return Invite{}, Record{}, err
 	}
 	return invite, Record{Invite: invite, Status: StatusIssued}, nil
 }
@@ -172,7 +202,82 @@ func Store(directory string, record Record) error {
 	if _, err := os.Lstat(path); err == nil {
 		return fmt.Errorf("invite %q already exists", record.InviteID)
 	}
-	return writeJSONAtomic(path, record, 0o600)
+	blob, err := Encode(record.Invite)
+	if err != nil {
+		return err
+	}
+	return storeIssuedAtomic(directory, record, blob)
+}
+
+func storeIssuedAtomic(directory string, record Record, blob []byte) error {
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		return err
+	}
+	tempDir, err := os.MkdirTemp(directory, ".wt-invite-tx-*")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = os.RemoveAll(tempDir) }()
+	recordPathTemp := filepath.Join(tempDir, record.InviteID+".json")
+	blobPathTemp := filepath.Join(tempDir, record.InviteID+".wtinvite")
+	if err := writeJSONAtomic(recordPathTemp, record, 0o600); err != nil {
+		return err
+	}
+	if err := writeFileAtomic(blobPathTemp, append(append([]byte(nil), blob...), '\n'), 0o600); err != nil {
+		return err
+	}
+	if err := os.Rename(recordPathTemp, recordPath(directory, record.InviteID)); err != nil {
+		return err
+	}
+	destBlob := filepath.Join(directory, record.InviteID+".wtinvite")
+	if err := os.Rename(blobPathTemp, destBlob); err != nil {
+		return err
+	}
+	dir, err := os.Open(directory)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+	return dir.Sync()
+}
+
+// IssuedBlobPath is the durable transferable invite next to the record.
+func IssuedBlobPath(directory, inviteID string) string {
+	return filepath.Join(directory, inviteID+".wtinvite")
+}
+
+// LoadIssuedBlob returns the durable transferable bytes for an invite.
+func LoadIssuedBlob(directory, inviteID string) ([]byte, error) {
+	if !isHexID(inviteID) {
+		return nil, fmt.Errorf("%w: invite_id is invalid", ErrInvalidInvite)
+	}
+	contents, err := os.ReadFile(IssuedBlobPath(directory, inviteID))
+	if err == nil {
+		return bytes.TrimSuffix(contents, []byte("\n")), nil
+	}
+	if !os.IsNotExist(err) {
+		return nil, err
+	}
+	record, loadErr := Load(directory, inviteID)
+	if loadErr != nil {
+		return nil, err
+	}
+	return Encode(record.Invite)
+}
+
+// UnusedIssuedForGeneration returns issued, unconsumed invites for generation.
+func UnusedIssuedForGeneration(directory string, generation uint64) ([]Record, error) {
+	records, err := List(directory)
+	if err != nil {
+		return nil, err
+	}
+	var issued []Record
+	for _, record := range records {
+		if record.Status == StatusIssued && record.PublishedEndpointGeneration == generation {
+			issued = append(issued, record)
+		}
+	}
+	return issued, nil
 }
 
 // IsHexID reports whether value is a bounded hexadecimal identifier.
@@ -191,6 +296,9 @@ func Load(directory, inviteID string) (Record, error) {
 	}
 	var record Record
 	if err := decodeStrictJSON(contents, &record); err != nil {
+		return Record{}, err
+	}
+	if err := canonicalizeStoredInvite(&record.Invite); err != nil {
 		return Record{}, err
 	}
 	return record, nil
@@ -320,53 +428,39 @@ func Encode(invite Invite) ([]byte, error) {
 	return json.Marshal(invite)
 }
 
-// GenerateSecret returns a fresh server-local invite MAC key.
-func GenerateSecret() ([]byte, error) {
-	secret := make([]byte, InviteSecretBytes)
-	if _, err := rand.Read(secret); err != nil {
-		return nil, err
-	}
-	return secret, nil
-}
-
-// WriteSecret stores the invite MAC key with mode 0600.
-func WriteSecret(path string, secret []byte) error {
-	if len(secret) != InviteSecretBytes {
-		return fmt.Errorf("invite secret must be %d bytes", InviteSecretBytes)
-	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	return writeFileAtomic(path, secret, 0o600)
-}
-
-// ReadSecret loads the invite MAC key.
-func ReadSecret(path string) ([]byte, error) {
-	secret, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	if len(secret) != InviteSecretBytes {
-		return nil, fmt.Errorf("invite secret must be %d bytes", InviteSecretBytes)
-	}
-	return secret, nil
-}
-
 func validateCreateInput(input CreateInput) error {
 	if input.ClientName == "" || !isSafeName(input.ClientName) {
 		return fmt.Errorf("%w: client name is required and must be alphanumeric with ._- ", ErrInvalidInvite)
 	}
-	if !input.ServerAddress.IsValid() || input.ServerAddress.IsUnspecified() || input.ServerAddress.Zone() != "" {
-		return fmt.Errorf("%w: server address must be a concrete unzoned IP", ErrInvalidInvite)
+	if _, err := canonicalInviteHost(input.DataHost); err != nil {
+		return fmt.Errorf("%w: data host: %v", ErrInvalidInvite, err)
+	}
+	if _, err := canonicalInviteHost(input.EnrollmentHost); err != nil {
+		return fmt.Errorf("%w: enrollment host: %v", ErrInvalidInvite, err)
 	}
 	if !input.TargetAddress.IsValid() || input.TargetAddress.IsUnspecified() || input.TargetAddress.Zone() != "" {
 		return fmt.Errorf("%w: target address must be a concrete unzoned IP", ErrInvalidInvite)
 	}
-	if input.ServerPort == 0 || input.TargetPort == 0 {
+	if input.DataPort == 0 || input.TargetPort == 0 {
 		return fmt.Errorf("%w: ports must be nonzero", ErrInvalidInvite)
 	}
-	if input.EnrollPort != 0 && input.EnrollPort == input.ServerPort {
-		return fmt.Errorf("%w: enroll_port must differ from server_port", ErrInvalidInvite)
+	if input.PublishedEndpointGeneration == 0 {
+		return fmt.Errorf("%w: published_endpoint_generation must be at least 1", ErrInvalidInvite)
+	}
+	dataKey, err := dialLocatorKey(input.DataHost, input.DataPort)
+	if err != nil {
+		return fmt.Errorf("%w: data host: %v", ErrInvalidInvite, err)
+	}
+	enrollPort := input.EnrollmentPort
+	if enrollPort == 0 {
+		enrollPort = DefaultEnrollmentPort
+	}
+	enrollKey, err := dialLocatorKey(input.EnrollmentHost, enrollPort)
+	if err != nil {
+		return fmt.Errorf("%w: enrollment host: %v", ErrInvalidInvite, err)
+	}
+	if dataKey == enrollKey {
+		return fmt.Errorf("%w: data and enrollment locators must not share the same canonical host:port", ErrInvalidInvite)
 	}
 	if input.Principal == "" || input.ProfileID == "" || input.ArtifactProfileID == "" {
 		return fmt.Errorf("%w: principal, profile_id, and artifact_profile_id are required", ErrInvalidInvite)
@@ -375,7 +469,7 @@ func validateCreateInput(input CreateInput) error {
 		return fmt.Errorf("%w: host public key is required and must be one line", ErrInvalidInvite)
 	}
 	if !isLowerHexDigest(input.EnrollmentTLSSPKISHA256) {
-		return fmt.Errorf("%w: enrollment_tls_spki_sha256 must be a lowercase SHA-256 digest", ErrInvalidInvite)
+		return fmt.Errorf("%w: enrollment tls_spki_sha256 must be a lowercase SHA-256 digest", ErrInvalidInvite)
 	}
 	return nil
 }
@@ -390,28 +484,72 @@ func validateInviteShape(invite Invite) error {
 	if !isHexID(invite.InviteID) {
 		return fmt.Errorf("%w: invite_id is invalid", ErrInvalidInvite)
 	}
-	if _, err := netip.ParseAddr(invite.ServerAddress); err != nil {
-		return fmt.Errorf("%w: server address: %v", ErrInvalidInvite, err)
+	if invite.PublishedEndpointGeneration == 0 {
+		return fmt.Errorf("%w: published_endpoint_generation must be at least 1", ErrInvalidInvite)
+	}
+	if _, err := canonicalInviteHost(invite.Data.Host); err != nil {
+		return fmt.Errorf("%w: data host: %v", ErrInvalidInvite, err)
+	}
+	if _, err := canonicalInviteHost(invite.Enrollment.Host); err != nil {
+		return fmt.Errorf("%w: enrollment host: %v", ErrInvalidInvite, err)
 	}
 	if _, err := netip.ParseAddr(invite.TargetAddress); err != nil {
 		return fmt.Errorf("%w: target address: %v", ErrInvalidInvite, err)
 	}
-	if invite.ServerPort == 0 || invite.TargetPort == 0 {
+	if invite.Data.Port == 0 || invite.TargetPort == 0 || invite.Enrollment.Port == 0 {
 		return fmt.Errorf("%w: ports must be nonzero", ErrInvalidInvite)
 	}
-	if invite.EnrollPort == 0 {
-		return fmt.Errorf("%w: enroll_port must be nonzero", ErrInvalidInvite)
+	dataKey, err := dialLocatorKey(invite.Data.Host, invite.Data.Port)
+	if err != nil {
+		return fmt.Errorf("%w: data host: %v", ErrInvalidInvite, err)
 	}
-	if invite.EnrollPort == invite.ServerPort {
-		return fmt.Errorf("%w: enroll_port must differ from server_port", ErrInvalidInvite)
+	enrollKey, err := dialLocatorKey(invite.Enrollment.Host, invite.Enrollment.Port)
+	if err != nil {
+		return fmt.Errorf("%w: enrollment host: %v", ErrInvalidInvite, err)
 	}
-	if !isLowerHexDigest(invite.EnrollmentTLSSPKISHA256) {
-		return fmt.Errorf("%w: enrollment_tls_spki_sha256 must be a lowercase SHA-256 digest", ErrInvalidInvite)
+	if dataKey == enrollKey {
+		return fmt.Errorf("%w: data and enrollment locators must not share the same canonical host:port", ErrInvalidInvite)
+	}
+	if !isLowerHexDigest(invite.Enrollment.TLSSPKISHA256) {
+		return fmt.Errorf("%w: enrollment tls_spki_sha256 must be a lowercase SHA-256 digest", ErrInvalidInvite)
 	}
 	if _, err := grant.DurationFromSeconds(invite.AuthorizationDurationSeconds); err != nil {
 		return fmt.Errorf("%w: authorization_duration_seconds: %v", ErrInvalidInvite, err)
 	}
 	return nil
+}
+
+func canonicalizeStoredInvite(invite *Invite) error {
+	if invite == nil {
+		return fmt.Errorf("%w: invite is nil", ErrInvalidInvite)
+	}
+	dataHost, err := canonicalInviteHost(invite.Data.Host)
+	if err != nil {
+		return fmt.Errorf("%w: data host: %v", ErrInvalidInvite, err)
+	}
+	enrollHost, err := canonicalInviteHost(invite.Enrollment.Host)
+	if err != nil {
+		return fmt.Errorf("%w: enrollment host: %v", ErrInvalidInvite, err)
+	}
+	invite.Data.Host = dataHost
+	invite.Enrollment.Host = enrollHost
+	return validateInviteShape(*invite)
+}
+
+func canonicalInviteHost(value string) (string, error) {
+	host, err := locator.ParseDialHost(value)
+	if err != nil {
+		return "", err
+	}
+	return host.Canonical()
+}
+
+func dialLocatorKey(host string, port uint16) (string, error) {
+	canonical, err := canonicalInviteHost(host)
+	if err != nil {
+		return "", err
+	}
+	return canonical + "\x00" + fmt.Sprintf("%d", port), nil
 }
 
 func isLowerHexDigest(value string) bool {

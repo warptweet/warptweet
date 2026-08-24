@@ -23,6 +23,7 @@ import (
 	"warptweet.com/warptweet/internal/grant"
 	"warptweet.com/warptweet/internal/knownhosts"
 	"warptweet.com/warptweet/internal/lifecycle"
+	"warptweet.com/warptweet/internal/locator"
 	"warptweet.com/warptweet/internal/outcome"
 	"warptweet.com/warptweet/internal/profile"
 	"warptweet.com/warptweet/internal/routestate"
@@ -319,7 +320,11 @@ func runRenderClient(arguments []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	spec, err := clientSpec(manifest, tunnelID, manifestPath)
+	_, selected, err := resolveManifestServer(context.Background(), manifest, locator.ResolveOptions{}, false)
+	if err != nil {
+		return err
+	}
+	spec, err := clientSpec(manifest, tunnelID, manifestPath, selected)
 	if err != nil {
 		return err
 	}
@@ -407,7 +412,11 @@ func runRenderKnownHost(arguments []string, stdout, stderr io.Writer) error {
 	if err != nil {
 		return err
 	}
-	if _, err := clientSpec(manifest, tunnelID.value, manifestPath.value); err != nil {
+	_, selected, err := resolveManifestServer(context.Background(), manifest, locator.ResolveOptions{}, false)
+	if err != nil {
+		return err
+	}
+	if _, err := clientSpec(manifest, tunnelID.value, manifestPath.value, selected); err != nil {
 		return err
 	}
 	publicKey, err := readHostPublicKeyFile(publicKeyPath.value)
@@ -467,7 +476,11 @@ func runDoctor(
 	if err != nil {
 		return err
 	}
-	spec, err := clientSpec(manifest, tunnelID, manifestPath)
+	_, selected, err := resolveManifestServer(ctx, manifest, locator.ResolveOptions{}, false)
+	if err != nil {
+		return err
+	}
+	spec, err := clientSpec(manifest, tunnelID, manifestPath, selected)
 	if err != nil {
 		return err
 	}
@@ -662,7 +675,11 @@ func runTunnel(
 	if err != nil {
 		return err
 	}
-	spec, err := clientSpec(manifest, tunnelID.value, manifestPath.value)
+	_, selected, err := resolveManifestServer(ctx, manifest, locator.ResolveOptions{}, true)
+	if err != nil {
+		return err
+	}
+	spec, err := clientSpec(manifest, tunnelID.value, manifestPath.value, selected)
 	if err != nil {
 		return err
 	}
@@ -818,7 +835,7 @@ func parseClientSelection(name string, arguments []string, stderr io.Writer) (st
 	return manifestPath.value, tunnelID.value, nil
 }
 
-func clientSpec(manifest config.Config, tunnelID, manifestPath string) (engine.ClientSpec, error) {
+func clientSpec(manifest config.Config, tunnelID, manifestPath string, serverAddr netip.Addr) (engine.ClientSpec, error) {
 	var selectedTunnel *config.Tunnel
 	for index := range manifest.Tunnels {
 		if manifest.Tunnels[index].ID == tunnelID {
@@ -852,7 +869,7 @@ func clientSpec(manifest config.Config, tunnelID, manifestPath string) (engine.C
 	}
 	return engine.ClientSpec{
 		TunnelID:             selectedTunnel.ID,
-		ServerAddress:        canonicalAddress(manifest.Server.Address),
+		ServerAddress:        canonicalAddress(serverAddr),
 		ServerPort:           uint16(manifest.Server.Port),
 		ServerUser:           manifest.Server.User,
 		ListenAddress:        canonicalAddress(selectedTunnel.Listen.Address),
@@ -1088,7 +1105,7 @@ type publicCommand struct {
 }
 
 var publicCommands = []publicCommand{
-	{Name: "host", Usage: "warptweet host --to <port|ip:port> [--name <label>] [--access-for 30d] [--out path] [--stdout] [--listen ip:port] [--no-invite] [--json]"},
+	{Name: "host", Usage: "warptweet host --to <port|ip:port> [--name <label>] [--access-for 30d] [--out path] [--stdout] [--listen ip:port] [--listen-interface name] [--advertise host:port] [--enroll-listen ip:port] [--enroll-advertise host:port] [--no-invite] [--json]"},
 	{Name: "connect", Usage: "warptweet connect <invite.wtinvite> [--yes] [--listen-port <port>] [--restart unless-stopped|manual] [--proof <proof.json>]"},
 	{Name: "profile", Usage: "warptweet profile"},
 	{Name: "validate", Usage: "warptweet validate --config <manifest.wt>"},

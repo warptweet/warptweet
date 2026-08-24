@@ -60,7 +60,6 @@ func TestEnrollUnitUsesControllerEnrollmentListener(t *testing.T) {
 		"AssertFileIsExecutable=/opt/warptweet/bin/warptweet",
 		"AssertPathExists=/etc/warptweet/server.wt",
 		"AssertPathExists=/var/lib/warptweet/ssh/ssh_host_mldsa44_ed25519_key",
-		"AssertPathExists=/etc/warptweet/invite.mac-key",
 		"ExecStartPre=/opt/warptweet/bin/warptweet doctor-server --config /etc/warptweet/server.wt",
 		"ExecStart=/opt/warptweet/bin/warptweet server enroll-listen",
 		"User=root",
@@ -83,6 +82,7 @@ func TestEnrollUnitUsesControllerEnrollmentListener(t *testing.T) {
 		"ExecStart=/usr/bin/",
 		"ConditionFileIsExecutable=",
 		"WantedBy=multi-user.target",
+		"invite.mac-key",
 	} {
 		if strings.Contains(unit, forbidden) {
 			t.Fatalf("enroll unit contains forbidden text %q", forbidden)

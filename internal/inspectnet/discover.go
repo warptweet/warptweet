@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"strings"
 )
 
 // RouteLookup issues one RTM_GETROUTE lookup. Tests inject fakes; production
@@ -108,6 +109,51 @@ func candidateForFamily(lookup RouteLookup, ifaces []Interface, family int, prob
 		)
 	}
 	return filterCandidate(iface, addr, family)
+}
+
+// AddressForInterface resolves one named guest interface to a single unicast
+// address. The name is a bind source, not a persisted locator. Zero or several
+// usable addresses fail closed and name --listen.
+func AddressForInterface(name string, ifaces []Interface) (netip.Addr, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return netip.Addr{}, fmt.Errorf("listen-interface is empty; pass --listen")
+	}
+	var found *Interface
+	for i := range ifaces {
+		if ifaces[i].Name == name {
+			found = &ifaces[i]
+			break
+		}
+	}
+	if found == nil {
+		return netip.Addr{}, fmt.Errorf("listen-interface %s was not found; pass --listen", name)
+	}
+	if found.Flags&net.FlagUp == 0 {
+		return netip.Addr{}, fmt.Errorf("listen-interface %s is down; pass --listen", name)
+	}
+	if found.Flags&net.FlagLoopback != 0 {
+		return netip.Addr{}, fmt.Errorf("listen-interface %s is loopback; pass --listen", name)
+	}
+	v4 := familyUnicast(*found, FamilyIPv4)
+	v6 := familyUnicast(*found, FamilyIPv6)
+	switch {
+	case len(v4) == 1 && len(v6) == 1:
+		return netip.Addr{}, fmt.Errorf(
+			"listen-interface %s has unique IPv4 %s and IPv6 %s; pass --listen",
+			name, v4[0], v6[0],
+		)
+	case len(v4) == 1 && len(v6) == 0:
+		return v4[0], nil
+	case len(v6) == 1 && len(v4) == 0:
+		return v6[0], nil
+	case len(v4) > 1:
+		return netip.Addr{}, fmt.Errorf("listen-interface %s has %d IPv4 addresses, want 1; pass --listen", name, len(v4))
+	case len(v6) > 1:
+		return netip.Addr{}, fmt.Errorf("listen-interface %s has %d IPv6 addresses, want 1; pass --listen", name, len(v6))
+	default:
+		return netip.Addr{}, fmt.Errorf("listen-interface %s has no usable unicast address; pass --listen", name)
+	}
 }
 
 func filterCandidate(iface Interface, addr netip.Addr, family int) (familyCandidate, error) {

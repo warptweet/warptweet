@@ -319,6 +319,56 @@ func TestFamilyUnicastSkipsLinkLocalWhenCounting(t *testing.T) {
 	}
 }
 
+func TestAddressForInterfacePersistsSingleAddress(t *testing.T) {
+	t.Parallel()
+
+	ifaces := []Interface{{
+		Index: 2,
+		Name:  "ens4",
+		Flags: net.FlagUp,
+		Addrs: []netip.Addr{netip.MustParseAddr("10.168.0.2"), netip.MustParseAddr("fe80::1")},
+	}}
+	addr, err := AddressForInterface("ens4", ifaces)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if addr.String() != "10.168.0.2" {
+		t.Fatalf("addr=%s", addr)
+	}
+}
+
+func TestAddressForInterfaceFailsClosedOnBothFamilies(t *testing.T) {
+	t.Parallel()
+
+	ifaces := []Interface{{
+		Index: 2,
+		Name:  "ens4",
+		Flags: net.FlagUp,
+		Addrs: []netip.Addr{netip.MustParseAddr("10.168.0.2"), netip.MustParseAddr("2001:db8::1")},
+	}}
+	_, err := AddressForInterface("ens4", ifaces)
+	if err == nil || !strings.Contains(err.Error(), "--listen") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestAddressForInterfaceFailsClosedOnMissingOrAmbiguous(t *testing.T) {
+	t.Parallel()
+
+	ifaces := []Interface{{
+		Index: 2,
+		Name:  "ens4",
+		Flags: net.FlagUp,
+		Addrs: []netip.Addr{netip.MustParseAddr("10.168.0.2"), netip.MustParseAddr("10.168.0.3")},
+	}}
+	if _, err := AddressForInterface("missing", ifaces); err == nil {
+		t.Fatal("accepted missing interface")
+	}
+	if _, err := AddressForInterface("ens4", ifaces); err == nil || !strings.Contains(err.Error(), "--listen") {
+		t.Fatalf("ambiguous IPv4: %v", err)
+	}
+}
+
 func fixedLookup(v4, v6 RouteReply) RouteLookup {
 	return func(family int, dst netip.Addr) (RouteReply, error) {
 		_ = dst

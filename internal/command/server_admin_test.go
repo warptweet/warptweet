@@ -81,25 +81,23 @@ func TestParseEndpointAcceptsConcreteIPs(t *testing.T) {
 func TestInviteCreateAndRevokeWithoutPackage(t *testing.T) {
 	t.Parallel()
 
-	secret, err := enrollment.GenerateSecret()
-	if err != nil {
-		t.Fatalf("GenerateSecret: %v", err)
-	}
 	directory := t.TempDir()
 	now := time.Date(2026, 8, 12, 15, 0, 0, 0, time.UTC)
 	invite, record, err := enrollment.Create(enrollment.CreateInput{
-		ClientName:              "node-a",
-		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
-		ServerPort:              2222,
-		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
-		TargetPort:              5432,
-		Principal:               server.DefaultDedicatedUser,
-		ProfileID:               profile.CurrentID,
-		ArtifactProfileID:       "linux-amd64",
-		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA",
-		EnrollmentTLSSPKISHA256: strings.Repeat("a", 64),
-		Now:                     now,
-		Secret:                  secret,
+		ClientName:                  "node-a",
+		DataHost:                    "192.0.2.10",
+		DataPort:                    2222,
+		EnrollmentHost:              "192.0.2.10",
+		EnrollmentPort:              enrollment.DefaultEnrollmentPort,
+		PublishedEndpointGeneration: 1,
+		TargetAddress:               netip.MustParseAddr("198.51.100.20"),
+		TargetPort:                  5432,
+		Principal:                   server.DefaultDedicatedUser,
+		ProfileID:                   profile.CurrentID,
+		ArtifactProfileID:           "linux-amd64",
+		HostPublicKey:               "ssh-mldsa44-ed25519@openssh.com AAAA",
+		EnrollmentTLSSPKISHA256:     strings.Repeat("a", 64),
+		Now:                         now,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)

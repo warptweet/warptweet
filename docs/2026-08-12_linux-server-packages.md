@@ -34,7 +34,7 @@ warptweet host --to <port|numeric-ip:port> [--name <client-label>]
 
 1. generates or reuses the composite host identity through the bundled
    `ssh-keygen -t mldsa44-ed25519`;
-2. creates the invite MAC secret and the pinned TLS 1.3 enrollment identity;
+2. creates the pinned TLS 1.3 enrollment identity (no invite MAC key);
 3. writes the fixed server manifest and an initially empty managed
    `authorized_keys` file;
 4. reconciles pending client authorization state;
@@ -44,7 +44,8 @@ warptweet host --to <port|numeric-ip:port> [--name <client-label>]
 7. starts `warptweet-enroll.service` and requires its pinned-TLS endpoint; and
 8. writes one single-use `<label>.wtinvite`, unless `--no-invite` was selected.
 
-`host ready` is emitted only after both listeners are accepting. There is no
+Host output reports `local_listener_ready`, `published_endpoint_configured`,
+and `external_reachability_unverified` after both bind listeners accept. There is no
 public flag that bypasses enrollment readiness. A port-only target is local to
 the host, so `--to 5432` means `127.0.0.1:5432`.
 

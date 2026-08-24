@@ -143,17 +143,19 @@ warptweet host --to 10.0.0.5:5432 --listen 0.0.0.0:2222
 1. Preflight packaged engine and layout.
 2. Ensure host identity at fixed path.
 3. Write or update the server policy manifest for the listener and target.
-4. Ensure invite MAC secret exists.
+4. Ensure the pinned enrollment TLS identity exists. Invites are unsigned bearer documents; there is no invite MAC key.
 5. Enable/start host service unit when packaged that way.
-6. Mint invite bound to listen, target, host public key, profile, artifact profile, principal, expiry, nonce, `enroll_port`, and MAC. Connect uses the MAC-bound `enroll_port` for HTTPS enrollment (HTTP/1.1 over the pinned TLS channel).
+6. Mint an invite schema 3 document bound to the published data and enrollment dials, host public key, profile, artifact profile, principal, expiry, nonce, and enrollment SPKI. Connect uses the enrollment locator for HTTPS (HTTP/1.1 over the pinned TLS channel).
 7. Write named invite file; print path + host fingerprint + local target summary.
 
 ### Human output (concise)
 
 ```text
-host ready
+local_listener_ready
+published_endpoint_configured
+external_reachability_unverified
 target   127.0.0.1:5432
-listen   0.0.0.0:2222
+listen   10.168.0.2:2222
 host     SHA256:ab:cd:...
 invite   /home/you/db-1.wtinvite
 ```

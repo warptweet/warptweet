@@ -1,8 +1,8 @@
 // Package config loads and validates WarpTweet client manifests.
 //
-// A .wt manifest is strict JSON whose schema_version must be 1. Duplicate or
+// A .wt manifest is strict JSON whose schema_version must be 2. Duplicate or
 // unknown fields and trailing JSON values are rejected so configuration
-// mistakes cannot silently weaken tunnel policy.
+// mistakes cannot silently weaken tunnel policy. Schema 1 is rejected.
 package config
 
 import (
@@ -21,8 +21,9 @@ import (
 
 const (
 	// CurrentSchemaVersion is the only configuration schema understood by this
-	// package. A semantic change to the schema requires a new version.
-	CurrentSchemaVersion = 1
+	// package. A semantic change to the schema requires a new version. Schema 1
+	// is rejected.
+	CurrentSchemaVersion = 2
 
 	// ManifestExtension is the required suffix for a WarpTweet manifest.
 	ManifestExtension = ".wt"
@@ -74,10 +75,11 @@ type Endpoint struct {
 }
 
 // Server identifies the SSH server and the Unix account used for the tunnel.
+// Host is a persisted locator: an IP literal or a DNS name.
 type Server struct {
-	Address netip.Addr `json:"address"`
-	Port    Port       `json:"port"`
-	User    string     `json:"user"`
+	Host string `json:"host"`
+	Port Port   `json:"port"`
+	User string `json:"user"`
 }
 
 // Tunnel is one local TCP listener forwarded to a numeric target endpoint.
@@ -94,7 +96,7 @@ type Supervision struct {
 	MaxBackoff     Duration `json:"max_backoff"`
 }
 
-// Config is the typed representation of a WarpTweet client .wt manifest v1.
+// Config is the typed representation of a WarpTweet client .wt manifest v2.
 // ProfileID is accepted only when it resolves to the immutable
 // profile.CurrentID.
 type Config struct {
@@ -127,7 +129,7 @@ func Load(path string) (Config, error) {
 }
 
 // Decode strictly decodes and validates the JSON content of one .wt manifest
-// v1 from reader. Duplicate fields, unknown fields, trailing JSON values,
+// v2 from reader. Duplicate fields, unknown fields, trailing JSON values,
 // invalid UTF-8, and oversized inputs are rejected. Call Load when the
 // manifest path is known so the required .wt extension is also enforced.
 func Decode(reader io.Reader) (Config, error) {
@@ -165,6 +167,9 @@ func Decode(reader io.Reader) (Config, error) {
 		return Config{}, fmt.Errorf("decode config: trailing data: %w", err)
 	}
 
+	if err := canonicalizeServerHost(&result); err != nil {
+		return Config{}, err
+	}
 	if err := Validate(result); err != nil {
 		return Config{}, err
 	}

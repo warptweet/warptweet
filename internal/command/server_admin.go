@@ -24,7 +24,6 @@ import (
 )
 
 const (
-	inviteSecretPath     = "/etc/warptweet/invite.mac-key"
 	inviteDirectory      = "/var/lib/warptweet/invites"
 	serverStateDirectory = "/var/lib/warptweet/server"
 )
@@ -211,7 +210,7 @@ func runServerClockRecover(ctx context.Context, arguments []string, stdout, stde
 	if err := grant.ClearBlockedClock(installlayout.HostClockBlockedPath); err != nil {
 		return err
 	}
-	if _, err := ensureSSHDStarted(ctx, manifest, false); err != nil {
+	if _, err := ensureSSHDStarted(ctx, manifest.Network.Data.Listen.AddrPort(), false); err != nil {
 		return fmt.Errorf("restart data plane: %w", err)
 	}
 	return writeJSON(stdout, map[string]any{"status": "clock_recovered"})

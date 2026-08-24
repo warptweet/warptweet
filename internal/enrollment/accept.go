@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"warptweet.com/warptweet/internal/grant"
+	"warptweet.com/warptweet/internal/locator"
 	"warptweet.com/warptweet/internal/profile"
 )
 
@@ -142,7 +143,7 @@ func Accept(input AcceptInput) (AcceptResult, error) {
 	if err != nil {
 		return AcceptResult{}, fmt.Errorf("%w: %v", ErrInvalidInvite, err)
 	}
-	serverAddress := firstNonEmpty(input.ServerAddress, record.ServerAddress)
+	serverAddress := firstNonEmpty(input.ServerAddress, record.Data.Host)
 	if input.ClientsDirectory != "" {
 		wantClient := ClientRecord{
 			ClientID:                     clientID,
@@ -195,10 +196,7 @@ func Accept(input AcceptInput) (AcceptResult, error) {
 		return AcceptResult{}, err
 	}
 
-	enrollPort := consumed.EnrollPort
-	if enrollPort == 0 {
-		enrollPort = DefaultEnrollmentPort
-	}
+	enrollPort := consumed.EnrollmentPort()
 	proof := EnrollmentProof{
 		InviteID:                     consumed.InviteID,
 		ClientID:                     clientID,
@@ -276,10 +274,7 @@ func storeOrResumePendingClient(directory string, want ClientRecord) (ClientReco
 }
 
 func acceptedResult(input AcceptInput, invite Record, client ClientRecord, publicKey string) AcceptResult {
-	enrollPort := invite.EnrollPort
-	if enrollPort == 0 {
-		enrollPort = DefaultEnrollmentPort
-	}
+	enrollPort := invite.EnrollmentPort()
 	proof := EnrollmentProof{
 		InviteID:                     invite.InviteID,
 		ClientID:                     client.ClientID,
@@ -292,7 +287,7 @@ func acceptedResult(input AcceptInput, invite Record, client ClientRecord, publi
 		AcceptedAt:                   client.AcceptedAt,
 		AuthorizationNotAfter:        client.AuthorizationNotAfter,
 		AuthorizationDurationSeconds: client.AuthorizationDurationSeconds,
-		ServerAddress:                firstNonEmpty(input.ServerAddress, invite.ServerAddress),
+		ServerAddress:                firstNonEmpty(input.ServerAddress, invite.Data.Host),
 		EnrollPort:                   enrollPort,
 	}
 	return AcceptResult{Proof: proof, PublicKey: publicKey, Invite: invite.Invite, ClientID: client.ClientID}
@@ -411,7 +406,15 @@ func parseHostForURL(serverAddress string) (string, error) {
 	if value == "" {
 		return "", fmt.Errorf("%w: server address is required", ErrInvalidInvite)
 	}
-	return value, nil
+	host, err := locator.ParseDialHost(value)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrInvalidInvite, err)
+	}
+	canonical, err := host.Canonical()
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrInvalidInvite, err)
+	}
+	return canonical, nil
 }
 
 func joinHostPort(host string, port uint16) string {

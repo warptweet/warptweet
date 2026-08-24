@@ -161,7 +161,7 @@ Not a tunnel manifest. Not reusable after consume. Never private keys or passwor
 | Default TTL | 15 minutes (hard max) |
 | Size bound | 16 KiB |
 | MAC | HMAC-SHA256 over newline-joined fields (excludes `mac`) |
-| MAC secret | 32 bytes, server-local only (`/etc/warptweet/invite.mac-key`, mode 0600) |
+| MAC secret | Removed. Invites are unsigned bearers; `/etc/warptweet/invite.mac-key` is not created. |
 | Server durable state | `/var/lib/warptweet/invites/<invite_id>.json` with `issued` / `consumed` / `revoked` / `expired` |
 | Client MAC verify | Client **does not** hold the MAC key; it fails closed on shape, expiry, profile, and secret markers. Authenticity of accept is proven later by enrollment proof binding + host key pin. |
 
@@ -379,7 +379,7 @@ flowchart TB
     CTRL_S["warptweet controller"]
     ID_H["composite host key"]
     AK["authorized_keys"]
-    MAC["invite.mac-key"]
+    (no invite MAC; WT-SR-020)
     SSHD["pinned sshd"]
     TGT["authorized target"]
   end
@@ -437,7 +437,7 @@ flowchart TB
 /opt/warptweet/etc/ssh_host_mldsa44_ed25519_key
 /opt/warptweet/etc/authorized_keys/<user>
 /opt/warptweet/share/openssh-bundle.sha256
-/etc/warptweet/{client.wt,server.wt,invite.mac-key,identity/,trust/,enrollment/}
+/etc/warptweet/{client.wt,server.wt,identity/,trust/,enrollment/}
 /var/lib/warptweet/{invites/,clients/,server/}
 /run/warptweet/tunnels/<tunnel-id>/{state.json,lock,pid}
 ```

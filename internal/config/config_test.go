@@ -38,8 +38,8 @@ func TestLoadAcceptsValidStrictConfiguration(t *testing.T) {
 	if got.ProfileID != profile.CurrentID {
 		t.Fatalf("ProfileID = %q, want %q", got.ProfileID, profile.CurrentID)
 	}
-	if got.Server.Address != netip.MustParseAddr("192.0.2.10") {
-		t.Fatalf("Server.Address = %v", got.Server.Address)
+	if got.Server.Host != "192.0.2.10" {
+		t.Fatalf("Server.Host = %v", got.Server.Host)
 	}
 	if len(got.Tunnels) != 1 || got.Tunnels[0].ID != "database-primary" {
 		t.Fatalf("Tunnels = %#v", got.Tunnels)
@@ -287,7 +287,7 @@ func TestDecodeRejectsUnsupportedSchemaAndPathFields(t *testing.T) {
 	t.Run("schema version", func(t *testing.T) {
 		t.Parallel()
 		document := validManifestDocument(t)
-		document["schema_version"] = 2
+		document["schema_version"] = 1
 		contents, err := json.Marshal(document)
 		if err != nil {
 			t.Fatalf("Marshal: %v", err)
@@ -337,7 +337,7 @@ func TestValidateAcceptsBoundaryValuesAndIPv6Endpoints(t *testing.T) {
 	t.Parallel()
 
 	value := validConfig()
-	value.Server.Address = netip.MustParseAddr("2001:db8::10")
+	value.Server.Host = "2001:db8::10"
 	value.Tunnels[0].Target.Address = netip.MustParseAddr("2001:db8::20")
 	value.Server.Port = 1
 	value.Tunnels[0].Listen.Port = 65535
@@ -389,7 +389,7 @@ func TestValidateRejectsInvalidConfiguration(t *testing.T) {
 			name:  "schema version",
 			field: "schema_version",
 			mutate: func(value *Config) {
-				value.SchemaVersion = 2
+				value.SchemaVersion = 1
 			},
 		},
 		{
@@ -421,31 +421,31 @@ func TestValidateRejectsInvalidConfiguration(t *testing.T) {
 			},
 		},
 		{
-			name:  "invalid server address",
-			field: "server.address",
+			name:  "invalid server host",
+			field: "server.host",
 			mutate: func(value *Config) {
-				value.Server.Address = netip.Addr{}
+				value.Server.Host = ""
 			},
 		},
 		{
-			name:  "IPv4-mapped server address",
-			field: "server.address",
+			name:  "unspecified server host",
+			field: "server.host",
 			mutate: func(value *Config) {
-				value.Server.Address = netip.MustParseAddr("::ffff:192.0.2.10")
+				value.Server.Host = "0.0.0.0"
 			},
 		},
 		{
-			name:  "unspecified server address",
-			field: "server.address",
+			name:  "multicast server host",
+			field: "server.host",
 			mutate: func(value *Config) {
-				value.Server.Address = netip.IPv4Unspecified()
+				value.Server.Host = "224.0.0.1"
 			},
 		},
 		{
-			name:  "multicast server address",
-			field: "server.address",
+			name:  "uppercase DNS server host",
+			field: "server.host",
 			mutate: func(value *Config) {
-				value.Server.Address = netip.MustParseAddr("224.0.0.1")
+				value.Server.Host = "TUNNEL.EXAMPLE.COM"
 			},
 		},
 		{
@@ -616,6 +616,24 @@ func TestValidateRejectsInvalidConfiguration(t *testing.T) {
 	}
 }
 
+func TestDecodeCanonicalizesDNSServerHostCasing(t *testing.T) {
+	t.Parallel()
+
+	value := validConfig()
+	value.Server.Host = "TUNNEL.EXAMPLE.COM"
+	contents, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := Decode(bytes.NewReader(contents))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Server.Host != "tunnel.example.com" {
+		t.Fatalf("host=%q", decoded.Server.Host)
+	}
+}
+
 func TestDurationJSONRoundTrip(t *testing.T) {
 	t.Parallel()
 
@@ -644,9 +662,9 @@ func validConfig() Config {
 		ProfileID:       profile.CurrentID,
 		SSHBinarySHA256: strings.Repeat("a", 64),
 		Server: Server{
-			Address: netip.MustParseAddr("192.0.2.10"),
-			Port:    22,
-			User:    "warptweet",
+			Host: "192.0.2.10",
+			Port: 22,
+			User: "warptweet",
 		},
 		Tunnels: []Tunnel{
 			{

@@ -69,6 +69,28 @@ func TestArgumentsPinOnlyChaCha20(t *testing.T) {
 	}
 }
 
+func TestClientSpecUsesSelectedIPAndTunnelHostKeyAlias(t *testing.T) {
+	t.Parallel()
+
+	spec := validClientSpec(t)
+	spec.ServerAddress = netip.MustParseAddr("34.20.174.226")
+	spec.TunnelID = "database-primary"
+	arguments, err := Arguments(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(arguments, " ")
+	if !strings.Contains(joined, "HostName=34.20.174.226") {
+		t.Fatalf("HostName is not the selected IP: %s", joined)
+	}
+	if strings.Contains(joined, "HostName=tunnel.example.com") {
+		t.Fatal("HostName used the DNS locator")
+	}
+	if !strings.Contains(joined, "HostKeyAlias=warptweet-database-primary") {
+		t.Fatalf("HostKeyAlias=%s", joined)
+	}
+}
+
 func TestArgumentsExposeOnlyLocalForward(t *testing.T) {
 	t.Parallel()
 

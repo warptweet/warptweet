@@ -7,6 +7,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"warptweet.com/warptweet/internal/locator"
 	"warptweet.com/warptweet/internal/profile"
 )
 
@@ -92,8 +93,24 @@ func (value Config) Validate() error {
 	return Validate(value)
 }
 
+func canonicalizeServerHost(value *Config) error {
+	if value == nil {
+		return invalid("server.host", "must be an IP literal or DNS name")
+	}
+	host, err := locator.ParseDialHost(value.Server.Host)
+	if err != nil {
+		return invalid("server.host", "%v", err)
+	}
+	canonical, err := host.Canonical()
+	if err != nil {
+		return invalid("server.host", "%v", err)
+	}
+	value.Server.Host = canonical
+	return nil
+}
+
 func validateServer(server Server) error {
-	if err := validateAddress("server.address", server.Address); err != nil {
+	if err := validateServerHost(server.Host); err != nil {
 		return err
 	}
 	if err := validatePort("server.port", server.Port); err != nil {
@@ -101,6 +118,44 @@ func validateServer(server Server) error {
 	}
 	if err := validateUnixUser(server.User); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateServerHost(value string) error {
+	host, err := locator.ParseDialHost(value)
+	if err != nil {
+		return invalid("server.host", "%v", err)
+	}
+	canonical, err := host.Canonical()
+	if err != nil {
+		return invalid("server.host", "%v", err)
+	}
+	if canonical != value {
+		return invalid("server.host", "must use canonical locator form")
+	}
+	if host.IP.IsValid() {
+		return validateDialIP("server.host", host.IP)
+	}
+	return nil
+}
+
+func validateDialIP(field string, address netip.Addr) error {
+	address = address.Unmap()
+	if address.Zone() != "" {
+		return invalid(field, "must not contain an IPv6 zone")
+	}
+	if address.IsUnspecified() {
+		return invalid(field, "must not be an unspecified address")
+	}
+	if address.IsMulticast() {
+		return invalid(field, "must not be a multicast address")
+	}
+	if address.IsLinkLocalUnicast() {
+		return invalid(field, "must not be a link-local address")
+	}
+	if address.Is4() && address == netip.AddrFrom4([4]byte{255, 255, 255, 255}) {
+		return invalid(field, "must not be the IPv4 broadcast address")
 	}
 	return nil
 }

@@ -22,24 +22,22 @@ import (
 func TestAcceptResumesPendingAuthorizationWithoutBurningInvite(t *testing.T) {
 	t.Parallel()
 
-	secret, err := GenerateSecret()
-	if err != nil {
-		t.Fatalf("GenerateSecret: %v", err)
-	}
 	now := time.Date(2026, 8, 15, 12, 0, 0, 0, time.UTC)
 	invite, record, err := Create(CreateInput{
-		ClientName:              "retry-client",
-		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
-		ServerPort:              2222,
-		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
-		TargetPort:              5432,
-		Principal:               "warptweet",
-		ProfileID:               profile.CurrentID,
-		ArtifactProfileID:       "linux-amd64",
-		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
-		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
-		Now:                     now,
-		Secret:                  secret,
+		ClientName:                  "retry-client",
+		DataHost:                    "192.0.2.10",
+		DataPort:                    2222,
+		EnrollmentHost:              "192.0.2.10",
+		EnrollmentPort:              DefaultEnrollmentPort,
+		PublishedEndpointGeneration: 1,
+		TargetAddress:               netip.MustParseAddr("198.51.100.20"),
+		TargetPort:                  5432,
+		Principal:                   "warptweet",
+		ProfileID:                   profile.CurrentID,
+		ArtifactProfileID:           "linux-amd64",
+		HostPublicKey:               "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256:     testEnrollmentTLSSPKIPin,
+		Now:                         now,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -69,7 +67,7 @@ func TestAcceptResumesPendingAuthorizationWithoutBurningInvite(t *testing.T) {
 		ProfileID:        profile.CurrentID,
 		TargetAddress:    invite.TargetAddress,
 		TargetPort:       invite.TargetPort,
-		ServerAddress:    invite.ServerAddress,
+		ServerAddress:    invite.Data.Host,
 		Now:              now.Add(time.Minute),
 		InstallAuthorization: func(string, time.Time) error {
 			return errors.New("injected authorization failure")
@@ -155,24 +153,22 @@ func TestAcceptResumesPendingAuthorizationWithoutBurningInvite(t *testing.T) {
 func TestAcceptConsumesInviteOnce(t *testing.T) {
 	t.Parallel()
 
-	secret, err := GenerateSecret()
-	if err != nil {
-		t.Fatalf("GenerateSecret: %v", err)
-	}
 	now := time.Date(2026, 8, 14, 18, 0, 0, 0, time.UTC)
 	invite, record, err := Create(CreateInput{
-		ClientName:              "laptop-1",
-		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
-		ServerPort:              2222,
-		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
-		TargetPort:              5432,
-		Principal:               "warptweet",
-		ProfileID:               profile.CurrentID,
-		ArtifactProfileID:       "linux-amd64",
-		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
-		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
-		Now:                     now,
-		Secret:                  secret,
+		ClientName:                  "laptop-1",
+		DataHost:                    "192.0.2.10",
+		DataPort:                    2222,
+		EnrollmentHost:              "192.0.2.10",
+		EnrollmentPort:              DefaultEnrollmentPort,
+		PublishedEndpointGeneration: 1,
+		TargetAddress:               netip.MustParseAddr("198.51.100.20"),
+		TargetPort:                  5432,
+		Principal:                   "warptweet",
+		ProfileID:                   profile.CurrentID,
+		ArtifactProfileID:           "linux-amd64",
+		HostPublicKey:               "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256:     testEnrollmentTLSSPKIPin,
+		Now:                         now,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -233,24 +229,22 @@ func TestAcceptConsumesInviteOnce(t *testing.T) {
 func TestAcceptRejectsNonceMismatch(t *testing.T) {
 	t.Parallel()
 
-	secret, err := GenerateSecret()
-	if err != nil {
-		t.Fatalf("GenerateSecret: %v", err)
-	}
 	now := time.Date(2026, 8, 14, 18, 30, 0, 0, time.UTC)
 	invite, record, err := Create(CreateInput{
-		ClientName:              "node-a",
-		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
-		ServerPort:              2222,
-		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
-		TargetPort:              5432,
-		Principal:               "warptweet",
-		ProfileID:               profile.CurrentID,
-		ArtifactProfileID:       "linux-amd64",
-		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
-		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
-		Now:                     now,
-		Secret:                  secret,
+		ClientName:                  "node-a",
+		DataHost:                    "192.0.2.10",
+		DataPort:                    2222,
+		EnrollmentHost:              "192.0.2.10",
+		EnrollmentPort:              DefaultEnrollmentPort,
+		PublishedEndpointGeneration: 1,
+		TargetAddress:               netip.MustParseAddr("198.51.100.20"),
+		TargetPort:                  5432,
+		Principal:                   "warptweet",
+		ProfileID:                   profile.CurrentID,
+		ArtifactProfileID:           "linux-amd64",
+		HostPublicKey:               "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256:     testEnrollmentTLSSPKIPin,
+		Now:                         now,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -290,24 +284,22 @@ func TestAcceptRejectsNonceMismatch(t *testing.T) {
 func TestEnrollmentHTTPHandlerAcceptsValidRequest(t *testing.T) {
 	t.Parallel()
 
-	secret, err := GenerateSecret()
-	if err != nil {
-		t.Fatalf("GenerateSecret: %v", err)
-	}
 	now := time.Now().UTC()
 	invite, record, err := Create(CreateInput{
-		ClientName:              "studio-mac",
-		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
-		ServerPort:              2222,
-		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
-		TargetPort:              5432,
-		Principal:               server.DefaultDedicatedUser,
-		ProfileID:               profile.CurrentID,
-		ArtifactProfileID:       "darwin-arm64",
-		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
-		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
-		Now:                     now,
-		Secret:                  secret,
+		ClientName:                  "studio-mac",
+		DataHost:                    "192.0.2.10",
+		DataPort:                    2222,
+		EnrollmentHost:              "192.0.2.10",
+		EnrollmentPort:              DefaultEnrollmentPort,
+		PublishedEndpointGeneration: 1,
+		TargetAddress:               netip.MustParseAddr("198.51.100.20"),
+		TargetPort:                  5432,
+		Principal:                   server.DefaultDedicatedUser,
+		ProfileID:                   profile.CurrentID,
+		ArtifactProfileID:           "darwin-arm64",
+		HostPublicKey:               "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256:     testEnrollmentTLSSPKIPin,
+		Now:                         now,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)

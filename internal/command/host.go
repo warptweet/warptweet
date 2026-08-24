@@ -25,7 +25,6 @@ import (
 	"warptweet.com/warptweet/internal/inspectnet"
 	"warptweet.com/warptweet/internal/installlayout"
 	"warptweet.com/warptweet/internal/outcome"
-	"warptweet.com/warptweet/internal/profile"
 	"warptweet.com/warptweet/internal/server"
 )
 
@@ -40,6 +39,10 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 	name := onceStringFlag{name: "--name"}
 	out := onceStringFlag{name: "--out"}
 	listen := onceStringFlag{name: "--listen"}
+	listenInterface := onceStringFlag{name: "--listen-interface"}
+	advertise := onceStringFlag{name: "--advertise"}
+	enrollListen := onceStringFlag{name: "--enroll-listen"}
+	enrollAdvertise := onceStringFlag{name: "--enroll-advertise"}
 	stdoutInvite := onceBoolFlag{name: "--stdout"}
 	noInvite := onceBoolFlag{name: "--no-invite"}
 	asJSON := onceBoolFlag{name: "--json"}
@@ -48,6 +51,10 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 	flags.Var(&name, "name", "invite client label")
 	flags.Var(&out, "out", "exact invite output path")
 	flags.Var(&listen, "listen", "numeric server listen address:port")
+	flags.Var(&listenInterface, "listen-interface", "Linux interface name resolved to a concrete bind address")
+	flags.Var(&advertise, "advertise", "published data dial host:port")
+	flags.Var(&enrollListen, "enroll-listen", "enrollment bind address:port")
+	flags.Var(&enrollAdvertise, "enroll-advertise", "published enrollment dial host:port")
 	flags.Var(&stdoutInvite, "stdout", "print invite JSON only; do not write a file")
 	flags.Var(&noInvite, "no-invite", "bootstrap host without minting an invite")
 	flags.Var(&asJSON, "json", "emit JSON")
@@ -101,24 +108,20 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 	if runtime.GOOS != "linux" {
 		return errHostRequiresLinux
 	}
-	listenEndpoint, err := resolveHostListen(listen.value)
-	if err != nil {
-		return err
-	}
-
 	if err := ensureHostDirectories(); err != nil {
 		return err
 	}
+	label := name.value
+	if label == "" {
+		label = defaultHostLabel()
+	}
+	label = enrollment.SanitizeInviteLabel(label)
+
 	var (
-		hostPublicKey                string
-		createdHostKey               bool
-		enrollmentPin                string
-		createdEnrollmentIdentity    bool
-		renewedEnrollmentCertificate bool
-		manifest                     server.Config
-		restartDataPlane             bool
+		applied    hostApplyResult
+		invitePath string
 	)
-	if err := withHostStateLock(func() error {
+	if err := withHostOperationLock(func() error {
 		if grant.ClockIsBlocked(installlayout.HostClockBlockedPath) {
 			return outcome.New(outcome.CodeClockBlocked, "host clock: blocked until warptweet server clock-recover", "Run host clock recovery before minting invites", 1)
 		}
@@ -130,177 +133,149 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 			}
 			return fmt.Errorf("host clock: %w", err)
 		}
-		key, created, err := ensureHostIdentity(ctx)
+		env := productionHostApplyEnv()
+		result, err := applyHostConfiguration(ctx, env, hostApplyInput{
+			Target: targetEndpoint,
+			Flags: hostPublicationFlags{
+				Listen:          listen,
+				ListenInterface: listenInterface,
+				Advertise:       advertise,
+				EnrollListen:    enrollListen,
+				EnrollAdvertise: enrollAdvertise,
+			},
+			NoInvite:             noInvite.value,
+			Label:                label,
+			AuthorizationSeconds: authorizationSeconds,
+		})
 		if err != nil {
 			return err
 		}
-		hostPublicKey = key
-		createdHostKey = created
-		if err := ensureInviteSecret(); err != nil {
+		applied = result
+		if err := reconcileExpiredGrants(result.Manifest, time.Now().UTC()); err != nil {
+			return fmt.Errorf("reconcile expired grants: %w", err)
+		}
+		if err := reconcileManagedAuthorizations(result.Manifest); err != nil {
+			return fmt.Errorf("reconcile managed authorizations: %w", err)
+		}
+		if err := ensureMgmtListenStarted(); err != nil {
 			return err
 		}
-		pin, createdTLS, renewedTLS, err := enrollment.EnsureTLSIdentity(
-			installlayout.ServerEnrollmentTLSCertPath,
-			installlayout.ServerEnrollmentTLSKeyPath,
-			[]net.IP{net.IP(listenEndpoint.Addr().AsSlice())},
-			time.Now().UTC(),
-		)
-		if err != nil {
-			return fmt.Errorf("ensure enrollment TLS identity: %w", err)
+		if noInvite.value {
+			return nil
 		}
-		enrollmentPin = pin
-		createdEnrollmentIdentity = createdTLS
-		renewedEnrollmentCertificate = renewedTLS
-		if err := refuseHostTargetChange(targetEndpoint); err != nil {
-			return err
+		raw := result.InviteBlob
+		if stdoutInvite.value {
+			return nil
 		}
-		restartDataPlane = hostTargetChanged(targetEndpoint) || hostDataListenChanged(listenEndpoint)
-		written, writeErr := writeHostManifest(listenEndpoint, targetEndpoint)
-		if writeErr != nil {
-			return writeErr
+		if out.value != "" {
+			invitePath, err = enrollment.WriteInviteFileExact(out.value, raw)
+		} else {
+			cwd, cwdErr := os.Getwd()
+			if cwdErr != nil {
+				return cwdErr
+			}
+			invitePath, err = enrollment.WriteInviteFile(cwd, label, result.Invite.InviteID, raw)
 		}
-		manifest = written
-		return nil
+		return err
 	}); err != nil {
 		return err
 	}
-	if err := reconcileExpiredGrants(manifest, time.Now().UTC()); err != nil {
-		return fmt.Errorf("reconcile expired grants: %w", err)
-	}
-	if err := reconcileManagedAuthorizations(manifest); err != nil {
-		return fmt.Errorf("reconcile managed authorizations: %w", err)
-	}
-	dataPlaneStatus, err := ensureSSHDStarted(ctx, manifest, restartDataPlane)
-	if err != nil {
-		return fmt.Errorf("start WarpTweet data plane: %w", err)
+
+	if stdoutInvite.value && !noInvite.value {
+		_, err := stdout.Write(applied.InviteBlob)
+		return err
 	}
 
+	dataDial, _ := applied.Publication.DataDial.Host.Canonical()
+	enrollDial, _ := applied.Publication.EnrollDial.Host.Canonical()
 	result := map[string]any{
-		"status":        "ready",
-		"target":        targetEndpoint.String(),
-		"listen":        listenEndpoint.String(),
-		"host_key_path": installlayout.ServerHostKeyPath,
-		"manifest_path": installlayout.ServerManifestPath,
-		"host_key":      map[string]any{"created": createdHostKey},
+		"local_listener_ready":             true,
+		"published_endpoint_configured":    true,
+		"external_reachability_unverified": true,
+		"target":                           targetEndpoint.String(),
+		"listen":                           applied.Publication.DataListen.AddrPort().String(),
+		"data_dial":                        fmt.Sprintf("%s:%d", dataDial, applied.Publication.DataDial.Port),
+		"enrollment_listen":                applied.Publication.EnrollListen.AddrPort().String(),
+		"enrollment_dial":                  fmt.Sprintf("%s:%d", enrollDial, applied.Publication.EnrollDial.Port),
+		"published_endpoint_generation":    applied.Manifest.Network.PublishedEndpointGeneration,
+		"host_key_path":                    installlayout.ServerHostKeyPath,
+		"manifest_path":                    installlayout.ServerManifestPath,
+		"host_key":                         map[string]any{"created": applied.CreatedHostKey},
 		"enrollment_tls": map[string]any{
-			"created":     createdEnrollmentIdentity,
-			"renewed":     renewedEnrollmentCertificate,
-			"spki_sha256": enrollmentPin,
+			"created":     applied.CreatedEnrollmentIdentity,
+			"renewed":     applied.RenewedEnrollmentCertificate,
+			"spki_sha256": applied.EnrollmentPin,
 		},
-		"dedicated_user": manifest.DedicatedUser,
-		"profile_id":     manifest.ProfileID,
-		"data_plane":     dataPlaneStatus,
+		"dedicated_user": applied.Manifest.DedicatedUser,
+		"profile_id":     applied.Manifest.ProfileID,
+		"data_plane":     applied.DataPlaneStatus,
+		"enroll_listen":  applied.EnrollStatus,
+		"enroll_port":    applied.Publication.EnrollListen.Port,
 	}
-	fingerprint := sha256.Sum256([]byte(hostPublicKey))
+	fingerprint := sha256.Sum256([]byte(applied.HostPublicKey))
 	hostFingerprint := hex.EncodeToString(fingerprint[:])
 	result["host_public_key_sha256"] = hostFingerprint
 
-	if err := ensureMgmtListenStarted(); err != nil {
-		return err
-	}
-	enrollStatus, err := applyEnrollListenStatus(result, manifest.Network.Enrollment.Listen.Address, enrollmentPin)
-	if err != nil {
-		return err
-	}
-
-	if noInvite.value {
-		if asJSON.value {
-			return writeJSON(stdout, result)
+	if !noInvite.value {
+		result["invite_id"] = applied.Invite.InviteID
+		result["invite_expires_at"] = applied.Invite.ExpiresAt
+		result["authorization_duration_seconds"] = applied.Invite.AuthorizationDurationSeconds
+		result["invite_path"] = invitePath
+		result["invite_class"] = "confidential_bearer"
+		result["client_name"] = label
+		if applied.ResumedInvite {
+			result["invite_resumed"] = true
 		}
-		return writeHostHuman(stdout, hostHumanOutput{
-			Target:       targetEndpoint.String(),
-			Listen:       listenEndpoint.String(),
-			Fingerprint:  hostFingerprint,
-			EnrollStatus: enrollStatus,
-		})
 	}
-
-	label := name.value
-	if label == "" {
-		label = defaultHostLabel()
-	}
-	label = enrollment.SanitizeInviteLabel(label)
-
-	invite, record, err := mintServerInvite(ctx, label, targetEndpoint, manifest, hostPublicKey, enrollmentPin, authorizationSeconds)
-	if err != nil {
-		return err
-	}
-	if err := enrollment.Store(inviteDirectory, record); err != nil {
-		return err
-	}
-	raw, err := enrollment.Encode(invite)
-	if err != nil {
-		return err
-	}
-	raw = append(raw, '\n')
-
-	if stdoutInvite.value {
-		_, err := stdout.Write(raw)
-		return err
-	}
-
-	var invitePath string
-	if out.value != "" {
-		invitePath, err = enrollment.WriteInviteFileExact(out.value, raw)
-	} else {
-		cwd, cwdErr := os.Getwd()
-		if cwdErr != nil {
-			return cwdErr
-		}
-		invitePath, err = enrollment.WriteInviteFile(cwd, label, invite.InviteID, raw)
-	}
-	if err != nil {
-		return err
-	}
-
-	result["invite_id"] = invite.InviteID
-	result["invite_expires_at"] = invite.ExpiresAt
-	result["authorization_duration_seconds"] = invite.AuthorizationDurationSeconds
-	result["invite_path"] = invitePath
-	result["invite_class"] = "confidential_bearer"
-	result["client_name"] = label
 
 	if asJSON.value {
 		return writeJSON(stdout, result)
 	}
 	return writeHostHuman(stdout, hostHumanOutput{
 		Target:               targetEndpoint.String(),
-		Listen:               listenEndpoint.String(),
+		Listen:               applied.Publication.DataListen.AddrPort().String(),
+		DataDial:             fmt.Sprintf("%s:%d", dataDial, applied.Publication.DataDial.Port),
+		EnrollmentDial:       fmt.Sprintf("%s:%d", enrollDial, applied.Publication.EnrollDial.Port),
 		Fingerprint:          hostFingerprint,
 		InvitePath:           invitePath,
-		InviteExpiresAt:      invite.ExpiresAt,
-		AuthorizationSeconds: invite.AuthorizationDurationSeconds,
-		EnrollStatus:         enrollStatus,
+		InviteExpiresAt:      applied.Invite.ExpiresAt,
+		AuthorizationSeconds: applied.Invite.AuthorizationDurationSeconds,
+		EnrollStatus:         applied.EnrollStatus,
+		EnrollPort:           applied.Publication.EnrollListen.Port,
 	})
-}
-
-func applyEnrollListenStatus(result map[string]any, listenAddr netip.Addr, enrollmentPin string) (string, error) {
-	started, startErr := ensureEnrollListenStarted(listenAddr, enrollmentPin)
-	if startErr != nil {
-		result["enroll_listen_error"] = startErr.Error()
-		return "error", fmt.Errorf("start enrollment listener: %w", startErr)
-	}
-	enrollStatus := "already_running"
-	if started {
-		enrollStatus = "started"
-	}
-	result["enroll_listen"] = enrollStatus
-	result["enroll_port"] = enrollment.DefaultEnrollmentPort
-	return enrollStatus, nil
 }
 
 type hostHumanOutput struct {
 	Target               string
 	Listen               string
+	DataDial             string
+	EnrollmentDial       string
 	Fingerprint          string
 	InvitePath           string
 	InviteExpiresAt      string
 	AuthorizationSeconds int64
 	EnrollStatus         string
+	EnrollPort           uint16
 }
 
 func writeHostHuman(stdout io.Writer, output hostHumanOutput) error {
-	_, err := fmt.Fprintf(stdout, "host ready\ntarget   %s\nlisten   %s\nhost     SHA256:%s\n", output.Target, output.Listen, output.Fingerprint)
+	_, err := fmt.Fprintf(stdout, "local_listener_ready\npublished_endpoint_configured\nexternal_reachability_unverified\ntarget   %s\nlisten   %s\n", output.Target, output.Listen)
+	if err != nil {
+		return err
+	}
+	if output.DataDial != "" {
+		_, err = fmt.Fprintf(stdout, "data dial   %s\n", output.DataDial)
+		if err != nil {
+			return err
+		}
+	}
+	if output.EnrollmentDial != "" {
+		_, err = fmt.Fprintf(stdout, "enrollment dial   %s\n", output.EnrollmentDial)
+		if err != nil {
+			return err
+		}
+	}
+	_, err = fmt.Fprintf(stdout, "host     SHA256:%s\n", output.Fingerprint)
 	if err != nil {
 		return err
 	}
@@ -322,19 +297,25 @@ func writeHostHuman(stdout io.Writer, output hostHumanOutput) error {
 			return err
 		}
 	}
-	_, err = fmt.Fprintf(stdout, "enroll   :%d (%s)\n", enrollment.DefaultEnrollmentPort, output.EnrollStatus)
+	port := output.EnrollPort
+	if port == 0 {
+		port = enrollment.DefaultEnrollmentPort
+	}
+	_, err = fmt.Fprintf(stdout, "enroll   :%d (%s)\n", port, output.EnrollStatus)
 	return err
 }
 
-func ensureEnrollListenStarted(listenAddr netip.Addr, enrollmentPin string) (started bool, err error) {
-	endpoint := netip.AddrPortFrom(listenAddr, enrollment.DefaultEnrollmentPort)
+func ensureEnrollListenStarted(endpoint netip.AddrPort, enrollmentPin string, restart bool) (started bool, err error) {
 	pidPath := filepath.Join(serverStateDirectory, "enroll-listen.pid")
-	if enrollListenAlreadyRunning(endpoint, enrollmentPin) {
+	if !restart && enrollListenAlreadyRunning(endpoint, enrollmentPin) {
 		return false, nil
+	}
+	if restart {
+		_ = stopEnrollListen(pidPath)
 	}
 
 	// Prefer the packaged unit when present so confinement matches production.
-	if handled, unitErr := tryStartEnrollUnit(endpoint, enrollmentPin); handled {
+	if handled, unitErr := tryStartEnrollUnit(endpoint, enrollmentPin, restart); handled {
 		return unitErr == nil, unitErr
 	}
 
@@ -388,7 +369,26 @@ func ensureEnrollListenStarted(listenAddr netip.Addr, enrollmentPin string) (sta
 	return false, errors.New("enroll-listen remained alive but its pinned TLS endpoint did not become ready")
 }
 
-func tryStartEnrollUnit(endpoint netip.AddrPort, enrollmentPin string) (bool, error) {
+func stopEnrollListen(pidPath string) error {
+	if _, err := exec.LookPath("systemctl"); err == nil {
+		cmd := exec.Command("systemctl", "stop", "warptweet-enroll.service")
+		cmd.Env = []string{"LANG=C", "LC_ALL=C"}
+		_ = cmd.Run()
+	}
+	pid, err := readPIDFile(pidPath)
+	if err != nil {
+		return nil
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return nil
+	}
+	_ = proc.Signal(syscall.SIGTERM)
+	_ = os.Remove(pidPath)
+	return nil
+}
+
+func tryStartEnrollUnit(endpoint netip.AddrPort, enrollmentPin string, restart bool) (bool, error) {
 	unitPath := "/lib/systemd/system/warptweet-enroll.service"
 	if _, err := os.Stat(unitPath); err != nil {
 		unitPath = "/usr/lib/systemd/system/warptweet-enroll.service"
@@ -399,7 +399,11 @@ func tryStartEnrollUnit(endpoint netip.AddrPort, enrollmentPin string) (bool, er
 	if _, err := exec.LookPath("systemctl"); err != nil {
 		return false, nil
 	}
-	cmd := exec.Command("systemctl", "start", "warptweet-enroll.service")
+	action := "start"
+	if restart {
+		action = "restart"
+	}
+	cmd := exec.Command("systemctl", action, "warptweet-enroll.service")
 	cmd.Env = []string{"LANG=C", "LC_ALL=C"}
 	if err := cmd.Run(); err != nil {
 		return true, fmt.Errorf("start warptweet-enroll.service: %w", err)
@@ -617,29 +621,6 @@ func parseHostTarget(value string) (netip.AddrPort, error) {
 	return parseEndpoint(value)
 }
 
-func resolveHostListen(flagValue string) (netip.AddrPort, error) {
-	stored, err := loadStoredServerManifest()
-	if err != nil {
-		return netip.AddrPort{}, err
-	}
-	return resolveListen(flagValue, stored, discoverHostBind)
-}
-
-func loadStoredServerManifest() (*server.Config, error) {
-	_, err := os.Lstat(installlayout.ServerManifestPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	manifest, err := server.Load(installlayout.ServerManifestPath)
-	if err != nil {
-		return nil, err
-	}
-	return &manifest, nil
-}
-
 func discoverHostBind() (netip.Addr, error) {
 	ifaces, err := inspectnet.ListHostInterfaces()
 	if err != nil {
@@ -688,68 +669,6 @@ func withHostStateLock(fn func() error) error {
 	return err
 }
 
-func hostTargetChanged(targetEndpoint netip.AddrPort) bool {
-	existing, err := server.Load(installlayout.ServerManifestPath)
-	if err != nil {
-		return false
-	}
-	current := netip.AddrPortFrom(existing.Target.Address, uint16(existing.Target.Port))
-	return current != targetEndpoint
-}
-
-func hostDataListenChanged(listenEndpoint netip.AddrPort) bool {
-	existing, err := server.Load(installlayout.ServerManifestPath)
-	if err != nil {
-		return false
-	}
-	return existing.Network.Data.Listen.AddrPort() != listenEndpoint
-}
-
-func refuseHostTargetChange(targetEndpoint netip.AddrPort) error {
-	existing, err := server.Load(installlayout.ServerManifestPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			return nil
-		}
-		return err
-	}
-	current := netip.AddrPortFrom(existing.Target.Address, uint16(existing.Target.Port))
-	if current == targetEndpoint {
-		return nil
-	}
-	clients, err := enrollment.ListClients(installlayout.ClientsDirectory)
-	if err != nil {
-		return fmt.Errorf("list grants before target change: %w", err)
-	}
-	for _, record := range clients {
-		if record.Status != enrollment.ClientStatusExpired && record.Status != enrollment.ClientStatusRevoked {
-			return fmt.Errorf("host target cannot change from %s to %s while grant %s is %s", current, targetEndpoint, record.ClientID, record.Status)
-		}
-	}
-	invites, err := enrollment.List(inviteDirectory)
-	if err != nil {
-		return fmt.Errorf("list invites before target change: %w", err)
-	}
-	for _, record := range invites {
-		if record.Status == enrollment.StatusIssued {
-			return fmt.Errorf("host target cannot change from %s to %s while invite %s is issued", current, targetEndpoint, record.InviteID)
-		}
-	}
-	return nil
-}
-
-func refusePublishedLocatorChange() error {
-	clients, err := enrollment.ListClients(installlayout.ClientsDirectory)
-	if err != nil {
-		return fmt.Errorf("list grants before published endpoint change: %w", err)
-	}
-	invites, err := enrollment.List(inviteDirectory)
-	if err != nil {
-		return fmt.Errorf("list invites before published endpoint change: %w", err)
-	}
-	return publicationChangeBlocked(clients, invites)
-}
-
 func publicationChangeBlocked(clients []enrollment.ClientRecord, invites []enrollment.Record) error {
 	for _, record := range clients {
 		if record.Status != enrollment.ClientStatusExpired && record.Status != enrollment.ClientStatusRevoked {
@@ -773,7 +692,6 @@ func ensureHostDirectories() error {
 	}
 	for _, path := range []string{
 		filepath.Dir(installlayout.ServerManifestPath),
-		filepath.Dir(inviteSecretPath),
 	} {
 		if err := ensureDirectoryMode(path, 0o755); err != nil {
 			return err
@@ -852,104 +770,7 @@ func ensureHostIdentity(ctx context.Context) (publicKey string, created bool, er
 	return publicKey, true, nil
 }
 
-func ensureInviteSecret() error {
-	if _, err := os.Lstat(inviteSecretPath); err == nil {
-		_, readErr := enrollment.ReadSecret(inviteSecretPath)
-		return readErr
-	} else if !os.IsNotExist(err) {
-		return err
-	}
-	secret, err := enrollment.GenerateSecret()
-	if err != nil {
-		return err
-	}
-	return enrollment.WriteSecret(inviteSecretPath, secret)
-}
-
-func writeHostManifest(listenEndpoint, targetEndpoint netip.AddrPort) (server.Config, error) {
-	sshdDigest, err := fileSHA256(installlayout.SSHDPath)
-	if err != nil {
-		if existing, loadErr := server.Load(installlayout.ServerManifestPath); loadErr == nil &&
-			existing.SSHDBinarySHA256 != "" && existing.SSHDBinarySHA256 != strings.Repeat("0", 64) {
-			sshdDigest = existing.SSHDBinarySHA256
-		} else {
-			return server.Config{}, fmt.Errorf("hash sshd binary: %w", err)
-		}
-	}
-	bundleDigest, err := fileSHA256(installlayout.OpenSSHBundleManifestPath)
-	if err != nil {
-		if existing, loadErr := server.Load(installlayout.ServerManifestPath); loadErr == nil &&
-			existing.OpenSSHBundleManifestSHA256 != "" && existing.OpenSSHBundleManifestSHA256 != strings.Repeat("0", 64) {
-			bundleDigest = existing.OpenSSHBundleManifestSHA256
-		} else {
-			return server.Config{}, fmt.Errorf("hash OpenSSH bundle manifest: %w", err)
-		}
-	}
-
-	stored, storedErr := loadStoredServerManifest()
-	if storedErr != nil {
-		return server.Config{}, storedErr
-	}
-	var storedNetwork *server.Network
-	if stored != nil {
-		storedNetwork = &stored.Network
-	}
-	dataListen := server.BindEndpoint{Address: listenEndpoint.Addr(), Port: listenEndpoint.Port()}
-	enrollListen := server.BindEndpoint{Address: listenEndpoint.Addr(), Port: enrollment.DefaultEnrollmentPort}
-	dataDial := server.DialFromBind(dataListen)
-	enrollDial := server.DialFromBind(enrollListen)
-	if storedNetwork != nil {
-		dataDial = storedNetwork.Data.Dial
-		enrollDial = storedNetwork.Enrollment.Dial
-	}
-	network, changed, err := server.ProposeNetwork(dataListen, enrollListen, dataDial, enrollDial, storedNetwork)
-	if err != nil {
-		return server.Config{}, err
-	}
-	if changed {
-		if err := refusePublishedLocatorChange(); err != nil {
-			return server.Config{}, err
-		}
-	}
-
-	manifest := server.Config{
-		Kind:                        server.ManifestKind,
-		SchemaVersion:               server.CurrentSchemaVersion,
-		ProfileID:                   profile.CurrentID,
-		SSHDBinarySHA256:            sshdDigest,
-		OpenSSHBundleManifestSHA256: bundleDigest,
-		Network:                     network,
-		Target: server.Endpoint{
-			Address: targetEndpoint.Addr(),
-			Port:    server.Port(targetEndpoint.Port()),
-		},
-		DedicatedUser:      server.DefaultDedicatedUser,
-		HostKeyPath:        installlayout.ServerHostKeyPath,
-		AuthorizedKeysPath: filepath.Join(installlayout.AuthorizedKeysDirectory, server.DefaultDedicatedUser),
-	}
-	if err := server.Validate(manifest); err != nil {
-		return server.Config{}, err
-	}
-	if err := writeServerManifestAtomic(installlayout.ServerManifestPath, manifest); err != nil {
-		return server.Config{}, err
-	}
-	if _, err := os.Lstat(manifest.AuthorizedKeysPath); os.IsNotExist(err) {
-		if err := os.WriteFile(manifest.AuthorizedKeysPath, nil, 0o644); err != nil {
-			return server.Config{}, err
-		}
-	}
-	rendered, err := server.Render(manifest)
-	if err != nil {
-		return server.Config{}, err
-	}
-	if err := writeFileAtomic(installlayout.ServerConfigPath, rendered, 0o644); err != nil {
-		return server.Config{}, fmt.Errorf("write restricted sshd configuration: %w", err)
-	}
-	return manifest, nil
-}
-
-func ensureSSHDStarted(ctx context.Context, manifest server.Config, restart bool) (string, error) {
-	endpoint := manifest.Network.Data.Listen.AddrPort()
+func ensureSSHDStarted(ctx context.Context, endpoint netip.AddrPort, restart bool) (string, error) {
 	for _, unitPath := range []string{
 		"/lib/systemd/system/warptweet-sshd.service",
 		"/usr/lib/systemd/system/warptweet-sshd.service",
@@ -1057,11 +878,8 @@ func mintServerInvite(
 			manifest.Target.Port,
 		)
 	}
-	secret, err := enrollment.ReadSecret(inviteSecretPath)
-	if err != nil {
-		return enrollment.Invite{}, enrollment.Record{}, fmt.Errorf("read invite secret: %w", err)
-	}
 	if hostPublicKey == "" {
+		var err error
 		hostPublicKey, err = deriveHostPublicKey(ctx, manifest.HostKeyPath)
 		if err != nil {
 			return enrollment.Invite{}, enrollment.Record{}, err
@@ -1072,9 +890,13 @@ func mintServerInvite(
 		return enrollment.Invite{}, enrollment.Record{}, err
 	}
 	artifactID := string(selected.ID)
-	dataDial := manifest.Network.Data.Dial
-	if !dataDial.Host.IP.IsValid() {
-		return enrollment.Invite{}, enrollment.Record{}, errors.New("invite mint requires an IP data dial")
+	dataHost, err := manifest.Network.Data.Dial.Host.Canonical()
+	if err != nil {
+		return enrollment.Invite{}, enrollment.Record{}, err
+	}
+	enrollHost, err := manifest.Network.Enrollment.Dial.Host.Canonical()
+	if err != nil {
+		return enrollment.Invite{}, enrollment.Record{}, err
 	}
 	enrollPort := manifest.Network.Enrollment.Dial.Port
 	if enrollPort == 0 {
@@ -1082,18 +904,19 @@ func mintServerInvite(
 	}
 	return enrollment.Create(enrollment.CreateInput{
 		ClientName:                   clientName,
-		ServerAddress:                dataDial.Host.IP,
-		ServerPort:                   dataDial.Port,
-		EnrollPort:                   enrollPort,
+		DataHost:                     dataHost,
+		DataPort:                     manifest.Network.Data.Dial.Port,
+		EnrollmentHost:               enrollHost,
+		EnrollmentPort:               enrollPort,
+		EnrollmentTLSSPKISHA256:      enrollmentTLSSPKISHA256,
+		PublishedEndpointGeneration:  manifest.Network.PublishedEndpointGeneration,
 		TargetAddress:                manifest.Target.Address,
 		TargetPort:                   uint16(manifest.Target.Port),
 		Principal:                    manifest.DedicatedUser,
 		ProfileID:                    manifest.ProfileID,
 		ArtifactProfileID:            artifactID,
 		HostPublicKey:                hostPublicKey,
-		EnrollmentTLSSPKISHA256:      enrollmentTLSSPKISHA256,
 		TTL:                          enrollment.DefaultTTL,
 		AuthorizationDurationSeconds: authorizationSeconds,
-		Secret:                       secret,
 	})
 }

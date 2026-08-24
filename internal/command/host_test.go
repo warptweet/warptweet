@@ -50,6 +50,14 @@ func TestHostHumanOutputClassifiesInviteAsConfidentialBearer(t *testing.T) {
 	if !strings.Contains(stdout.String(), "confidential bearer") {
 		t.Fatalf("host output missing classification: %s", stdout.String())
 	}
+	for _, state := range []string{"local_listener_ready", "published_endpoint_configured", "external_reachability_unverified"} {
+		if !strings.Contains(stdout.String(), state) {
+			t.Fatalf("host output missing %s: %s", state, stdout.String())
+		}
+	}
+	if strings.Contains(stdout.String(), "host ready") {
+		t.Fatalf("host output still prints a single host ready: %s", stdout.String())
+	}
 }
 
 func TestParseHostTargetPortSugar(t *testing.T) {

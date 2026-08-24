@@ -1,7 +1,6 @@
 package enrollment
 
 import (
-	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,31 +11,22 @@ import (
 func TestCreateParseConsumeInviteLifecycle(t *testing.T) {
 	t.Parallel()
 
-	secret, err := GenerateSecret()
-	if err != nil {
-		t.Fatalf("GenerateSecret: %v", err)
-	}
 	now := time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC)
-	invite, record, err := Create(CreateInput{
-		ClientName:              "laptop-1",
-		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
-		ServerPort:              2222,
-		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
-		TargetPort:              5432,
-		Principal:               "warptweet",
-		ProfileID:               "profile-v1",
-		ArtifactProfileID:       "linux-amd64",
-		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
-		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
-		TTL:                     DefaultTTL,
-		Now:                     now,
-		Secret:                  secret,
-	})
+	input := testCreateInput()
+	input.TTL = DefaultTTL
+	input.Now = now
+	invite, record, err := Create(input)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if record.Status != StatusIssued || invite.InviteID == "" || invite.Nonce == "" {
 		t.Fatalf("unexpected invite: %+v record=%+v", invite, record)
+	}
+	if invite.SchemaVersion != 3 || invite.Data.Host != "192.0.2.10" || invite.Enrollment.Host != "192.0.2.10" {
+		t.Fatalf("invite=%+v", invite)
+	}
+	if invite.PublishedEndpointGeneration != 1 {
+		t.Fatalf("generation=%d", invite.PublishedEndpointGeneration)
 	}
 
 	raw, err := Encode(invite)
@@ -45,6 +35,9 @@ func TestCreateParseConsumeInviteLifecycle(t *testing.T) {
 	}
 	if strings.Contains(string(raw), "BEGIN") || strings.Contains(strings.ToLower(string(raw)), "private") {
 		t.Fatal("invite encoding contains private-key markers")
+	}
+	if strings.Contains(string(raw), "server_address") || strings.Contains(string(raw), "enroll_port") {
+		t.Fatalf("schema 3 invite still encodes schema 2 fields: %s", raw)
 	}
 
 	var parsed Invite
@@ -59,6 +52,13 @@ func TestCreateParseConsumeInviteLifecycle(t *testing.T) {
 	if err := Store(directory, record); err != nil {
 		t.Fatalf("Store: %v", err)
 	}
+	blob, err := LoadIssuedBlob(directory, invite.InviteID)
+	if err != nil {
+		t.Fatalf("LoadIssuedBlob: %v", err)
+	}
+	if string(blob) != string(raw) {
+		t.Fatalf("durable blob mismatch")
+	}
 	consumed, err := Consume(directory, invite.InviteID, "client-1", now.Add(2*time.Minute))
 	if err != nil {
 		t.Fatalf("Consume: %v", err)
@@ -71,28 +71,54 @@ func TestCreateParseConsumeInviteLifecycle(t *testing.T) {
 	}
 }
 
+func TestCreateCanonicalizesDNSHostCasing(t *testing.T) {
+	t.Parallel()
+
+	input := testCreateInput()
+	input.DataHost = "TUNNEL.EXAMPLE.COM"
+	input.DataPort = 443
+	input.EnrollmentHost = "ENROLL.EXAMPLE.COM"
+	input.EnrollmentPort = 8443
+	invite, _, err := Create(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invite.Data.Host != "tunnel.example.com" || invite.Enrollment.Host != "enroll.example.com" {
+		t.Fatalf("hosts=%q %q", invite.Data.Host, invite.Enrollment.Host)
+	}
+}
+
+func TestCreateRejectsEqualCanonicalLocators(t *testing.T) {
+	t.Parallel()
+
+	input := testCreateInput()
+	input.DataPort = DefaultEnrollmentPort
+	if _, _, err := Create(input); err == nil {
+		t.Fatal("accepted identical data and enrollment locators")
+	}
+}
+
+func TestCreateAllowsEqualPortsOnDifferentHosts(t *testing.T) {
+	t.Parallel()
+
+	input := testCreateInput()
+	input.DataHost = "tunnel.example.com"
+	input.DataPort = 443
+	input.EnrollmentHost = "enroll.example.com"
+	input.EnrollmentPort = 443
+	if _, _, err := Create(input); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRevokeInvite(t *testing.T) {
 	t.Parallel()
 
-	secret, err := GenerateSecret()
-	if err != nil {
-		t.Fatalf("GenerateSecret: %v", err)
-	}
 	now := time.Date(2026, 8, 12, 13, 0, 0, 0, time.UTC)
-	invite, record, err := Create(CreateInput{
-		ClientName:              "laptop-2",
-		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
-		ServerPort:              2222,
-		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
-		TargetPort:              5432,
-		Principal:               "warptweet",
-		ProfileID:               "profile-v1",
-		ArtifactProfileID:       "linux-amd64",
-		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
-		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
-		Now:                     now,
-		Secret:                  secret,
-	})
+	input := testCreateInput()
+	input.ClientName = "laptop-2"
+	input.Now = now
+	invite, record, err := Create(input)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
@@ -118,25 +144,11 @@ func TestRevokeInvite(t *testing.T) {
 func TestRevokeConsumedInvite(t *testing.T) {
 	t.Parallel()
 
-	secret, err := GenerateSecret()
-	if err != nil {
-		t.Fatal(err)
-	}
 	now := time.Date(2026, 8, 12, 13, 0, 0, 0, time.UTC)
-	invite, record, err := Create(CreateInput{
-		ClientName:              "laptop-3",
-		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
-		ServerPort:              2222,
-		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
-		TargetPort:              5432,
-		Principal:               "warptweet",
-		ProfileID:               "profile-v1",
-		ArtifactProfileID:       "linux-amd64",
-		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
-		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
-		Now:                     now,
-		Secret:                  secret,
-	})
+	input := testCreateInput()
+	input.ClientName = "laptop-3"
+	input.Now = now
+	invite, record, err := Create(input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,25 +178,11 @@ func TestRevokeConsumedInvite(t *testing.T) {
 func TestCancelExpiredUnconsumedInvite(t *testing.T) {
 	t.Parallel()
 
-	secret, err := GenerateSecret()
-	if err != nil {
-		t.Fatal(err)
-	}
 	now := time.Date(2026, 8, 22, 20, 0, 0, 0, time.UTC)
-	invite, record, err := Create(CreateInput{
-		ClientName:              "expired-invite",
-		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
-		ServerPort:              2222,
-		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
-		TargetPort:              5432,
-		Principal:               "warptweet",
-		ProfileID:               "profile-v1",
-		ArtifactProfileID:       "linux-amd64",
-		HostPublicKey:           "ssh-mldsa44-ed25519@openssh.com AAAA host",
-		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
-		Now:                     now,
-		Secret:                  secret,
-	})
+	input := testCreateInput()
+	input.ClientName = "expired-invite"
+	input.Now = now
+	invite, record, err := Create(input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,25 +213,15 @@ func TestStoredInviteDurationIsAuthoritative(t *testing.T) {
 	t.Parallel()
 
 	now := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
-	invite, record, err := Create(CreateInput{
-		ClientName:                   "laptop-1",
-		ServerAddress:                netip.MustParseAddr("192.0.2.10"),
-		ServerPort:                   2222,
-		TargetAddress:                netip.MustParseAddr("198.51.100.20"),
-		TargetPort:                   5432,
-		Principal:                    "warptweet",
-		ProfileID:                    "profile-v1",
-		ArtifactProfileID:            "linux-amd64",
-		HostPublicKey:                "ssh-mldsa44-ed25519@openssh.com AAAA host",
-		EnrollmentTLSSPKISHA256:      testEnrollmentTLSSPKIPin,
-		TTL:                          DefaultTTL,
-		AuthorizationDurationSeconds: 3600,
-		Now:                          now,
-	})
+	input := testCreateInput()
+	input.TTL = DefaultTTL
+	input.AuthorizationDurationSeconds = 3600
+	input.Now = now
+	invite, record, err := Create(input)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if invite.SchemaVersion != 2 || invite.AuthorizationDurationSeconds != 3600 {
+	if invite.SchemaVersion != 3 || invite.AuthorizationDurationSeconds != 3600 {
 		t.Fatalf("invite=%+v", invite)
 	}
 	directory := t.TempDir()
@@ -252,23 +240,10 @@ func TestStoredInviteDurationIsAuthoritative(t *testing.T) {
 func TestCreateRejectsDurationAboveMaximum(t *testing.T) {
 	t.Parallel()
 
-	secret := make([]byte, InviteSecretBytes)
-	_, _, err := Create(CreateInput{
-		ClientName:                          "laptop-1",
-		ServerAddress:                       netip.MustParseAddr("192.0.2.10"),
-		ServerPort:                          2222,
-		TargetAddress:                       netip.MustParseAddr("198.51.100.20"),
-		TargetPort:                          5432,
-		Principal:                           "warptweet",
-		ProfileID:                           "profile",
-		ArtifactProfileID:                   "linux-amd64",
-		HostPublicKey:                       "ssh-mldsa44-ed25519@openssh.com AAAA host",
-		EnrollmentTLSSPKISHA256:             testEnrollmentTLSSPKIPin,
-		AuthorizationDurationSeconds:        31536001,
-		MaximumAuthorizationDurationSeconds: 31536000,
-		Secret:                              secret,
-	})
-	if err == nil {
+	input := testCreateInput()
+	input.AuthorizationDurationSeconds = 31536001
+	input.MaximumAuthorizationDurationSeconds = 31536000
+	if _, _, err := Create(input); err == nil {
 		t.Fatal("Create accepted a duration above the host maximum")
 	}
 }
@@ -276,21 +251,9 @@ func TestCreateRejectsDurationAboveMaximum(t *testing.T) {
 func TestCreateRejectsUnsafeInputs(t *testing.T) {
 	t.Parallel()
 
-	secret := make([]byte, InviteSecretBytes)
-	_, _, err := Create(CreateInput{
-		ClientName:              "../evil",
-		ServerAddress:           netip.MustParseAddr("192.0.2.10"),
-		ServerPort:              2222,
-		TargetAddress:           netip.MustParseAddr("198.51.100.20"),
-		TargetPort:              5432,
-		Principal:               "warptweet",
-		ProfileID:               "profile",
-		ArtifactProfileID:       "linux-amd64",
-		HostPublicKey:           "key",
-		EnrollmentTLSSPKISHA256: testEnrollmentTLSSPKIPin,
-		Secret:                  secret,
-	})
-	if err == nil {
+	input := testCreateInput()
+	input.ClientName = "../evil"
+	if _, _, err := Create(input); err == nil {
 		t.Fatal("Create accepted unsafe client name")
 	}
 }
@@ -299,19 +262,22 @@ func TestInviteIDRejectsPathTraversal(t *testing.T) {
 	t.Parallel()
 
 	invite := Invite{
-		Kind:                         KindInvite,
-		SchemaVersion:                CurrentSchemaVersion,
-		InviteID:                     "../../../tmp",
-		ClientName:                   "laptop-1",
-		ServerAddress:                "192.0.2.10",
-		ServerPort:                   2222,
-		EnrollPort:                   29722,
+		Kind:          KindInvite,
+		SchemaVersion: CurrentSchemaVersion,
+		InviteID:      "../../../tmp",
+		ClientName:    "laptop-1",
+		Data:          InviteDial{Host: "192.0.2.10", Port: 2222},
+		Enrollment: InviteEnrollment{
+			Host:          "192.0.2.10",
+			Port:          29722,
+			TLSSPKISHA256: strings.Repeat("ab", 32),
+		},
+		PublishedEndpointGeneration:  1,
 		TargetAddress:                "198.51.100.20",
 		TargetPort:                   5432,
 		Principal:                    "warptweet",
 		ProfileID:                    "profile-v1",
 		Nonce:                        strings.Repeat("ab", 16),
-		EnrollmentTLSSPKISHA256:      strings.Repeat("ab", 32),
 		AuthorizationDurationSeconds: 2592000,
 	}
 	if err := validateInviteShape(invite); err == nil {
@@ -334,5 +300,37 @@ func TestStoreRejectsTraversalInviteID(t *testing.T) {
 	}
 	if _, err := os.Lstat(outside); err == nil {
 		t.Fatal("Store wrote outside the invite directory")
+	}
+}
+
+func TestUnusedIssuedForGenerationResumesOneInvite(t *testing.T) {
+	t.Parallel()
+
+	input := testCreateInput()
+	invite, record, err := Create(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	if err := Store(directory, record); err != nil {
+		t.Fatal(err)
+	}
+	issued, err := UnusedIssuedForGeneration(directory, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issued) != 1 || issued[0].InviteID != invite.InviteID {
+		t.Fatalf("issued=%+v", issued)
+	}
+	blob, err := LoadIssuedBlob(directory, invite.InviteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := Encode(issued[0].Invite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(blob) != string(again) {
+		t.Fatal("resumed bytes differ")
 	}
 }

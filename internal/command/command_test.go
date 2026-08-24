@@ -254,9 +254,9 @@ func writeClientManifest(t *testing.T, capableEngine bool) (string, string) {
 		ProfileID:       profile.CurrentID,
 		SSHBinarySHA256: hex.EncodeToString(digest[:]),
 		Server: config.Server{
-			Address: netip.MustParseAddr("192.0.2.10"),
-			Port:    2222,
-			User:    "warptweet",
+			Host: "192.0.2.10",
+			Port: 2222,
+			User: "warptweet",
 		},
 		Tunnels: []config.Tunnel{{
 			ID: "database-primary",

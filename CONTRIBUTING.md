@@ -9,7 +9,7 @@ WarpTweet welcomes focused contributions that preserve its managed-endpoint, fai
 - [Static OpenSSL boundary](docs/2026-08-10_static-openssl.md)
 - [Threat model](docs/2026-08-09_threat-model.md)
 - [Cryptographic profile v1](docs/2026-08-09_crypto-profile.md)
-- [Client tunnels manifest v1 schema](schemas/client-tunnels-v1.schema.json)
+- [Client tunnels manifest v2 schema](schemas/client-tunnels-v2.schema.json)
 - [Server policy manifest v2 schema](schemas/server-gateway-v2.schema.json)
 
 ## Non-negotiable invariants

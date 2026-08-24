@@ -32,10 +32,10 @@ func TestPublishedManifestSchemasConformToRuntimeManifests(t *testing.T) {
 
 	root := repositoryRoot(t)
 
-	t.Run("client tunnels v1", func(t *testing.T) {
+	t.Run("client tunnels v2", func(t *testing.T) {
 		t.Parallel()
 
-		schema := readPublishedSchema(t, filepath.Join(root, "schemas", "client-tunnels-v1.schema.json"))
+		schema := readPublishedSchema(t, filepath.Join(root, "schemas", "client-tunnels-v2.schema.json"))
 		manifest := validClientSchemaConfig()
 		if err := config.Validate(manifest); err != nil {
 			t.Fatalf("typed client fixture is not runtime-valid: %v", err)
@@ -51,6 +51,14 @@ func TestPublishedManifestSchemasConformToRuntimeManifests(t *testing.T) {
 			t.Fatalf("client example with a concrete digest is not runtime-valid: %v", err)
 		}
 		assertSchemaConformance(t, schema, decodeJSONDocument(t, example))
+	})
+
+	t.Run("client tunnels v1 is historical unused", func(t *testing.T) {
+		t.Parallel()
+
+		schema := readPublishedSchema(t, filepath.Join(root, "schemas", "client-tunnels-v1.schema.json"))
+		assertSchemaPropertyConst(t, schema, "schema_version", "1")
+		assertSchemaRejection(t, schema, marshalJSONDocument(t, validClientSchemaConfig()))
 	})
 
 	t.Run("server gateway v2", func(t *testing.T) {
@@ -95,12 +103,20 @@ func TestPublishedManifestSchemasDeclareExactClosedContracts(t *testing.T) {
 		identifier string
 	}{
 		{
-			name:       "client tunnels v1",
+			name:       "client tunnels v1 historical",
 			path:       "client-tunnels-v1.schema.json",
+			kind:       config.ClientTunnelsKind,
+			version:    "1",
+			profileID:  profile.CurrentID,
+			identifier: "https://warptweet.com/schemas/client-tunnels-v1.schema.json",
+		},
+		{
+			name:       "client tunnels v2",
+			path:       "client-tunnels-v2.schema.json",
 			kind:       config.ClientTunnelsKind,
 			version:    fmt.Sprint(config.CurrentSchemaVersion),
 			profileID:  profile.CurrentID,
-			identifier: "https://warptweet.com/schemas/client-tunnels-v1.schema.json",
+			identifier: "https://warptweet.com/schemas/client-tunnels-v2.schema.json",
 		},
 		{
 			name:       "server gateway v1 historical",
@@ -148,7 +164,7 @@ func TestPublishedManifestSchemasRejectUnsafeShapes(t *testing.T) {
 	t.Parallel()
 
 	root := repositoryRoot(t)
-	clientSchema := readPublishedSchema(t, filepath.Join(root, "schemas", "client-tunnels-v1.schema.json"))
+	clientSchema := readPublishedSchema(t, filepath.Join(root, "schemas", "client-tunnels-v2.schema.json"))
 	clientDocument := marshalJSONDocument(t, validClientSchemaConfig()).(map[string]any)
 	clientTests := []struct {
 		name   string
@@ -157,7 +173,14 @@ func TestPublishedManifestSchemasRejectUnsafeShapes(t *testing.T) {
 		{
 			name: "wrong schema version",
 			mutate: func(document map[string]any) {
-				document["schema_version"] = json.Number("2")
+				document["schema_version"] = json.Number("1")
+			},
+		},
+		{
+			name: "legacy server address field",
+			mutate: func(document map[string]any) {
+				delete(document["server"].(map[string]any), "host")
+				document["server"].(map[string]any)["address"] = "192.0.2.10"
 			},
 		},
 		{
@@ -303,9 +326,9 @@ func validClientSchemaConfig() config.Config {
 		ProfileID:       profile.CurrentID,
 		SSHBinarySHA256: strings.Repeat("a", 64),
 		Server: config.Server{
-			Address: netip.MustParseAddr("192.0.2.10"),
-			Port:    2222,
-			User:    server.DefaultDedicatedUser,
+			Host: "192.0.2.10",
+			Port: 2222,
+			User: server.DefaultDedicatedUser,
 		},
 		Tunnels: []config.Tunnel{
 			{

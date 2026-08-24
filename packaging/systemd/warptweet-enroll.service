@@ -6,7 +6,6 @@ Wants=network-online.target
 AssertFileIsExecutable=/opt/warptweet/bin/warptweet
 AssertPathExists=/etc/warptweet/server.wt
 AssertPathExists=/var/lib/warptweet/ssh/ssh_host_mldsa44_ed25519_key
-AssertPathExists=/etc/warptweet/invite.mac-key
 AssertPathExists=/etc/warptweet/enrollment/tls.crt
 AssertPathExists=/etc/warptweet/enrollment/tls.key
 StartLimitIntervalSec=60
