@@ -62,10 +62,7 @@ func TestPinnedOpenSSHStagedCryptoAndRendering(t *testing.T) {
 		ProfileID:                   profile.CurrentID,
 		SSHDBinarySHA256:            fileSHA256(t, sshdPath),
 		OpenSSHBundleManifestSHA256: fileSHA256(t, bundleManifestPath),
-		Listen: server.Endpoint{
-			Address: netip.MustParseAddr("127.0.0.1"),
-			Port:    2222,
-		},
+		Network:                     server.PublicationNetwork(netip.MustParseAddr("127.0.0.1"), 2222, 29722),
 		Target: server.Endpoint{
 			Address: netip.MustParseAddr("10.0.0.20"),
 			Port:    5432,

@@ -10,7 +10,7 @@ WarpTweet gives a developer or agent one local service socket, not a shell and n
 - Adoption and release contract: https://github.com/warptweet/warptweet/blob/main/docs/2026-08-16_adoption-and-release-strategy.md
 - Public release gate: https://github.com/warptweet/warptweet/blob/main/packaging/evidence/public-release.json
 - Client schema: https://warptweet.com/schemas/client-tunnels-v1.schema.json
-- Server schema: https://warptweet.com/schemas/server-gateway-v1.schema.json
+- Server schema: https://warptweet.com/schemas/server-gateway-v2.schema.json
 - Release evidence schema: https://warptweet.com/schemas/release-evidence-v2.schema.json
 - Adoption-release result schema: https://warptweet.com/schemas/adoption-release-result-v1.schema.json
 

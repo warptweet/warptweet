@@ -22,6 +22,7 @@ import (
 	"warptweet.com/warptweet/internal/artifactprofile"
 	"warptweet.com/warptweet/internal/enrollment"
 	"warptweet.com/warptweet/internal/grant"
+	"warptweet.com/warptweet/internal/inspectnet"
 	"warptweet.com/warptweet/internal/installlayout"
 	"warptweet.com/warptweet/internal/outcome"
 	"warptweet.com/warptweet/internal/profile"
@@ -29,6 +30,9 @@ import (
 )
 
 const defaultHostListenPort uint16 = 2222
+
+// errHostRequiresLinux is the public host fail-closed error on non-Linux GOOS.
+var errHostRequiresLinux = errors.New("WarpTweet host requires Linux; this is the server command")
 
 func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) error {
 	flags := newFlagSet("host", stderr)
@@ -94,6 +98,9 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 		}
 		return fmt.Errorf("host authorization policy: %w", err)
 	}
+	if runtime.GOOS != "linux" {
+		return errHostRequiresLinux
+	}
 	listenEndpoint, err := resolveHostListen(listen.value)
 	if err != nil {
 		return err
@@ -147,7 +154,7 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 		if err := refuseHostTargetChange(targetEndpoint); err != nil {
 			return err
 		}
-		restartDataPlane = hostTargetChanged(targetEndpoint)
+		restartDataPlane = hostTargetChanged(targetEndpoint) || hostDataListenChanged(listenEndpoint)
 		written, writeErr := writeHostManifest(listenEndpoint, targetEndpoint)
 		if writeErr != nil {
 			return writeErr
@@ -191,7 +198,7 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 	if err := ensureMgmtListenStarted(); err != nil {
 		return err
 	}
-	enrollStatus, err := applyEnrollListenStatus(result, listenEndpoint.Addr(), enrollmentPin)
+	enrollStatus, err := applyEnrollListenStatus(result, manifest.Network.Enrollment.Listen.Address, enrollmentPin)
 	if err != nil {
 		return err
 	}
@@ -611,72 +618,55 @@ func parseHostTarget(value string) (netip.AddrPort, error) {
 }
 
 func resolveHostListen(flagValue string) (netip.AddrPort, error) {
+	stored, err := loadStoredServerManifest()
+	if err != nil {
+		return netip.AddrPort{}, err
+	}
+	return resolveListen(flagValue, stored, discoverHostBind)
+}
+
+func loadStoredServerManifest() (*server.Config, error) {
+	_, err := os.Lstat(installlayout.ServerManifestPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	manifest, err := server.Load(installlayout.ServerManifestPath)
+	if err != nil {
+		return nil, err
+	}
+	return &manifest, nil
+}
+
+func discoverHostBind() (netip.Addr, error) {
+	ifaces, err := inspectnet.ListHostInterfaces()
+	if err != nil {
+		return netip.Addr{}, fmt.Errorf("inspect-network: list interfaces: %w; pass --listen", err)
+	}
+	addr, err := inspectnet.Discover(inspectnet.KernelRouteLookup, ifaces)
+	if err != nil {
+		return netip.Addr{}, err
+	}
+	return addr, nil
+}
+
+func resolveListen(flagValue string, stored *server.Config, discover func() (netip.Addr, error)) (netip.AddrPort, error) {
 	if flagValue != "" {
 		return parseEndpoint(flagValue)
 	}
-	if manifest, err := server.Load(installlayout.ServerManifestPath); err == nil {
-		return netip.AddrPortFrom(manifest.Listen.Address, uint16(manifest.Listen.Port)), nil
+	if stored != nil {
+		return stored.Network.Data.Listen.AddrPort(), nil
 	}
-	candidates := nonLoopbackIPv4Addresses()
-	switch len(candidates) {
-	case 0:
-		return netip.AddrPortFrom(netip.MustParseAddr("127.0.0.1"), defaultHostListenPort), nil
-	case 1:
-		return netip.AddrPortFrom(candidates[0], defaultHostListenPort), nil
-	default:
-		return netip.AddrPort{}, fmt.Errorf(
-			"multiple non-loopback IPv4 addresses (%s); pass --listen explicitly",
-			joinAddrs(candidates),
-		)
-	}
-}
-
-func nonLoopbackIPv4Addresses() []netip.Addr {
-	interfaces, err := net.Interfaces()
+	addr, err := discover()
 	if err != nil {
-		return nil
+		return netip.AddrPort{}, err
 	}
-	seen := map[netip.Addr]struct{}{}
-	var candidates []netip.Addr
-	for _, iface := range interfaces {
-		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
-			continue
-		}
-		addrs, err := iface.Addrs()
-		if err != nil {
-			continue
-		}
-		for _, addr := range addrs {
-			var ip net.IP
-			switch value := addr.(type) {
-			case *net.IPNet:
-				ip = value.IP
-			case *net.IPAddr:
-				ip = value.IP
-			}
-			if ip == nil {
-				continue
-			}
-			parsed, ok := netip.AddrFromSlice(ip.To4())
-			if !ok || !parsed.IsValid() || parsed.IsLoopback() || parsed.IsUnspecified() || parsed.IsLinkLocalUnicast() {
-				continue
-			}
-			if _, exists := seen[parsed]; exists {
-				continue
-			}
-			seen[parsed] = struct{}{}
-			candidates = append(candidates, parsed)
-		}
+	if !addr.IsValid() {
+		return netip.AddrPortFrom(netip.MustParseAddr("127.0.0.1"), defaultHostListenPort), nil
 	}
-	return candidates
-}
-
-func joinAddrs(addrs []netip.Addr) string {
-	parts := make([]string, 0, len(addrs))
-	for _, addr := range addrs {
-		parts = append(parts, addr.String())
-	}
-	return strings.Join(parts, ", ")
+	return netip.AddrPortFrom(addr, defaultHostListenPort), nil
 }
 
 func defaultHostLabel() string {
@@ -707,6 +697,14 @@ func hostTargetChanged(targetEndpoint netip.AddrPort) bool {
 	return current != targetEndpoint
 }
 
+func hostDataListenChanged(listenEndpoint netip.AddrPort) bool {
+	existing, err := server.Load(installlayout.ServerManifestPath)
+	if err != nil {
+		return false
+	}
+	return existing.Network.Data.Listen.AddrPort() != listenEndpoint
+}
+
 func refuseHostTargetChange(targetEndpoint netip.AddrPort) error {
 	existing, err := server.Load(installlayout.ServerManifestPath)
 	if err != nil {
@@ -735,6 +733,32 @@ func refuseHostTargetChange(targetEndpoint netip.AddrPort) error {
 	for _, record := range invites {
 		if record.Status == enrollment.StatusIssued {
 			return fmt.Errorf("host target cannot change from %s to %s while invite %s is issued", current, targetEndpoint, record.InviteID)
+		}
+	}
+	return nil
+}
+
+func refusePublishedLocatorChange() error {
+	clients, err := enrollment.ListClients(installlayout.ClientsDirectory)
+	if err != nil {
+		return fmt.Errorf("list grants before published endpoint change: %w", err)
+	}
+	invites, err := enrollment.List(inviteDirectory)
+	if err != nil {
+		return fmt.Errorf("list invites before published endpoint change: %w", err)
+	}
+	return publicationChangeBlocked(clients, invites)
+}
+
+func publicationChangeBlocked(clients []enrollment.ClientRecord, invites []enrollment.Record) error {
+	for _, record := range clients {
+		if record.Status != enrollment.ClientStatusExpired && record.Status != enrollment.ClientStatusRevoked {
+			return fmt.Errorf("published endpoints cannot change while grant %s is %s", record.ClientID, record.Status)
+		}
+	}
+	for _, record := range invites {
+		if record.Status == enrollment.StatusIssued {
+			return fmt.Errorf("published endpoints cannot change while invite %s is issued", record.InviteID)
 		}
 	}
 	return nil
@@ -862,16 +886,33 @@ func writeHostManifest(listenEndpoint, targetEndpoint netip.AddrPort) (server.Co
 		}
 	}
 
+	stored, storedErr := loadStoredServerManifest()
+	if storedErr != nil {
+		return server.Config{}, storedErr
+	}
+	var storedNetwork *server.Network
+	if stored != nil {
+		storedNetwork = &stored.Network
+	}
+	dataListen := server.BindEndpoint{Address: listenEndpoint.Addr(), Port: server.Port(listenEndpoint.Port())}
+	enrollListen := server.BindEndpoint{Address: listenEndpoint.Addr(), Port: server.Port(enrollment.DefaultEnrollmentPort)}
+	network, changed, err := server.ProposeNetwork(dataListen, enrollListen, storedNetwork)
+	if err != nil {
+		return server.Config{}, err
+	}
+	if changed {
+		if err := refusePublishedLocatorChange(); err != nil {
+			return server.Config{}, err
+		}
+	}
+
 	manifest := server.Config{
 		Kind:                        server.ManifestKind,
 		SchemaVersion:               server.CurrentSchemaVersion,
 		ProfileID:                   profile.CurrentID,
 		SSHDBinarySHA256:            sshdDigest,
 		OpenSSHBundleManifestSHA256: bundleDigest,
-		Listen: server.Endpoint{
-			Address: listenEndpoint.Addr(),
-			Port:    server.Port(listenEndpoint.Port()),
-		},
+		Network:                     network,
 		Target: server.Endpoint{
 			Address: targetEndpoint.Addr(),
 			Port:    server.Port(targetEndpoint.Port()),
@@ -902,7 +943,7 @@ func writeHostManifest(listenEndpoint, targetEndpoint netip.AddrPort) (server.Co
 }
 
 func ensureSSHDStarted(ctx context.Context, manifest server.Config, restart bool) (string, error) {
-	endpoint := netip.AddrPortFrom(manifest.Listen.Address, uint16(manifest.Listen.Port))
+	endpoint := manifest.Network.Data.Listen.AddrPort()
 	for _, unitPath := range []string{
 		"/lib/systemd/system/warptweet-sshd.service",
 		"/usr/lib/systemd/system/warptweet-sshd.service",
@@ -1025,11 +1066,19 @@ func mintServerInvite(
 		return enrollment.Invite{}, enrollment.Record{}, err
 	}
 	artifactID := string(selected.ID)
+	dataDial := manifest.Network.Data.Dial
+	if !dataDial.Host.IP.IsValid() {
+		return enrollment.Invite{}, enrollment.Record{}, errors.New("invite mint requires an IP data dial")
+	}
+	enrollPort := uint16(manifest.Network.Enrollment.Dial.Port)
+	if enrollPort == 0 {
+		enrollPort = enrollment.DefaultEnrollmentPort
+	}
 	return enrollment.Create(enrollment.CreateInput{
 		ClientName:                   clientName,
-		ServerAddress:                manifest.Listen.Address,
-		ServerPort:                   uint16(manifest.Listen.Port),
-		EnrollPort:                   enrollment.DefaultEnrollmentPort,
+		ServerAddress:                dataDial.Host.IP,
+		ServerPort:                   uint16(dataDial.Port),
+		EnrollPort:                   enrollPort,
 		TargetAddress:                manifest.Target.Address,
 		TargetPort:                   uint16(manifest.Target.Port),
 		Principal:                    manifest.DedicatedUser,

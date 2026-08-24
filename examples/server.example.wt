@@ -1,12 +1,31 @@
 {
   "kind": "warptweet.server-gateway",
-  "schema_version": 1,
+  "schema_version": 2,
   "profile_id": "warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519-chacha20",
   "sshd_binary_sha256": "REPLACE_WITH_64_LOWERCASE_HEXADECIMAL_CHARACTERS",
   "openssh_bundle_manifest_sha256": "REPLACE_WITH_64_LOWERCASE_HEXADECIMAL_CHARACTERS",
-  "listen": {
-    "address": "192.0.2.10",
-    "port": 2222
+  "network": {
+    "published_endpoint_generation": 1,
+    "data": {
+      "listen": {
+        "address": "192.0.2.10",
+        "port": 2222
+      },
+      "dial": {
+        "host": "192.0.2.10",
+        "port": 2222
+      }
+    },
+    "enrollment": {
+      "listen": {
+        "address": "192.0.2.10",
+        "port": 29722
+      },
+      "dial": {
+        "host": "192.0.2.10",
+        "port": 29722
+      }
+    }
   },
   "target": {
     "address": "198.51.100.20",

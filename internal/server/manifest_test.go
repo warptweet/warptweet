@@ -190,6 +190,30 @@ func TestDecodeRejectsCaseInsensitiveAliasesBeforeTypedDecoding(t *testing.T) {
 	}
 }
 
+func TestDecodeRejectsSchemaVersion1Document(t *testing.T) {
+	t.Parallel()
+
+	v1 := `{
+  "kind": "warptweet.server-gateway",
+  "schema_version": 1,
+  "profile_id": "warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519-chacha20",
+  "sshd_binary_sha256": "` + strings.Repeat("a", 64) + `",
+  "openssh_bundle_manifest_sha256": "` + strings.Repeat("b", 64) + `",
+  "listen": {"address": "192.0.2.10", "port": 2222},
+  "target": {"address": "198.51.100.7", "port": 5432},
+  "dedicated_user": "warptweet",
+  "host_key_path": "/var/lib/warptweet/ssh/ssh_host_mldsa44_ed25519_key",
+  "authorized_keys_path": "/var/lib/warptweet/authorized_keys/warptweet"
+}`
+	_, err := Decode(strings.NewReader(v1))
+	if err == nil {
+		t.Fatal("Decode accepted a schema 1 server-gateway document")
+	}
+	if !strings.Contains(err.Error(), "unknown field") && !strings.Contains(err.Error(), "SchemaVersion") {
+		t.Fatalf("schema 1 error = %v", err)
+	}
+}
+
 func TestDecodeRunsSecurityValidation(t *testing.T) {
 	t.Parallel()
 
@@ -215,7 +239,7 @@ func TestDecodeRequiresServerManifestDigests(t *testing.T) {
 		{
 			name: "unsupported schema version",
 			mutate: func(config *Config) {
-				config.SchemaVersion = 2
+				config.SchemaVersion = 1
 			},
 			field: "SchemaVersion",
 		},

@@ -53,10 +53,10 @@ func TestPublishedManifestSchemasConformToRuntimeManifests(t *testing.T) {
 		assertSchemaConformance(t, schema, decodeJSONDocument(t, example))
 	})
 
-	t.Run("server gateway v1", func(t *testing.T) {
+	t.Run("server gateway v2", func(t *testing.T) {
 		t.Parallel()
 
-		schema := readPublishedSchema(t, filepath.Join(root, "schemas", "server-gateway-v1.schema.json"))
+		schema := readPublishedSchema(t, filepath.Join(root, "schemas", "server-gateway-v2.schema.json"))
 		manifest := validServerSchemaConfig()
 		if err := server.Validate(manifest); err != nil {
 			t.Fatalf("typed server fixture is not runtime-valid: %v", err)
@@ -72,6 +72,14 @@ func TestPublishedManifestSchemasConformToRuntimeManifests(t *testing.T) {
 			t.Fatalf("server example with concrete digests is not runtime-valid: %v", err)
 		}
 		assertSchemaConformance(t, schema, decodeJSONDocument(t, example))
+	})
+
+	t.Run("server gateway v1 is historical unused", func(t *testing.T) {
+		t.Parallel()
+
+		schema := readPublishedSchema(t, filepath.Join(root, "schemas", "server-gateway-v1.schema.json"))
+		assertSchemaPropertyConst(t, schema, "schema_version", "1")
+		assertSchemaRejection(t, schema, marshalJSONDocument(t, validServerSchemaConfig()))
 	})
 }
 
@@ -95,12 +103,20 @@ func TestPublishedManifestSchemasDeclareExactClosedContracts(t *testing.T) {
 			identifier: "https://warptweet.com/schemas/client-tunnels-v1.schema.json",
 		},
 		{
-			name:       "server gateway v1",
+			name:       "server gateway v1 historical",
 			path:       "server-gateway-v1.schema.json",
+			kind:       server.ManifestKind,
+			version:    "1",
+			profileID:  profile.CurrentID,
+			identifier: "https://warptweet.com/schemas/server-gateway-v1.schema.json",
+		},
+		{
+			name:       "server gateway v2",
+			path:       "server-gateway-v2.schema.json",
 			kind:       server.ManifestKind,
 			version:    fmt.Sprint(server.CurrentSchemaVersion),
 			profileID:  profile.CurrentID,
-			identifier: "https://warptweet.com/schemas/server-gateway-v1.schema.json",
+			identifier: "https://warptweet.com/schemas/server-gateway-v2.schema.json",
 		},
 	}
 
@@ -213,7 +229,7 @@ func TestPublishedManifestSchemasRejectUnsafeShapes(t *testing.T) {
 		})
 	}
 
-	serverSchema := readPublishedSchema(t, filepath.Join(root, "schemas", "server-gateway-v1.schema.json"))
+	serverSchema := readPublishedSchema(t, filepath.Join(root, "schemas", "server-gateway-v2.schema.json"))
 	serverDocument := marshalJSONDocument(t, validServerSchemaConfig()).(map[string]any)
 	serverTests := []struct {
 		name   string
@@ -222,7 +238,7 @@ func TestPublishedManifestSchemasRejectUnsafeShapes(t *testing.T) {
 		{
 			name: "wrong schema version",
 			mutate: func(document map[string]any) {
-				document["schema_version"] = json.Number("2")
+				document["schema_version"] = json.Number("1")
 			},
 		},
 		{
@@ -258,7 +274,13 @@ func TestPublishedManifestSchemasRejectUnsafeShapes(t *testing.T) {
 		{
 			name: "zero port",
 			mutate: func(document map[string]any) {
-				document["listen"].(map[string]any)["port"] = json.Number("0")
+				document["network"].(map[string]any)["data"].(map[string]any)["listen"].(map[string]any)["port"] = json.Number("0")
+			},
+		},
+		{
+			name: "missing network",
+			mutate: func(document map[string]any) {
+				delete(document, "network")
 			},
 		},
 	}
@@ -312,10 +334,7 @@ func validServerSchemaConfig() server.Config {
 		ProfileID:                   profile.CurrentID,
 		SSHDBinarySHA256:            strings.Repeat("a", 64),
 		OpenSSHBundleManifestSHA256: strings.Repeat("b", 64),
-		Listen: server.Endpoint{
-			Address: netip.MustParseAddr("192.0.2.10"),
-			Port:    2222,
-		},
+		Network:                     server.PublicationNetwork(netip.MustParseAddr("192.0.2.10"), 2222, 29722),
 		Target: server.Endpoint{
 			Address: netip.MustParseAddr("198.51.100.20"),
 			Port:    5432,

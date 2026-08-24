@@ -18,8 +18,8 @@ const (
 	ManifestKind = "warptweet.server-gateway"
 
 	// CurrentSchemaVersion is the only server manifest schema accepted by this
-	// package. Semantic changes require a new version.
-	CurrentSchemaVersion = 1
+	// package. Semantic changes require a new version. Schema 1 is rejected.
+	CurrentSchemaVersion = 2
 
 	// MaxManifestBytes bounds all work performed before manifest content is
 	// trusted.

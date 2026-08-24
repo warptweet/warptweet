@@ -51,10 +51,7 @@ func NewPolicy(config server.Config) (Policy, error) {
 	}
 	return Policy{
 		Profile: selected,
-		Listen: netip.AddrPortFrom(
-			config.Listen.Address.Unmap(),
-			uint16(config.Listen.Port),
-		),
+		Listen:  config.Network.Data.Listen.AddrPort(),
 		Target: netip.AddrPortFrom(
 			config.Target.Address.Unmap(),
 			uint16(config.Target.Port),

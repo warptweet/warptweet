@@ -777,10 +777,7 @@ func TestValidateEffectiveServerConfigAcceptsCombinedPermitOpen(t *testing.T) {
 	t.Parallel()
 
 	config := server.Config{
-		Listen: server.Endpoint{
-			Address: netip.MustParseAddr("192.0.2.10"),
-			Port:    2222,
-		},
+		Network: server.PublicationNetwork(netip.MustParseAddr("192.0.2.10"), 2222, 29722),
 		Target: server.Endpoint{
 			Address: netip.MustParseAddr("198.51.100.7"),
 			Port:    5432,
@@ -889,10 +886,7 @@ func newServerPreflightFixture(t *testing.T) *serverPreflightFixture {
 		ProfileID:                   profile.CurrentID,
 		SSHDBinarySHA256:            strings.Repeat("0", 64),
 		OpenSSHBundleManifestSHA256: strings.Repeat("0", 64),
-		Listen: server.Endpoint{
-			Address: netip.MustParseAddr("192.0.2.10"),
-			Port:    2222,
-		},
+		Network:                     server.PublicationNetwork(netip.MustParseAddr("192.0.2.10"), 2222, 29722),
 		Target: server.Endpoint{
 			Address: netip.MustParseAddr("198.51.100.7"),
 			Port:    5432,
@@ -1205,17 +1199,17 @@ func equalServerTestArguments(got []string, want ...string) bool {
 }
 
 func serverTestEffectiveOutput(config server.Config, selected profile.Profile) []byte {
-	listenAddress := config.Listen.Address.Unmap()
+	listenAddress := config.Network.Data.Listen.Address.Unmap()
 	addressFamily := "inet6"
-	listen := "[" + listenAddress.String() + "]:" + fmt.Sprint(config.Listen.Port)
+	listen := "[" + listenAddress.String() + "]:" + fmt.Sprint(config.Network.Data.Listen.Port)
 	if listenAddress.Is4() {
 		addressFamily = "inet"
-		listen = listenAddress.String() + ":" + fmt.Sprint(config.Listen.Port)
+		listen = listenAddress.String() + ":" + fmt.Sprint(config.Network.Data.Listen.Port)
 	}
 	target := netip.AddrPortFrom(config.Target.Address.Unmap(), uint16(config.Target.Port)).String()
 	lines := []string{
 		"addressfamily " + addressFamily,
-		"port " + fmt.Sprint(config.Listen.Port),
+		"port " + fmt.Sprint(config.Network.Data.Listen.Port),
 		"listenaddress " + listen,
 		"pidfile " + expectedServerPIDFile,
 		"hostkey " + config.HostKeyPath,

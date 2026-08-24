@@ -361,11 +361,21 @@ WT_SERVER_MANIFEST=/etc/warptweet/server.wt
 {
     printf '%s\n' '{'
     printf '%s\n' '  "kind": "warptweet.server-gateway",'
-    printf '%s\n' '  "schema_version": 1,'
+    printf '%s\n' '  "schema_version": 2,'
     printf '%s\n' '  "profile_id": "warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519-chacha20",'
     printf '  "sshd_binary_sha256": "%s",\n' "$WT_SSHD_SHA256"
     printf '  "openssh_bundle_manifest_sha256": "%s",\n' "$WT_BUNDLE_SHA256"
-    printf '%s\n' '  "listen": {"address": "127.0.0.1", "port": 2222},'
+    printf '%s\n' '  "network": {'
+    printf '%s\n' '    "published_endpoint_generation": 1,'
+    printf '%s\n' '    "data": {'
+    printf '%s\n' '      "listen": {"address": "127.0.0.1", "port": 2222},'
+    printf '%s\n' '      "dial": {"host": "127.0.0.1", "port": 2222}'
+    printf '%s\n' '    },'
+    printf '%s\n' '    "enrollment": {'
+    printf '%s\n' '      "listen": {"address": "127.0.0.1", "port": 29722},'
+    printf '%s\n' '      "dial": {"host": "127.0.0.1", "port": 29722}'
+    printf '%s\n' '    }'
+    printf '%s\n' '  },'
     printf '%s\n' '  "target": {"address": "127.0.0.1", "port": 5432},'
     printf '%s\n' '  "dedicated_user": "warptweet",'
     printf '%s\n' '  "host_key_path": "/var/lib/warptweet/ssh/ssh_host_mldsa44_ed25519_key",'

@@ -150,12 +150,12 @@ func runServerStatus(ctx context.Context, arguments []string, stdout, stderr io.
 	}
 	if manifest, err := server.Load(installlayout.ServerManifestPath); err == nil {
 		status["profile_id"] = manifest.ProfileID
-		status["listen"] = fmt.Sprintf("%s:%d", manifest.Listen.Address, manifest.Listen.Port)
+		status["listen"] = manifest.Network.Data.Listen.AddrPort().String()
 		status["target"] = fmt.Sprintf("%s:%d", manifest.Target.Address, manifest.Target.Port)
 		status["dedicated_user"] = manifest.DedicatedUser
 		status["manifest"] = "present"
-		if addr := manifest.Listen.Address; addr.IsValid() && !addr.IsUnspecified() {
-			if url, err := enrollment.EnrollmentURL(addr.String(), enrollment.DefaultEnrollmentPort); err == nil {
+		if addr := manifest.Network.Enrollment.Listen.Address; addr.IsValid() && !addr.IsUnspecified() {
+			if url, err := enrollment.EnrollmentURL(addr.String(), uint16(manifest.Network.Enrollment.Listen.Port)); err == nil {
 				status["enroll_url"] = url
 			}
 		}

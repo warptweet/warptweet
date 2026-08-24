@@ -53,7 +53,7 @@ Every manifest has a `kind`, kind-specific `schema_version`, and exact `profile_
 | Kind | Schema | Purpose and kind-specific metadata |
 | --- | --- | --- |
 | `warptweet.client-tunnels` | [v1](schemas/client-tunnels-v1.schema.json) | Pins the fixed installed client `ssh` digest and declares the server endpoint, supervision policy, and one or more tunnels. Key and trust paths are installation invariants and cannot be supplied by a manifest. Each `run --tunnel` invocation selects exactly one declaration and binds exactly `127.0.0.1`. |
-| `warptweet.server-gateway` | [v1](schemas/server-gateway-v1.schema.json) | Selects one server listener, one authorized target, one dedicated account, fixed host-key and authorized-keys paths, and exact SHA-256 pins for the installed `sshd` and authenticated OpenSSH plus OpenSSL bundle manifest. |
+| `warptweet.server-gateway` | [v2](schemas/server-gateway-v2.schema.json) | Selects data and enrollment bind/dial endpoints, `published_endpoint_generation`, one authorized target, one dedicated account, fixed host-key and authorized-keys paths, and exact SHA-256 pins for the installed `sshd` and authenticated OpenSSH plus OpenSSL bundle manifest. Schema 1 is rejected. |
 
 Unknown fields, duplicate JSON member names at any nesting depth, trailing JSON values, invalid UTF-8, invalid types, unsupported kind-specific schema versions, and oversized inputs are rejected.
 

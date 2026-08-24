@@ -5,13 +5,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"strings"
 	"testing"
 
 	"warptweet.com/warptweet/internal/enrollment"
+	"warptweet.com/warptweet/internal/server"
 )
 
 func TestUsageMentionsHostAndConnect(t *testing.T) {
@@ -71,6 +74,105 @@ func TestParseHostTargetPortSugar(t *testing.T) {
 	}
 	if _, err := parseHostTarget("hostname:22"); err == nil {
 		t.Fatal("accepted hostname")
+	}
+}
+
+func TestHostFailsClosedOnNonLinux(t *testing.T) {
+	t.Parallel()
+
+	if runtime.GOOS == "linux" {
+		t.Skip("public host is supported on Linux")
+	}
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := Run(context.Background(), []string{"host", "--to", "5432", "--no-invite"}, nil, &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("host accepted a non-Linux GOOS")
+	}
+	if !strings.Contains(stderr.String(), "Linux") {
+		t.Fatalf("stderr=%s", stderr.String())
+	}
+}
+
+func TestResolveListenKeepsStoredBindWithoutDiscovery(t *testing.T) {
+	t.Parallel()
+
+	stored := server.Config{
+		Network: server.PublicationNetwork(netip.MustParseAddr("10.168.0.2"), 2222, 29722),
+	}
+	discovered := false
+	got, err := resolveListen("", &stored, func() (netip.Addr, error) {
+		discovered = true
+		return netip.MustParseAddr("192.0.2.99"), nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if discovered {
+		t.Fatal("omitted --listen re-ran inspect-network despite stored bind")
+	}
+	if got.String() != "10.168.0.2:2222" {
+		t.Fatalf("got %s", got)
+	}
+}
+
+func TestResolveListenFlagOverridesStoredBind(t *testing.T) {
+	t.Parallel()
+
+	stored := server.Config{
+		Network: server.PublicationNetwork(netip.MustParseAddr("10.168.0.2"), 2222, 29722),
+	}
+	got, err := resolveListen("192.0.2.10:2222", &stored, func() (netip.Addr, error) {
+		t.Fatal("discover called")
+		return netip.Addr{}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.String() != "192.0.2.10:2222" {
+		t.Fatalf("got %s", got)
+	}
+}
+
+func TestResolveListenFallsBackToLoopbackWhenDiscoveryIsEmpty(t *testing.T) {
+	t.Parallel()
+
+	got, err := resolveListen("", nil, func() (netip.Addr, error) {
+		return netip.Addr{}, nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.String() != "127.0.0.1:2222" {
+		t.Fatalf("got %s", got)
+	}
+}
+
+func TestPublicationChangeBlockedByLiveInventory(t *testing.T) {
+	t.Parallel()
+
+	err := publicationChangeBlocked([]enrollment.ClientRecord{{
+		ClientID: "client-1",
+		Status:   enrollment.ClientStatusActive,
+	}}, nil)
+	if err == nil || !strings.Contains(err.Error(), "client-1") {
+		t.Fatalf("error = %v", err)
+	}
+	err = publicationChangeBlocked(nil, []enrollment.Record{{
+		Invite: enrollment.Invite{InviteID: "invite-1"},
+		Status: enrollment.StatusIssued,
+	}})
+	if err == nil || !strings.Contains(err.Error(), "invite-1") {
+		t.Fatalf("error = %v", err)
+	}
+	if err := publicationChangeBlocked([]enrollment.ClientRecord{{
+		ClientID: "expired",
+		Status:   enrollment.ClientStatusExpired,
+	}}, []enrollment.Record{{
+		Invite: enrollment.Invite{InviteID: "used"},
+		Status: enrollment.StatusConsumed,
+	}}); err != nil {
+		t.Fatalf("terminal inventory blocked: %v", err)
 	}
 }
 

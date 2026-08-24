@@ -95,10 +95,7 @@ func TestRenderFormatsIPv6WithoutBroadeningPermitOpen(t *testing.T) {
 	t.Parallel()
 
 	config := validConfig()
-	config.Listen = Endpoint{
-		Address: netip.MustParseAddr("2001:db8::10"),
-		Port:    2222,
-	}
+	config.Network = PublicationNetwork(netip.MustParseAddr("2001:db8::10"), 2222, 29722)
 	config.Target = Endpoint{
 		Address: netip.MustParseAddr("2001:db8::20"),
 		Port:    443,
@@ -124,7 +121,10 @@ func TestRenderCanonicalizesIPv4MappedAddresses(t *testing.T) {
 	t.Parallel()
 
 	config := validConfig()
-	config.Listen.Address = netip.MustParseAddr("::ffff:192.0.2.10")
+	config.Network.Data.Listen.Address = netip.MustParseAddr("::ffff:192.0.2.10")
+	config.Network.Enrollment.Listen.Address = netip.MustParseAddr("::ffff:192.0.2.10")
+	config.Network.Data.Dial.Host = IPDialHost(netip.MustParseAddr("::ffff:192.0.2.10"))
+	config.Network.Enrollment.Dial.Host = IPDialHost(netip.MustParseAddr("::ffff:192.0.2.10"))
 	config.Target.Address = netip.MustParseAddr("::ffff:198.51.100.7")
 
 	got, err := Render(config)
@@ -136,6 +136,56 @@ func TestRenderCanonicalizesIPv4MappedAddresses(t *testing.T) {
 		!strings.Contains(text, "ListenAddress 192.0.2.10\n") ||
 		!strings.Contains(text, "PermitOpen 198.51.100.7:5432 127.0.0.1:29723\n") {
 		t.Fatalf("mapped addresses were not rendered canonically:\n%s", text)
+	}
+}
+
+func TestRenderUsesDataListenNotPublishedDial(t *testing.T) {
+	t.Parallel()
+
+	config := validConfig()
+	config.Network.Data.Dial = DialEndpoint{
+		Host: IPDialHost(netip.MustParseAddr("34.20.174.226")),
+		Port: 2222,
+	}
+	config.Network.Enrollment.Dial = DialEndpoint{
+		Host: IPDialHost(netip.MustParseAddr("34.20.174.226")),
+		Port: 29722,
+	}
+
+	got, err := Render(config)
+	if err != nil {
+		t.Fatalf("Render: %v", err)
+	}
+	text := string(got)
+	if strings.Contains(text, "34.20.174.226") {
+		t.Fatalf("Render wrote a published dial into sshd_config:\n%s", text)
+	}
+	if !strings.Contains(text, "ListenAddress 192.0.2.10\n") || !strings.Contains(text, "Port 2222\n") {
+		t.Fatalf("Render did not use data listen:\n%s", text)
+	}
+}
+
+func TestValidateAllowsLoopbackBindAndDial(t *testing.T) {
+	t.Parallel()
+
+	config := validConfig()
+	config.Network = PublicationNetwork(netip.MustParseAddr("127.0.0.1"), 2222, 29722)
+	if err := Validate(config); err != nil {
+		t.Fatalf("Validate rejected loopback bind and dial: %v", err)
+	}
+}
+
+func TestValidateRejectsSchemaVersion1(t *testing.T) {
+	t.Parallel()
+
+	config := validConfig()
+	config.SchemaVersion = 1
+	err := Validate(config)
+	if err == nil {
+		t.Fatal("Validate accepted schema 1")
+	}
+	if !errors.Is(err, ErrInvalidConfig) || !strings.Contains(err.Error(), "SchemaVersion") {
+		t.Fatalf("error = %v", err)
 	}
 }
 
@@ -157,7 +207,7 @@ func TestValidateRejectsUnsafeInputs(t *testing.T) {
 		{
 			name: "wrong schema version",
 			mutate: func(config *Config) {
-				config.SchemaVersion = 2
+				config.SchemaVersion = 1
 			},
 			field: "SchemaVersion",
 		},
@@ -227,58 +277,125 @@ func TestValidateRejectsUnsafeInputs(t *testing.T) {
 		{
 			name: "invalid listen address",
 			mutate: func(config *Config) {
-				config.Listen.Address = netip.Addr{}
+				config.Network.Data.Listen.Address = netip.Addr{}
 			},
-			field: "Listen.Address",
+			field: "Network.Data.Listen.Address",
 		},
 		{
 			name: "wildcard IPv4 listen address",
 			mutate: func(config *Config) {
-				config.Listen.Address = netip.MustParseAddr("0.0.0.0")
+				config.Network.Data.Listen.Address = netip.MustParseAddr("0.0.0.0")
 			},
-			field: "Listen.Address",
+			field: "Network.Data.Listen.Address",
 		},
 		{
 			name: "wildcard IPv6 listen address",
 			mutate: func(config *Config) {
-				config.Listen.Address = netip.MustParseAddr("::")
+				config.Network.Data.Listen.Address = netip.MustParseAddr("::")
 			},
-			field: "Listen.Address",
+			field: "Network.Data.Listen.Address",
 		},
 		{
 			name: "multicast listen address",
 			mutate: func(config *Config) {
-				config.Listen.Address = netip.MustParseAddr("224.0.0.1")
+				config.Network.Data.Listen.Address = netip.MustParseAddr("224.0.0.1")
 			},
-			field: "Listen.Address",
+			field: "Network.Data.Listen.Address",
 		},
 		{
 			name: "zoned listen address",
 			mutate: func(config *Config) {
-				config.Listen.Address = netip.MustParseAddr("fe80::1%eth0")
+				config.Network.Data.Listen.Address = netip.MustParseAddr("fe80::1%eth0")
 			},
-			field: "Listen.Address",
+			field: "Network.Data.Listen.Address",
 		},
 		{
 			name: "zero listen port",
 			mutate: func(config *Config) {
-				config.Listen.Port = 0
+				config.Network.Data.Listen.Port = 0
 			},
-			field: "Listen.Port",
+			field: "Network.Data.Listen.Port",
 		},
 		{
 			name: "negative listen port",
 			mutate: func(config *Config) {
-				config.Listen.Port = -1
+				config.Network.Data.Listen.Port = -1
 			},
-			field: "Listen.Port",
+			field: "Network.Data.Listen.Port",
 		},
 		{
 			name: "oversized listen port",
 			mutate: func(config *Config) {
-				config.Listen.Port = 65536
+				config.Network.Data.Listen.Port = 65536
 			},
-			field: "Listen.Port",
+			field: "Network.Data.Listen.Port",
+		},
+		{
+			name: "zero published_endpoint_generation",
+			mutate: func(config *Config) {
+				config.Network.PublishedEndpointGeneration = 0
+			},
+			field: "Network.PublishedEndpointGeneration",
+		},
+		{
+			name: "unspecified dial IP",
+			mutate: func(config *Config) {
+				config.Network.Data.Dial.Host = IPDialHost(netip.MustParseAddr("0.0.0.0"))
+			},
+			field: "Network.Data.Dial.Host",
+		},
+		{
+			name: "multicast dial IP",
+			mutate: func(config *Config) {
+				config.Network.Data.Dial.Host = IPDialHost(netip.MustParseAddr("224.0.0.1"))
+			},
+			field: "Network.Data.Dial.Host",
+		},
+		{
+			name: "broadcast dial IP",
+			mutate: func(config *Config) {
+				config.Network.Data.Dial.Host = IPDialHost(netip.MustParseAddr("255.255.255.255"))
+			},
+			field: "Network.Data.Dial.Host",
+		},
+		{
+			name: "link-local dial IP",
+			mutate: func(config *Config) {
+				config.Network.Data.Dial.Host = IPDialHost(netip.MustParseAddr("169.254.1.1"))
+			},
+			field: "Network.Data.Dial.Host",
+		},
+		{
+			name: "loopback dial with non-loopback bind",
+			mutate: func(config *Config) {
+				config.Network.Data.Dial.Host = IPDialHost(netip.MustParseAddr("127.0.0.1"))
+			},
+			field: "Network.Data.Dial.Host",
+		},
+		{
+			name: "non-loopback dial with loopback bind",
+			mutate: func(config *Config) {
+				config.Network = PublicationNetwork(netip.MustParseAddr("127.0.0.1"), 2222, 29722)
+				config.Network.Data.Dial.Host = IPDialHost(netip.MustParseAddr("192.0.2.10"))
+			},
+			field: "Network.Data.Dial.Host",
+		},
+		{
+			name: "bind address port collision",
+			mutate: func(config *Config) {
+				config.Network.Enrollment.Listen.Port = 2222
+			},
+			field: "Network",
+		},
+		{
+			name: "dial host port collision including IPv4-mapped",
+			mutate: func(config *Config) {
+				config.Network.Enrollment.Dial = DialEndpoint{
+					Host: IPDialHost(netip.MustParseAddr("::ffff:192.0.2.10")),
+					Port: 2222,
+				}
+			},
+			field: "Network",
 		},
 		{
 			name: "invalid target address",
@@ -457,10 +574,7 @@ func validConfig() Config {
 		ProfileID:                   profile.CurrentID,
 		SSHDBinarySHA256:            strings.Repeat("a", 64),
 		OpenSSHBundleManifestSHA256: strings.Repeat("b", 64),
-		Listen: Endpoint{
-			Address: netip.MustParseAddr("192.0.2.10"),
-			Port:    2222,
-		},
+		Network:                     PublicationNetwork(netip.MustParseAddr("192.0.2.10"), 2222, 29722),
 		Target: Endpoint{
 			Address: netip.MustParseAddr("198.51.100.7"),
 			Port:    5432,

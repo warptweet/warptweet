@@ -76,7 +76,7 @@ func runServerEnrollListen(ctx context.Context, arguments []string, stdout, stde
 	if _, _, _, err := enrollment.EnsureTLSIdentity(
 		installlayout.ServerEnrollmentTLSCertPath,
 		installlayout.ServerEnrollmentTLSKeyPath,
-		[]net.IP{net.IP(manifest.Listen.Address.AsSlice())},
+		[]net.IP{net.IP(manifest.Network.Enrollment.Listen.Address.AsSlice())},
 		time.Now().UTC(),
 	); err != nil {
 		return fmt.Errorf("ensure enrollment TLS identity: %w", err)
@@ -175,7 +175,7 @@ func resolveEnrollListen(flagValue string, manifest server.Config) (netip.AddrPo
 	if flagValue != "" {
 		return parseEndpoint(flagValue)
 	}
-	return netip.AddrPortFrom(manifest.Listen.Address, enrollment.DefaultEnrollmentPort), nil
+	return manifest.Network.Enrollment.Listen.AddrPort(), nil
 }
 
 func newEnrollmentHandler(manifest server.Config, hostPublicKey string, enrollPort uint16) http.Handler {
@@ -479,6 +479,10 @@ func acceptAndAuthorizeLocked(
 	if grant.ClockIsBlocked(installlayout.HostClockBlockedPath) {
 		return enrollment.EnrollmentProof{}, errors.New("host clock is blocked")
 	}
+	serverAddress, err := manifest.Network.Data.Dial.Host.Canonical()
+	if err != nil {
+		return enrollment.EnrollmentProof{}, err
+	}
 	result, err := enrollment.Accept(enrollment.AcceptInput{
 		Directory:        inviteDirectory,
 		ClientsDirectory: installlayout.ClientsDirectory,
@@ -488,7 +492,7 @@ func acceptAndAuthorizeLocked(
 		ProfileID:        profile.CurrentID,
 		TargetAddress:    manifest.Target.Address.String(),
 		TargetPort:       uint16(manifest.Target.Port),
-		ServerAddress:    manifest.Listen.Address.String(),
+		ServerAddress:    serverAddress,
 		Now:              now,
 		InstallAuthorization: func(publicKey string, notAfter time.Time) error {
 			line, err := server.RenderAuthorizedKey(manifest, []byte(publicKey), notAfter)

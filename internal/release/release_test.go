@@ -718,7 +718,7 @@ func TestFixedLayoutServerPreflightScriptIsCIOnlyAndNonListening(t *testing.T) {
 		`opt/warptweet/share/openssl-source.txt`,
 		`opt/warptweet/share/licenses/openssh/LICENCE`,
 		`opt/warptweet/share/licenses/openssl/LICENSE.txt`,
-		`"schema_version": 1`,
+		`"schema_version": 2`,
 		`warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519-chacha20`,
 		`--password '*NP*'`,
 		`-t mldsa44-ed25519`,
@@ -1710,7 +1710,7 @@ func TestExampleManifestBoundaries(t *testing.T) {
 		`"openssh_bundle_manifest_sha256"`,
 	} {
 		if !strings.Contains(string(serverExample), required) {
-			t.Errorf("server example omits required v1 declaration %q", required)
+			t.Errorf("server example omits required schema declaration %q", required)
 		}
 	}
 	clientExamplePath := filepath.Join(root, "examples", "client.example.wt")

@@ -65,10 +65,7 @@ func mustPolicy(t testing.TB) Policy {
 		ProfileID:                   profile.CurrentID,
 		SSHDBinarySHA256:            strings.Repeat("a", 64),
 		OpenSSHBundleManifestSHA256: strings.Repeat("b", 64),
-		Listen: server.Endpoint{
-			Address: netip.MustParseAddr("192.0.2.10"),
-			Port:    2222,
-		},
+		Network:                     server.PublicationNetwork(netip.MustParseAddr("192.0.2.10"), 2222, 29722),
 		Target: server.Endpoint{
 			Address: netip.MustParseAddr("198.51.100.7"),
 			Port:    5432,

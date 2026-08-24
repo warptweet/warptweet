@@ -1609,16 +1609,16 @@ func validateEffectiveServerConfig(output []byte, config server.Config, selected
 	if err != nil {
 		return err
 	}
-	listenAddress := config.Listen.Address.Unmap()
+	listenAddress := config.Network.Data.Listen.Address.Unmap()
 	addressFamily := "inet6"
 	if listenAddress.Is4() {
 		addressFamily = "inet"
 	}
-	listen := net.JoinHostPort(listenAddress.String(), strconv.Itoa(int(config.Listen.Port)))
+	listen := net.JoinHostPort(listenAddress.String(), strconv.Itoa(int(config.Network.Data.Listen.Port)))
 	target := netip.AddrPortFrom(config.Target.Address.Unmap(), uint16(config.Target.Port)).String()
 	expected := map[string][]string{
 		"addressfamily":                {addressFamily},
-		"port":                         {strconv.Itoa(int(config.Listen.Port))},
+		"port":                         {strconv.Itoa(int(config.Network.Data.Listen.Port))},
 		"listenaddress":                {listen},
 		"pidfile":                      {expectedServerPIDFile},
 		"hostkey":                      {config.HostKeyPath},

@@ -428,10 +428,7 @@ func validServerManifestForEnrollment() server.Config {
 		ProfileID:                   profile.CurrentID,
 		SSHDBinarySHA256:            "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
 		OpenSSHBundleManifestSHA256: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
-		Listen: server.Endpoint{
-			Address: netip.MustParseAddr("192.0.2.10"),
-			Port:    2222,
-		},
+		Network:                     server.PublicationNetwork(netip.MustParseAddr("192.0.2.10"), 2222, 29722),
 		Target: server.Endpoint{
 			Address: netip.MustParseAddr("198.51.100.20"),
 			Port:    5432,
