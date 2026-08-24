@@ -158,6 +158,68 @@ func TestAcceptProofUsesInputSetNotRequest(t *testing.T) {
 	}
 }
 
+func TestAcceptRejectsPublishedSetMismatchBeforeConsume(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	invite, record, err := Create(authorityCreateInput(now))
+	if err != nil {
+		t.Fatal(err)
+	}
+	invites := t.TempDir()
+	clients := t.TempDir()
+	if err := Store(invites, record); err != nil {
+		t.Fatal(err)
+	}
+	set := publishedFromInvite(t, invite)
+	set.Generation = 2
+	installed := false
+	_, err = Accept(AcceptInput{
+		Directory:        invites,
+		ClientsDirectory: clients,
+		Request: EnrollmentRequest{
+			InviteID:        invite.InviteID,
+			Nonce:           invite.Nonce,
+			ClientName:      invite.ClientName,
+			PublicKey:       testCompositePublicKey(),
+			ProfileID:       profile.CurrentID,
+			TunnelID:        "laptop-1",
+			ListenAddress:   "127.0.0.1",
+			ListenPort:      15432,
+			ManagementToken: testManagementToken,
+		},
+		HostPublicKey: invite.HostPublicKey,
+		Principal:     invite.Principal,
+		ProfileID:     profile.CurrentID,
+		TargetAddress: invite.TargetAddress,
+		TargetPort:    invite.TargetPort,
+		Published:     set,
+		Now:           now.Add(time.Minute),
+		InstallAuthorization: func(string, time.Time) error {
+			installed = true
+			return nil
+		},
+	})
+	if err == nil {
+		t.Fatal("Accept installed a published set that did not match the invite")
+	}
+	if installed {
+		t.Fatal("authorization installed before published-set equality")
+	}
+	stored, err := Load(invites, invite.InviteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Status != StatusIssued {
+		t.Fatalf("invite status=%q, want issued", stored.Status)
+	}
+	if records, err := ListClients(clients); err != nil {
+		t.Fatal(err)
+	} else if len(records) != 0 {
+		t.Fatalf("client records=%d, want none", len(records))
+	}
+}
+
 func TestStoreOrResumePendingClientComparesEntirePublishedSet(t *testing.T) {
 	t.Parallel()
 
@@ -201,10 +263,25 @@ func TestStoreOrResumePendingClientComparesEntirePublishedSet(t *testing.T) {
 	if _, err := Accept(input); err == nil {
 		t.Fatal("expected injected authorization failure")
 	}
-	input.Published.Generation = 2
+	clientID := clientIDFor(invite.InviteID, input.Request.PublicKey)
+	pending, err := LoadClient(clients, clientID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending.PublishedEndpointSet.Generation = 2
+	if err := UpdateClient(clients, pending); err != nil {
+		t.Fatal(err)
+	}
 	input.InstallAuthorization = func(string, time.Time) error { return nil }
 	if _, err := Accept(input); err == nil {
 		t.Fatal("re-accept treated a new published_endpoint_generation as identical")
+	}
+	issued, err := Load(invites, invite.InviteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issued.Status != StatusIssued {
+		t.Fatalf("invite status=%q, want issued", issued.Status)
 	}
 }
 

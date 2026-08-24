@@ -145,17 +145,9 @@ func runServerStatus(ctx context.Context, arguments []string, stdout, stderr io.
 		"manifest_path":    installlayout.ServerManifestPath,
 		"host_key_path":    installlayout.ServerHostKeyPath,
 		"invite_directory": inviteDirectory,
-		"enroll_port":      enrollment.DefaultEnrollmentPort,
 	}
 	if manifest, err := server.Load(installlayout.ServerManifestPath); err == nil {
-		status["profile_id"] = manifest.ProfileID
-		status["listen"] = manifest.Network.Data.Listen.AddrPort().String()
-		status["target"] = fmt.Sprintf("%s:%d", manifest.Target.Address, manifest.Target.Port)
-		status["dedicated_user"] = manifest.DedicatedUser
-		status["manifest"] = "present"
-		if url, err := enrollmentURLForManifest(manifest); err == nil {
-			status["enroll_url"] = url
-		}
+		applyManifestToServerStatus(status, manifest)
 	} else {
 		status["manifest"] = "missing"
 	}
@@ -188,6 +180,20 @@ func runServerStatus(ctx context.Context, arguments []string, stdout, stderr io.
 	}
 	status["clock_blocked"] = grant.ClockIsBlocked(installlayout.HostClockBlockedPath)
 	return writeJSON(stdout, status)
+}
+
+func applyManifestToServerStatus(status map[string]any, manifest server.Config) {
+	status["profile_id"] = manifest.ProfileID
+	status["listen"] = manifest.Network.Data.Listen.AddrPort().String()
+	status["target"] = fmt.Sprintf("%s:%d", manifest.Target.Address, manifest.Target.Port)
+	status["dedicated_user"] = manifest.DedicatedUser
+	status["manifest"] = "present"
+	if port := manifest.Network.Enrollment.Dial.Port; port != 0 {
+		status["enroll_port"] = port
+	}
+	if url, err := enrollmentURLForManifest(manifest); err == nil {
+		status["enroll_url"] = url
+	}
 }
 
 func runServerClockRecover(ctx context.Context, arguments []string, stdout, stderr io.Writer) error {

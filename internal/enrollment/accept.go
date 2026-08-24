@@ -96,6 +96,13 @@ func Accept(input AcceptInput) (AcceptResult, error) {
 	if err != nil {
 		return AcceptResult{}, fmt.Errorf("%w: unknown invite", ErrInvalidInvite)
 	}
+	recordSet, err := record.PublishedSet()
+	if err != nil {
+		return AcceptResult{}, fmt.Errorf("%w: invite published set: %v", ErrInvalidInvite, err)
+	}
+	if !recordSet.Equal(published) {
+		return AcceptResult{}, fmt.Errorf("%w: published endpoint set does not match invite", ErrInvalidInvite)
+	}
 	publicKey := strings.TrimSpace(input.Request.PublicKey)
 	clientID := clientIDFor(record.InviteID, publicKey)
 	if record.Status == StatusConsumed {

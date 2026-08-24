@@ -17,12 +17,14 @@ func publicationWarnings(manifest server.Config) []serverDoctorWarning {
 	var warnings []serverDoctorWarning
 	dataBind := canonicalDoctorAddr(manifest.Network.Data.Listen.Address)
 	dataDial := manifest.Network.Data.Dial
+	privateIPDial := false
 	if dataDial.Host.IP.IsValid() {
 		dialAddr := canonicalDoctorAddr(dataDial.Host.IP)
-		if isPrivateOrCGNAT(dialAddr) && dialAddr == dataBind && !dataBind.IsLoopback() {
+		privateIPDial = isPrivateOrCGNAT(dialAddr)
+		if privateIPDial && dialAddr == dataBind && !dataBind.IsLoopback() {
 			warnings = append(warnings, serverDoctorWarning{
 				Code:    "private_dial_equals_bind",
-				Message: "published data dial equals a private bind; this is a VPC-only locator, not a public pin",
+				Message: "published data dial equals a private bind; this is a VPC-only locator, not a public published endpoint",
 			})
 		}
 		if !isPubliclyRoutable(dataBind) && !dataBind.IsLoopback() {
@@ -33,9 +35,13 @@ func publicationWarnings(manifest server.Config) []serverDoctorWarning {
 		}
 	}
 	if !isPubliclyRoutable(dataBind) && !dataBind.IsLoopback() {
+		message := "WarpTweet cannot create inbound mappings"
+		if privateIPDial {
+			message += "; outbound-only NAT is unsupported"
+		}
 		warnings = append(warnings, serverDoctorWarning{
 			Code:    "cannot_create_inbound",
-			Message: "WarpTweet cannot create inbound mappings; outbound-only NAT is unsupported",
+			Message: message,
 		})
 	}
 	return warnings

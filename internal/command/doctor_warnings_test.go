@@ -3,6 +3,7 @@ package command
 import (
 	"encoding/json"
 	"net/netip"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -18,7 +19,7 @@ func TestPublicationWarningsJSONOnlyAndExcludeLoopback(t *testing.T) {
 
 	loopback := server.Config{Network: server.PublicationNetwork(netip.MustParseAddr("127.0.0.1"), 2222, 29722)}
 	if warnings := publicationWarnings(loopback); len(warnings) != 0 {
-		t.Fatalf("loopback pin=bind warned: %+v", warnings)
+		t.Fatalf("loopback bind=dial warned: %+v", warnings)
 	}
 
 	private := server.Config{Network: server.PublicationNetwork(netip.MustParseAddr("10.168.0.2"), 2222, 29722)}
@@ -34,9 +35,34 @@ func TestPublicationWarningsJSONOnlyAndExcludeLoopback(t *testing.T) {
 			strings.Contains(warning.Message, "DNSNames") {
 			t.Fatalf("doctor compared SAN to dial: %+v", warning)
 		}
+		if regexp.MustCompile(`(?i)\bpin\b`).MatchString(warning.Message) {
+			t.Fatalf("doctor called a locator a pin: %+v", warning)
+		}
 	}
 	if !codes["private_dial_equals_bind"] || !codes["cannot_create_inbound"] {
 		t.Fatalf("missing expected warnings: %+v", warnings)
+	}
+	inbound := warningByCode(warnings, "cannot_create_inbound")
+	if inbound == nil || !strings.Contains(inbound.Message, "outbound-only NAT is unsupported") {
+		t.Fatalf("private dial=bind omitted outbound-only diagnosis: %+v", warnings)
+	}
+
+	nat := server.Config{Network: server.PublicationNetwork(netip.MustParseAddr("10.168.0.2"), 2222, 29722)}
+	nat.Network.Data.Dial = server.DialEndpoint{Host: server.IPDialHost(netip.MustParseAddr("34.20.174.226")), Port: 2222}
+	nat.Network.Enrollment.Dial = server.DialEndpoint{Host: server.IPDialHost(netip.MustParseAddr("34.20.174.226")), Port: 29722}
+	natWarnings := publicationWarnings(nat)
+	natCodes := map[string]bool{}
+	for _, warning := range natWarnings {
+		natCodes[warning.Code] = true
+		if strings.Contains(warning.Message, "outbound-only NAT") {
+			t.Fatalf("1:1 NAT diagnosed as outbound-only: %+v", warning)
+		}
+	}
+	if natCodes["private_dial_equals_bind"] {
+		t.Fatalf("public advertise warned as private dial=bind: %+v", natWarnings)
+	}
+	if !natCodes["cannot_create_inbound"] {
+		t.Fatalf("1:1 NAT omitted cannot_create_inbound: %+v", natWarnings)
 	}
 
 	output := newServerDoctorOutput(engine.ServerPreflightReport{
@@ -117,4 +143,46 @@ func TestRouteStatusPayloadIncludesClientErrorClass(t *testing.T) {
 	if inferred["error_class"] != locator.ClassTLSNegotiate {
 		t.Fatalf("inferred=%v", inferred)
 	}
+}
+
+func TestApplyManifestToServerStatusUsesEnrollmentDialPort(t *testing.T) {
+	t.Parallel()
+
+	enrollHost, err := locator.ParseDialHost("enroll.example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	status := map[string]any{}
+	applyManifestToServerStatus(status, server.Config{
+		ProfileID:     profile.CurrentID,
+		DedicatedUser: server.DefaultDedicatedUser,
+		Network: server.Network{
+			PublishedEndpointGeneration: 1,
+			Data: server.ServiceEndpoints{
+				Listen: server.BindEndpoint{Address: netip.MustParseAddr("10.168.0.2"), Port: 2222},
+				Dial:   server.DialEndpoint{Host: server.IPDialHost(netip.MustParseAddr("34.20.174.226")), Port: 2222},
+			},
+			Enrollment: server.ServiceEndpoints{
+				Listen: server.BindEndpoint{Address: netip.MustParseAddr("10.168.0.2"), Port: 29722},
+				Dial:   server.DialEndpoint{Host: enrollHost, Port: 8443},
+			},
+		},
+		Target: server.Endpoint{Address: netip.MustParseAddr("127.0.0.1"), Port: 5432},
+	})
+	if status["enroll_port"] != uint16(8443) {
+		t.Fatalf("enroll_port=%v, want 8443", status["enroll_port"])
+	}
+	url, _ := status["enroll_url"].(string)
+	if url != "https://enroll.example.com:8443/v1/enroll" {
+		t.Fatalf("enroll_url=%q", url)
+	}
+}
+
+func warningByCode(warnings []serverDoctorWarning, code string) *serverDoctorWarning {
+	for i := range warnings {
+		if warnings[i].Code == code {
+			return &warnings[i]
+		}
+	}
+	return nil
 }
