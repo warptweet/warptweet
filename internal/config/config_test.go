@@ -185,7 +185,7 @@ func TestDecodeRejectsNonNumericAddressesAndInvalidPorts(t *testing.T) {
 	tests := map[string]func(map[string]any){
 		"server hostname": func(document map[string]any) {
 			server := document["server"].(map[string]any)
-			server["address"] = "ssh.example.test"
+			server["host"] = "*.example.test"
 		},
 		"target hostname": func(document map[string]any) {
 			tunnel := document["tunnels"].([]any)[0].(map[string]any)

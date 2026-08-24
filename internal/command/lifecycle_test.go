@@ -47,27 +47,8 @@ func TestLifecycleUsageMentionsCommands(t *testing.T) {
 func TestEnrollPrepareOnlyStagesWithoutSecrets(t *testing.T) {
 	t.Parallel()
 
-	// Without bundled ssh-keygen this becomes a keygen path error; still prove
-	// invite parsing and confirmation flags reject private-key invites first.
-	raw := []byte(`{
-  "kind":"warptweet.invite",
-  "schema_version":1,
-  "invite_id":"abc123",
-  "client_name":"laptop-1",
-  "server_address":"192.0.2.10",
-  "server_port":2222,
-  "target_address":"198.51.100.20",
-  "target_port":5432,
-  "principal":"warptweet",
-  "profile_id":"` + profile.CurrentID + `",
-  "artifact_profile_id":"darwin-arm64",
-  "host_public_key":"ssh-mldsa44-ed25519@openssh.com AAAA",
-  "issued_at":"2026-08-12T12:00:00Z",
-  "expires_at":"` + time.Now().UTC().Add(10*time.Minute).Format(time.RFC3339Nano) + `",
-  "nonce":"abcd",
-  "mac":"aa"
-}`)
-	invitePath := filepath.Join(t.TempDir(), "invite.json")
+	raw := []byte(validSchema3InviteJSON(t))
+	invitePath := filepath.Join(t.TempDir(), "invite.wtinvite")
 	if err := os.WriteFile(invitePath, raw, 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
@@ -75,7 +56,7 @@ func TestEnrollPrepareOnlyStagesWithoutSecrets(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 	code := Run(context.Background(), []string{
-		"enroll", invitePath, "--yes", "--prepare-only",
+		"enroll", "--yes", "--prepare-only", invitePath,
 	}, nil, &stdout, &stderr)
 	if code == 0 {
 		var output map[string]any
@@ -90,12 +71,86 @@ func TestEnrollPrepareOnlyStagesWithoutSecrets(t *testing.T) {
 		}
 		return
 	}
-	// On hosts without packaged ssh-keygen, enroll fails after invite parse.
 	if !strings.Contains(stderr.String(), "generate client key") &&
 		!strings.Contains(stderr.String(), "ssh-keygen") &&
-		!strings.Contains(stderr.String(), "invite") {
-		t.Fatalf("code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
+		!strings.Contains(stderr.String(), "permission denied") {
+		t.Fatalf("schema 3 parse should succeed; code=%d stderr=%s stdout=%s", code, stderr.String(), stdout.String())
 	}
+}
+
+func TestEnrollRejectsPriorInviteSchemas(t *testing.T) {
+	t.Parallel()
+
+	for _, version := range []int{1, 2} {
+		raw := []byte(`{
+  "kind":"warptweet.invite",
+  "schema_version":` + itoaSchema(version) + `,
+  "invite_id":"abc123",
+  "client_name":"laptop-1",
+  "server_address":"192.0.2.10",
+  "server_port":2222,
+  "enroll_port":29722,
+  "target_address":"198.51.100.20",
+  "target_port":5432,
+  "principal":"warptweet",
+  "profile_id":"` + profile.CurrentID + `",
+  "artifact_profile_id":"darwin-arm64",
+  "host_public_key":"ssh-mldsa44-ed25519@openssh.com AAAA",
+  "issued_at":"2026-08-12T12:00:00Z",
+  "expires_at":"` + time.Now().UTC().Add(10*time.Minute).Format(time.RFC3339Nano) + `",
+  "authorization_duration_seconds":2592000,
+  "nonce":"abcd",
+  "mac":"aa"
+}`)
+		invitePath := filepath.Join(t.TempDir(), "invite.wtinvite")
+		if err := os.WriteFile(invitePath, raw, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		code := Run(context.Background(), []string{
+			"enroll", "--yes", "--prepare-only", invitePath,
+		}, nil, &stdout, &stderr)
+		if code == 0 {
+			t.Fatalf("schema %d prepared: %s", version, stdout.String())
+		}
+		if strings.Contains(stdout.String(), `"status":"prepared"`) {
+			t.Fatalf("schema %d leaked prepared status", version)
+		}
+		if !strings.Contains(stderr.String(), "invite") && !strings.Contains(stderr.String(), "schema") {
+			t.Fatalf("schema %d stderr=%s", version, stderr.String())
+		}
+	}
+}
+
+func validSchema3InviteJSON(t *testing.T) string {
+	t.Helper()
+	return `{
+  "kind":"warptweet.invite",
+  "schema_version":3,
+  "invite_id":"abc123",
+  "client_name":"laptop-1",
+  "data":{"host":"192.0.2.10","port":2222},
+  "enrollment":{"host":"192.0.2.10","port":29722,"tls_spki_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
+  "published_endpoint_generation":1,
+  "target_address":"198.51.100.20",
+  "target_port":5432,
+  "principal":"warptweet",
+  "profile_id":"` + profile.CurrentID + `",
+  "artifact_profile_id":"darwin-arm64",
+  "host_public_key":"ssh-mldsa44-ed25519@openssh.com AAAA",
+  "issued_at":"2026-08-12T12:00:00Z",
+  "expires_at":"` + time.Now().UTC().Add(10*time.Minute).Format(time.RFC3339Nano) + `",
+  "authorization_duration_seconds":2592000,
+  "nonce":"abcd"
+}`
+}
+
+func itoaSchema(version int) string {
+	if version == 1 {
+		return "1"
+	}
+	return "2"
 }
 
 func TestCopyGenerationPolicyStagesRouteManifest(t *testing.T) {

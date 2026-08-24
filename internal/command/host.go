@@ -222,9 +222,10 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 		result["authorization_duration_seconds"] = applied.Invite.AuthorizationDurationSeconds
 		result["invite_path"] = invitePath
 		result["invite_class"] = "confidential_bearer"
-		result["client_name"] = label
+		result["client_name"] = applied.Invite.ClientName
 		if applied.ResumedInvite {
 			result["invite_resumed"] = true
+			result["invite_outstanding"] = true
 		}
 	}
 
@@ -238,6 +239,9 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 		EnrollmentDial:       fmt.Sprintf("%s:%d", enrollDial, applied.Publication.EnrollDial.Port),
 		Fingerprint:          hostFingerprint,
 		InvitePath:           invitePath,
+		InviteID:             applied.Invite.InviteID,
+		ClientName:           applied.Invite.ClientName,
+		InviteResumed:        applied.ResumedInvite,
 		InviteExpiresAt:      applied.Invite.ExpiresAt,
 		AuthorizationSeconds: applied.Invite.AuthorizationDurationSeconds,
 		EnrollStatus:         applied.EnrollStatus,
@@ -252,6 +256,9 @@ type hostHumanOutput struct {
 	EnrollmentDial       string
 	Fingerprint          string
 	InvitePath           string
+	InviteID             string
+	ClientName           string
+	InviteResumed        bool
 	InviteExpiresAt      string
 	AuthorizationSeconds int64
 	EnrollStatus         string
@@ -279,8 +286,18 @@ func writeHostHuman(stdout io.Writer, output hostHumanOutput) error {
 	if err != nil {
 		return err
 	}
+	if output.InviteResumed {
+		_, err = fmt.Fprintf(stdout, "invite   resumed unused issued invite %s (%s)\nclass    confidential bearer; one outstanding invite per published_endpoint_generation\n", output.InviteID, output.ClientName)
+		if err != nil {
+			return err
+		}
+	}
 	if output.InvitePath != "" {
-		_, err = fmt.Fprintf(stdout, "invite   %s\nclass    confidential bearer; transfer authenticated and delete after use\n", output.InvitePath)
+		if output.InviteResumed {
+			_, err = fmt.Fprintf(stdout, "invite   %s\n", output.InvitePath)
+		} else {
+			_, err = fmt.Fprintf(stdout, "invite   %s\nclass    confidential bearer; transfer authenticated and delete after use\n", output.InvitePath)
+		}
 		if err != nil {
 			return err
 		}
@@ -807,13 +824,25 @@ func ensureSSHDStarted(ctx context.Context, endpoint netip.AddrPort, restart boo
 		return "", errors.New("warptweet-sshd.service did not become active and listening")
 	}
 
-	if probeTCPListener(endpoint) {
+	return ensureDirectDataPlane(ctx, serverStateDirectory, endpoint, restart)
+}
+
+func ensureDirectDataPlane(ctx context.Context, stateDir string, endpoint netip.AddrPort, restart bool) (string, error) {
+	pidPath := filepath.Join(stateDir, "dataplane.pid")
+	if pid, err := readPIDFile(pidPath); err == nil && processOwnsTCPListen(pid, endpoint) {
+		if !restart {
+			return "direct_ready", nil
+		}
+		if err := stopDirectDataPlane(pidPath); err != nil {
+			return "", err
+		}
+	} else if probeTCPListener(endpoint) {
 		return "", fmt.Errorf("listener %s is already occupied outside the packaged WarpTweet service", endpoint)
 	}
-	if err := os.MkdirAll(serverStateDirectory, 0o700); err != nil {
+	if err := os.MkdirAll(stateDir, 0o700); err != nil {
 		return "", err
 	}
-	logPath := filepath.Join(serverStateDirectory, "dataplane.log")
+	logPath := filepath.Join(stateDir, "dataplane.log")
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o600)
 	if err != nil {
 		return "", err
@@ -827,7 +856,6 @@ func ensureSSHDStarted(ctx context.Context, endpoint netip.AddrPort, restart boo
 		_ = logFile.Close()
 		return "", err
 	}
-	pidPath := filepath.Join(serverStateDirectory, "dataplane.pid")
 	if err := os.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)+"\n"), 0o600); err != nil {
 		_ = cmd.Process.Kill()
 		_ = logFile.Close()
@@ -851,6 +879,21 @@ func ensureSSHDStarted(ctx context.Context, endpoint netip.AddrPort, restart boo
 	return "", errors.New("data plane did not begin listening before the readiness deadline")
 }
 
+func stopDirectDataPlane(pidPath string) error {
+	pid, err := readPIDFile(pidPath)
+	if err != nil {
+		return nil
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		_ = os.Remove(pidPath)
+		return nil
+	}
+	_ = proc.Signal(syscall.SIGTERM)
+	_ = os.Remove(pidPath)
+	return nil
+}
+
 func probeTCPListener(endpoint netip.AddrPort) bool {
 	connection, err := net.DialTimeout("tcp", endpoint.String(), 200*time.Millisecond)
 	if err != nil {
@@ -868,6 +911,7 @@ func mintServerInvite(
 	hostPublicKey string,
 	enrollmentTLSSPKISHA256 string,
 	authorizationSeconds int64,
+	now time.Time,
 ) (enrollment.Invite, enrollment.Record, error) {
 	if targetEndpoint.Addr().Compare(manifest.Target.Address) != 0 ||
 		uint16(manifest.Target.Port) != targetEndpoint.Port() {
@@ -918,5 +962,6 @@ func mintServerInvite(
 		HostPublicKey:                hostPublicKey,
 		TTL:                          enrollment.DefaultTTL,
 		AuthorizationDurationSeconds: authorizationSeconds,
+		Now:                          now,
 	})
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"net/http"
@@ -13,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"warptweet.com/warptweet/internal/locator"
 	"warptweet.com/warptweet/internal/profile"
 	"warptweet.com/warptweet/internal/server"
 )
@@ -276,6 +278,105 @@ func TestSubmitEnrollmentFailClosedCases(t *testing.T) {
 	// Happy path still works after negatives
 	if _, err := SubmitEnrollment(context.Background(), invite, base); err != nil {
 		t.Fatalf("valid enroll after negatives: %v", err)
+	}
+}
+
+func TestSubmitEnrollmentPlanWalksDNSCandidatesWithoutDefaultResolver(t *testing.T) {
+	t.Parallel()
+
+	now := time.Now().UTC()
+	invitesDir := t.TempDir()
+	clientsDir := t.TempDir()
+	manifest := validServerManifestForEnrollment()
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	enrollPort := uint16(listener.Addr().(*net.TCPAddr).Port)
+	certPath := filepath.Join(t.TempDir(), "tls.crt")
+	keyPath := filepath.Join(t.TempDir(), "tls.key")
+	enrollmentPin, _, _, err := EnsureTLSIdentity(certPath, keyPath, []net.IP{net.ParseIP("127.0.0.1")}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invite, record, err := Create(CreateInput{
+		ClientName:                  "studio-mac",
+		DataHost:                    "tunnel.example.com",
+		DataPort:                    2222,
+		EnrollmentHost:              "ENROLL.EXAMPLE.COM",
+		EnrollmentPort:              enrollPort,
+		PublishedEndpointGeneration: 1,
+		TargetAddress:               netip.MustParseAddr("198.51.100.20"),
+		TargetPort:                  5432,
+		Principal:                   server.DefaultDedicatedUser,
+		ProfileID:                   profile.CurrentID,
+		ArtifactProfileID:           "darwin-arm64",
+		HostPublicKey:               "ssh-mldsa44-ed25519@openssh.com AAAA host",
+		EnrollmentTLSSPKISHA256:     enrollmentPin,
+		Now:                         now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invite.Enrollment.Host != "enroll.example.com" {
+		t.Fatalf("host=%q", invite.Enrollment.Host)
+	}
+	if err := Store(invitesDir, record); err != nil {
+		t.Fatal(err)
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/enroll", newTestEnrollHandler(invite, invitesDir, clientsDir, "", manifest))
+	tlsConfig, err := LoadServerTLSConfig(certPath, keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpServer := &http.Server{Handler: mux}
+	go func() { _ = httpServer.Serve(tls.NewListener(listener, tlsConfig)) }()
+	defer httpServer.Close()
+
+	var queried string
+	var dialed []string
+	proof, selected, err := SubmitEnrollmentPlan(context.Background(), invite, EnrollmentRequest{
+		InviteID:        invite.InviteID,
+		Nonce:           invite.Nonce,
+		ClientName:      invite.ClientName,
+		PublicKey:       testCompositePublicKey(),
+		ProfileID:       profile.CurrentID,
+		TunnelID:        "studio-mac",
+		ListenAddress:   "127.0.0.1",
+		ListenPort:      15432,
+		ManagementToken: testManagementToken,
+	}, locator.ResolveOptions{
+		AllowLoopback: true,
+		Lookup: func(_ context.Context, name string) ([]netip.Addr, error) {
+			queried = name
+			return []netip.Addr{
+				netip.MustParseAddr("2001:db8::9"),
+				netip.MustParseAddr("127.0.0.1"),
+			}, nil
+		},
+		Dial: func(_ context.Context, addr netip.Addr, port uint16, _ time.Duration) error {
+			dialed = append(dialed, addr.String())
+			if !addr.IsLoopback() || port != enrollPort {
+				return errors.New("refused")
+			}
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if queried != "enroll.example.com." {
+		t.Fatalf("queried %q", queried)
+	}
+	if selected.String() != "127.0.0.1" {
+		t.Fatalf("selected=%s", selected)
+	}
+	if len(dialed) != 2 || dialed[0] != "2001:db8::9" || dialed[1] != "127.0.0.1" {
+		t.Fatalf("dialed=%v", dialed)
+	}
+	if proof.InviteID != invite.InviteID {
+		t.Fatalf("proof=%+v", proof)
 	}
 }
 

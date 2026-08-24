@@ -23,6 +23,7 @@ import (
 	"warptweet.com/warptweet/internal/grant"
 	"warptweet.com/warptweet/internal/grantsession"
 	"warptweet.com/warptweet/internal/installlayout"
+	"warptweet.com/warptweet/internal/outcome"
 	"warptweet.com/warptweet/internal/profile"
 	"warptweet.com/warptweet/internal/server"
 )
@@ -337,6 +338,11 @@ func writeEnrollmentJSON(
 			status = http.StatusForbidden
 			message = "enrollment forbidden"
 			reason = "forbidden"
+		}
+		if errors.Is(err, outcome.ErrHostBusy) || errors.Is(err, enrollment.ErrBusy) {
+			status = http.StatusServiceUnavailable
+			message = "host busy"
+			reason = "host_busy"
 		}
 		auditEnrollment(operation, source, "rejected", reason)
 		http.Error(writer, message, status)

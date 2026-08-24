@@ -315,7 +315,7 @@ func TestUnusedIssuedForGenerationResumesOneInvite(t *testing.T) {
 	if err := Store(directory, record); err != nil {
 		t.Fatal(err)
 	}
-	issued, err := UnusedIssuedForGeneration(directory, 1)
+	issued, err := UnusedIssuedForGeneration(directory, 1, time.Time{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,5 +332,70 @@ func TestUnusedIssuedForGenerationResumesOneInvite(t *testing.T) {
 	}
 	if string(blob) != string(again) {
 		t.Fatal("resumed bytes differ")
+	}
+}
+
+func TestLoadIssuedBlobResumesEncodeWhenBlobMissing(t *testing.T) {
+	t.Parallel()
+
+	input := testCreateInput()
+	invite, record, err := Create(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	if err := Store(directory, record); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(IssuedBlobPath(directory, invite.InviteID)); err != nil {
+		t.Fatal(err)
+	}
+	blob, err := LoadIssuedBlob(directory, invite.InviteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := Encode(invite)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(blob) != string(encoded) {
+		t.Fatal("missing-blob resume did not match Encode bytes")
+	}
+	issued, err := UnusedIssuedForGeneration(directory, 1, input.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issued) != 1 || issued[0].InviteID != invite.InviteID {
+		t.Fatalf("issued=%+v", issued)
+	}
+}
+
+func TestUnusedIssuedForGenerationExpiresPastDueRecords(t *testing.T) {
+	t.Parallel()
+
+	input := testCreateInput()
+	input.Now = time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	input.TTL = time.Minute
+	invite, record, err := Create(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	directory := t.TempDir()
+	if err := Store(directory, record); err != nil {
+		t.Fatal(err)
+	}
+	issued, err := UnusedIssuedForGeneration(directory, 1, input.Now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issued) != 0 {
+		t.Fatalf("issued expired invite: %+v", issued)
+	}
+	loaded, err := Load(directory, invite.InviteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Status != StatusExpired {
+		t.Fatalf("status=%s", loaded.Status)
 	}
 }

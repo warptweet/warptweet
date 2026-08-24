@@ -538,13 +538,13 @@ This is an assurance finding, not evidence that the ML-DSA primitive is incorrec
 
 ### WT-SR-020: Invite MAC semantics do not match the production path
 
-**Severity:** Medium
+**Severity:** Medium (addressed)
 
-- Invite HMAC generation and `ParseAndVerify` exist at `internal/enrollment/invite.go:161-201`.
-- Production search found no caller of `ParseAndVerify`.
-- The client shape-parses the invite and omits the MAC from its enrollment request; the server validates durable invite-record fields instead.
-
-The current MAC neither gives the client issuer authenticity nor gates server acceptance, contrary to older architecture text. Remove the dead field and document bearer semantics, or replace it with a client-verifiable signature anchored outside the invite.
+Invite HMAC, `ParseAndVerify`, and `/etc/warptweet/invite.mac-key` are gone.
+Schema 3 invites are unsigned confidential bearers. The client fails closed on
+kind, schema, shape, expiry, profile, and secret markers. The server accepts
+against the durable invite record. Do not describe a MAC field or
+`ParseAndVerify` as current.
 
 ### WT-SR-021: Clock rollback and direct management fallback have residual authority gaps
 

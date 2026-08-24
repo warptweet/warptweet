@@ -1,11 +1,18 @@
 package command
 
 import (
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+
+	"warptweet.com/warptweet/internal/enrollment"
+	"warptweet.com/warptweet/internal/outcome"
 )
 
 func TestGrantTickerObservesClockBeforeDelaySkip(t *testing.T) {
@@ -72,5 +79,57 @@ func TestRotateResponseFlushesBeforeSessionEviction(t *testing.T) {
 	}
 	if strings.Contains(fn, "afterSuccess()") {
 		t.Fatal("afterSuccess must not drop the management channel inline")
+	}
+}
+
+func TestWriteEnrollmentJSONMapsHostBusyToUnavailable(t *testing.T) {
+	t.Parallel()
+
+	request := httptest.NewRequest(http.MethodPost, "/v1/enroll", strings.NewReader(`{}`))
+	recorder := httptest.NewRecorder()
+	writeEnrollmentJSON(recorder, request, "enroll", nil, func([]byte) (any, error) {
+		return nil, fmt.Errorf("%w: another host command holds lock", outcome.ErrHostBusy)
+	}, nil)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("code=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), "host busy") {
+		t.Fatalf("body=%s", recorder.Body.String())
+	}
+}
+
+func TestEnrollmentAcceptDoesNotConsumeWhenHostLockHeld(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	held := make(chan struct{})
+	release := make(chan struct{})
+	go func() {
+		_ = enrollment.WithExclusiveLock(dir, hostStateLockName, func() error {
+			close(held)
+			<-release
+			return nil
+		})
+	}()
+	<-held
+	consumed := false
+	request := httptest.NewRequest(http.MethodPost, "/v1/enroll", strings.NewReader(`{}`))
+	recorder := httptest.NewRecorder()
+	writeEnrollmentJSON(recorder, request, "enroll", nil, func([]byte) (any, error) {
+		err := enrollment.WithNonBlockingExclusiveLock(dir, hostStateLockName, func() error {
+			consumed = true
+			return nil
+		})
+		if errors.Is(err, enrollment.ErrBusy) {
+			return nil, fmt.Errorf("%w: host operation in progress", outcome.ErrHostBusy)
+		}
+		return nil, err
+	}, nil)
+	close(release)
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("code=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if consumed {
+		t.Fatal("accept consumed while host lock was held")
 	}
 }

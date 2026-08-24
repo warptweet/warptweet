@@ -60,6 +60,32 @@ func TestHostHumanOutputClassifiesInviteAsConfidentialBearer(t *testing.T) {
 	}
 }
 
+func TestHostHumanOutputNamesResumedOutstandingInvite(t *testing.T) {
+	t.Parallel()
+
+	var stdout bytes.Buffer
+	if err := writeHostHuman(&stdout, hostHumanOutput{
+		Target:        "127.0.0.1:5432",
+		Listen:        "10.168.0.2:2222",
+		InvitePath:    "/tmp/laptop.wtinvite",
+		InviteID:      "abc123",
+		ClientName:    "laptop-1",
+		InviteResumed: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	text := stdout.String()
+	for _, required := range []string{
+		"resumed unused issued invite abc123 (laptop-1)",
+		"one outstanding invite per published_endpoint_generation",
+		"/tmp/laptop.wtinvite",
+	} {
+		if !strings.Contains(text, required) {
+			t.Fatalf("missing %q in %s", required, text)
+		}
+	}
+}
+
 func TestParseHostTargetPortSugar(t *testing.T) {
 	t.Parallel()
 

@@ -44,7 +44,7 @@ func TestApplyHostInterruptionResumesExactlyOneInvite(t *testing.T) {
 			if result.Manifest.Network.PublishedEndpointGeneration != 1 {
 				t.Fatalf("generation=%d", result.Manifest.Network.PublishedEndpointGeneration)
 			}
-			issued, err := enrollment.UnusedIssuedForGeneration(env.InviteDir, 1)
+			issued, err := enrollment.UnusedIssuedForGeneration(env.InviteDir, 1, env.Now)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -164,7 +164,7 @@ func TestConcurrentHostApplySerializesAndMintsOnce(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	issued, err := enrollment.UnusedIssuedForGeneration(env.InviteDir, 1)
+	issued, err := enrollment.UnusedIssuedForGeneration(env.InviteDir, 1, env.Now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -173,6 +173,95 @@ func TestConcurrentHostApplySerializesAndMintsOnce(t *testing.T) {
 	}
 	if mints.Load() != 1 {
 		t.Fatalf("mints=%d", mints.Load())
+	}
+}
+
+func TestExpiredIssuedInviteIsNotResumed(t *testing.T) {
+	t.Parallel()
+
+	env, input := newTestHostApply(t)
+	first, err := applyHostConfiguration(context.Background(), env, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expires, err := time.Parse(time.RFC3339Nano, first.Invite.ExpiresAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.Now = expires.Add(time.Second)
+	second, err := applyHostConfiguration(context.Background(), env, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Invite.InviteID == "" || second.Invite.InviteID == first.Invite.InviteID {
+		t.Fatalf("expired invite resumed: first=%s second=%s", first.Invite.InviteID, second.Invite.InviteID)
+	}
+	if second.ResumedInvite {
+		t.Fatal("expired invite marked resumed")
+	}
+	issued, err := enrollment.UnusedIssuedForGeneration(env.InviteDir, 1, env.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issued) != 1 || issued[0].InviteID != second.Invite.InviteID {
+		t.Fatalf("issued=%+v", issued)
+	}
+	loaded, err := enrollment.Load(env.InviteDir, first.Invite.InviteID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Status != enrollment.StatusExpired {
+		t.Fatalf("prior status=%s", loaded.Status)
+	}
+}
+
+func TestAdvertiseOnlyChangeRestartsEnrollmentAfterInviteGone(t *testing.T) {
+	t.Parallel()
+
+	env, input := newTestHostApply(t)
+	first, err := applyHostConfiguration(context.Background(), env, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := enrollment.Cancel(env.InviteDir, first.Invite.InviteID, env.Now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	var enrollRestarts, dataRestarts int
+	var dataListen netip.AddrPort
+	env.ApplyDataPlane = func(restart bool, endpoint netip.AddrPort) (string, error) {
+		dataListen = endpoint
+		if restart {
+			dataRestarts++
+		}
+		return "ok", nil
+	}
+	env.ApplyEnrollment = func(restart bool, endpoint netip.AddrPort, pin string) (string, error) {
+		if restart {
+			enrollRestarts++
+		}
+		return "ok", nil
+	}
+	input.Flags.Advertise = onceStringFlag{name: "--advertise", value: "34.20.174.226:2222", set: true}
+	input.NoInvite = true
+	second, err := applyHostConfiguration(context.Background(), env, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if enrollRestarts != 1 {
+		t.Fatalf("enroll restarts=%d", enrollRestarts)
+	}
+	if dataListen != first.Publication.DataListen.AddrPort() {
+		t.Fatalf("data listen changed: %s -> %s", first.Publication.DataListen.AddrPort(), dataListen)
+	}
+	if dataRestarts != 1 {
+		t.Fatalf("data-plane should restart from desired/applied mismatch, restarts=%d", dataRestarts)
+	}
+	if second.Manifest.Network.PublishedEndpointGeneration != first.Manifest.Network.PublishedEndpointGeneration+1 {
+		t.Fatalf("generation %d -> %d", first.Manifest.Network.PublishedEndpointGeneration, second.Manifest.Network.PublishedEndpointGeneration)
+	}
+	host, _ := second.Publication.DataDial.Host.Canonical()
+	if host != "34.20.174.226" {
+		t.Fatalf("data dial=%s", host)
 	}
 }
 

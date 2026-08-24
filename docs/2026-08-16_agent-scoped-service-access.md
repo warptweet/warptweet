@@ -389,8 +389,9 @@ The invite schema MUST be versioned to bind the authorization duration granted
 by the host. The recommended v2 field is an integer
 `authorization_duration_seconds`.
 
-The duration MUST participate in the invite MAC and enrollment proof. The
-client MAY display it but MUST NOT change it. The server computes:
+The duration MUST be bound on the invite and enrollment proof. Invites are
+unsigned bearers (WT-SR-020); there is no invite MAC. The client MAY display
+the duration but MUST NOT change it. The server computes:
 
 ```text
 authorization_not_after = accepted_at + authorization_duration_seconds

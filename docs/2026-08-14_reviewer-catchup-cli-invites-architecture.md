@@ -73,17 +73,17 @@ Strict decode everywhere that matters: UTF-8, single object, no unknown or dupli
 
 ## 3. `.wt` manifests
 
-### Client (`warptweet.client-tunnels`, schema v1)
+### Client (`warptweet.client-tunnels`, schema v2)
 
-Example: `examples/client.example.wt`
+Example: `examples/client.example.wt`. Schema 1 is rejected.
 
 ```json
 {
   "kind": "warptweet.client-tunnels",
-  "schema_version": 1,
+  "schema_version": 2,
   "profile_id": "warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519",
   "ssh_binary_sha256": "<64 lowercase hex>",
-  "server": { "address": "192.0.2.10", "port": 2222, "user": "warptweet" },
+  "server": { "host": "192.0.2.10", "port": 2222, "user": "warptweet" },
   "tunnels": [{
     "id": "database-primary",
     "listen": { "address": "127.0.0.1", "port": 15432 },
@@ -95,14 +95,14 @@ Example: `examples/client.example.wt`
 
 Identity path, known_hosts, and engine binary path are **install invariants**, not free-form fields in the manifest (production Linux client layout under `/etc/warptweet/` and `/opt/warptweet/`).
 
-### Server (`warptweet.server-gateway`, schema v1)
+### Server (`warptweet.server-gateway`, schema v2)
 
-Example: `examples/server.example.wt`
+Example: `examples/server.example.wt`. Schema 1 is rejected.
 
 ```json
 {
   "kind": "warptweet.server-gateway",
-  "schema_version": 1,
+  "schema_version": 2,
   "profile_id": "warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519",
   "sshd_binary_sha256": "<64 hex>",
   "openssh_bundle_manifest_sha256": "<64 hex>",
@@ -120,7 +120,7 @@ Example: `examples/server.example.wt`
 
 Not secret containers, but topology, digests, and policy are sensitive: authenticated distribution, restrictive perms, atomic activation, audit by digest/generation.
 
-Schemas: `schemas/client-tunnels-v1.schema.json`, `schemas/server-gateway-v1.schema.json`.
+Schemas: `schemas/client-tunnels-v2.schema.json`, `schemas/server-gateway-v2.schema.json`. v1 files remain historical unused.
 
 ---
 
@@ -128,21 +128,21 @@ Schemas: `schemas/client-tunnels-v1.schema.json`, `schemas/server-gateway-v1.sch
 
 ### Purpose
 
-Single-use, short-lived, **confidential bearer** enrollment authorizations.  
-Kind: `warptweet.invite`, `schema_version: 2`.  
-Not a tunnel manifest. Not reusable after consume. Never private keys or passwords. Transfer over an authenticated channel and delete after consumption or expiry.
+Single-use, short-lived, **unsigned confidential bearer** enrollment authorizations.  
+Kind: `warptweet.invite`, `schema_version: 3`. Schema 2 is rejected; there is no decoder.  
+Not a tunnel manifest. Not reusable after consume. Never private keys or passwords. Transfer over an authenticated channel and delete after consumption or expiry. HMAC is gone (WT-SR-020).
 
 ### Canonical fields (from `internal/enrollment`)
 
 ```json
 {
   "kind": "warptweet.invite",
-  "schema_version": 1,
+  "schema_version": 3,
   "invite_id": "<32 hex>",
   "client_name": "laptop-1",
-  "server_address": "192.0.2.10",
-  "server_port": 2222,
-  "enroll_port": 29722,
+  "data": { "host": "192.0.2.10", "port": 2222 },
+  "enrollment": { "host": "192.0.2.10", "port": 29722, "tls_spki_sha256": "<64 lowercase hex>" },
+  "published_endpoint_generation": 1,
   "target_address": "198.51.100.20",
   "target_port": 5432,
   "principal": "warptweet",
@@ -151,8 +151,8 @@ Not a tunnel manifest. Not reusable after consume. Never private keys or passwor
   "host_public_key": "ssh-mldsa44-ed25519@openssh.com AAAA... comment",
   "issued_at": "2026-08-12T12:00:00.000000000Z",
   "expires_at": "2026-08-12T12:15:00.000000000Z",
-  "nonce": "<32 hex>",
-  "mac": "<base64url HMAC-SHA256>"
+  "authorization_duration_seconds": 2592000,
+  "nonce": "<32 hex>"
 }
 ```
 
@@ -160,10 +160,10 @@ Not a tunnel manifest. Not reusable after consume. Never private keys or passwor
 | --- | --- |
 | Default TTL | 15 minutes (hard max) |
 | Size bound | 16 KiB |
-| MAC | HMAC-SHA256 over newline-joined fields (excludes `mac`) |
-| MAC secret | Removed. Invites are unsigned bearers; `/etc/warptweet/invite.mac-key` is not created. |
-| Server durable state | `/var/lib/warptweet/invites/<invite_id>.json` with `issued` / `consumed` / `revoked` / `expired` |
-| Client MAC verify | Client **does not** hold the MAC key; it fails closed on shape, expiry, profile, and secret markers. Authenticity of accept is proven later by enrollment proof binding + host key pin. |
+| MAC | None. Invites are unsigned bearers. |
+| MAC secret | Not created. `/etc/warptweet/invite.mac-key` is not part of this edition. |
+| Server durable state | `/var/lib/warptweet/invites/<invite_id>/record.json` plus `invite.wtinvite`, statuses `issued` / `consumed` / `revoked` / `expired` |
+| Client verify | Client fails closed on kind, schema 3, shape, expiry, profile, and secret markers. Authenticity of accept is proven later by enrollment proof binding + host key pin. |
 
 ### Invite file mint (implemented)
 
@@ -497,8 +497,8 @@ Use these as discussion prompts; they are intentional incomplete areas or drift,
 
 ### Schemas / examples
 
-- `schemas/client-tunnels-v1.schema.json`
-- `schemas/server-gateway-v1.schema.json`
+- `schemas/client-tunnels-v2.schema.json`
+- `schemas/server-gateway-v2.schema.json`
 - `examples/client.example.wt`
 - `examples/server.example.wt`
 

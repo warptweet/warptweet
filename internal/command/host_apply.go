@@ -305,7 +305,7 @@ func resumeOrMintInvite(
 	manifest server.Config,
 	hostPublicKey, pin string,
 ) (enrollment.Invite, []byte, bool, error) {
-	issued, err := enrollment.UnusedIssuedForGeneration(env.InviteDir, manifest.Network.PublishedEndpointGeneration)
+	issued, err := enrollment.UnusedIssuedForGeneration(env.InviteDir, manifest.Network.PublishedEndpointGeneration, env.Now)
 	if err != nil {
 		return enrollment.Invite{}, nil, false, err
 	}
@@ -319,7 +319,7 @@ func resumeOrMintInvite(
 		}
 		return issued[0].Invite, append(append([]byte(nil), blob...), '\n'), true, nil
 	}
-	invite, record, err := mintServerInvite(ctx, input.Label, input.Target, manifest, hostPublicKey, pin, input.AuthorizationSeconds)
+	invite, record, err := mintServerInvite(ctx, input.Label, input.Target, manifest, hostPublicKey, pin, input.AuthorizationSeconds, env.Now)
 	if err != nil {
 		return enrollment.Invite{}, nil, false, err
 	}

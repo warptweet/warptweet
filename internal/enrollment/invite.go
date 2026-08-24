@@ -198,8 +198,8 @@ func Store(directory string, record Record) error {
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return err
 	}
-	path := recordPath(directory, record.InviteID)
-	if _, err := os.Lstat(path); err == nil {
+	destDir := inviteDir(directory, record.InviteID)
+	if _, err := os.Lstat(destDir); err == nil {
 		return fmt.Errorf("invite %q already exists", record.InviteID)
 	}
 	blob, err := Encode(record.Invite)
@@ -217,22 +217,34 @@ func storeIssuedAtomic(directory string, record Record, blob []byte) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = os.RemoveAll(tempDir) }()
-	recordPathTemp := filepath.Join(tempDir, record.InviteID+".json")
-	blobPathTemp := filepath.Join(tempDir, record.InviteID+".wtinvite")
-	if err := writeJSONAtomic(recordPathTemp, record, 0o600); err != nil {
+	published := false
+	defer func() {
+		if !published {
+			_ = os.RemoveAll(tempDir)
+		}
+	}()
+	if err := writeJSONAtomic(filepath.Join(tempDir, "record.json"), record, 0o600); err != nil {
 		return err
 	}
-	if err := writeFileAtomic(blobPathTemp, append(append([]byte(nil), blob...), '\n'), 0o600); err != nil {
+	if err := writeFileAtomic(filepath.Join(tempDir, "invite.wtinvite"), append(append([]byte(nil), blob...), '\n'), 0o600); err != nil {
 		return err
 	}
-	if err := os.Rename(recordPathTemp, recordPath(directory, record.InviteID)); err != nil {
+	temp, err := os.Open(tempDir)
+	if err != nil {
 		return err
 	}
-	destBlob := filepath.Join(directory, record.InviteID+".wtinvite")
-	if err := os.Rename(blobPathTemp, destBlob); err != nil {
+	if err := temp.Sync(); err != nil {
+		_ = temp.Close()
 		return err
 	}
+	if err := temp.Close(); err != nil {
+		return err
+	}
+	destDir := inviteDir(directory, record.InviteID)
+	if err := os.Rename(tempDir, destDir); err != nil {
+		return err
+	}
+	published = true
 	dir, err := os.Open(directory)
 	if err != nil {
 		return err
@@ -243,7 +255,7 @@ func storeIssuedAtomic(directory string, record Record, blob []byte) error {
 
 // IssuedBlobPath is the durable transferable invite next to the record.
 func IssuedBlobPath(directory, inviteID string) string {
-	return filepath.Join(directory, inviteID+".wtinvite")
+	return filepath.Join(inviteDir(directory, inviteID), "invite.wtinvite")
 }
 
 // LoadIssuedBlob returns the durable transferable bytes for an invite.
@@ -265,19 +277,51 @@ func LoadIssuedBlob(directory, inviteID string) ([]byte, error) {
 	return Encode(record.Invite)
 }
 
-// UnusedIssuedForGeneration returns issued, unconsumed invites for generation.
-func UnusedIssuedForGeneration(directory string, generation uint64) ([]Record, error) {
+// UnusedIssuedForGeneration returns unexpired issued invites for generation.
+// Issued records whose ExpiresAt is not after now are persisted as expired and
+// are not resumed.
+func UnusedIssuedForGeneration(directory string, generation uint64, now time.Time) ([]Record, error) {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
 	records, err := List(directory)
 	if err != nil {
 		return nil, err
 	}
 	var issued []Record
 	for _, record := range records {
-		if record.Status == StatusIssued && record.PublishedEndpointGeneration == generation {
-			issued = append(issued, record)
+		if record.Status != StatusIssued || record.PublishedEndpointGeneration != generation {
+			continue
 		}
+		if InviteExpired(record, now) {
+			record.Status = StatusExpired
+			_ = writeJSONAtomic(recordPath(directory, record.InviteID), record, 0o600)
+			continue
+		}
+		issued = append(issued, record)
 	}
 	return issued, nil
+}
+
+// InviteExpiry parses the invite expiry instant.
+func InviteExpiry(record Record) (time.Time, error) {
+	expires, err := time.Parse(time.RFC3339Nano, record.ExpiresAt)
+	if err != nil {
+		expires, err = time.Parse(time.RFC3339, record.ExpiresAt)
+	}
+	return expires, err
+}
+
+// InviteExpired reports whether an issued invite is past due.
+func InviteExpired(record Record, now time.Time) bool {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	expires, err := InviteExpiry(record)
+	if err != nil {
+		return true
+	}
+	return !now.Before(expires)
 }
 
 // IsHexID reports whether value is a bounded hexadecimal identifier.
@@ -411,10 +455,10 @@ func List(directory string) ([]Record, error) {
 	}
 	var records []Record
 	for _, entry := range entries {
-		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
+		if strings.HasPrefix(entry.Name(), ".") || !entry.IsDir() || !isHexID(entry.Name()) {
 			continue
 		}
-		record, err := Load(directory, strings.TrimSuffix(entry.Name(), ".json"))
+		record, err := Load(directory, entry.Name())
 		if err != nil {
 			return nil, err
 		}
@@ -564,8 +608,12 @@ func isLowerHexDigest(value string) bool {
 	return true
 }
 
+func inviteDir(directory, inviteID string) string {
+	return filepath.Join(directory, inviteID)
+}
+
 func recordPath(directory, inviteID string) string {
-	return filepath.Join(directory, inviteID+".json")
+	return filepath.Join(inviteDir(directory, inviteID), "record.json")
 }
 
 func isSafeName(value string) bool {
