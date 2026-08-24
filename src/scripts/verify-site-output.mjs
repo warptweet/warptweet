@@ -53,6 +53,13 @@ if (!isConnectNextCommand(releaseGate.next_command)) {
   throw new Error("public-release next_command must be the connect action");
 }
 
+if (!indexHtml.includes("warptweet connect --yes --listen-port 15432 --restart unless-stopped staging-db.wtinvite")) {
+  throw new Error("website connect example must put flags before the invite path");
+}
+if (!indexHtml.includes("One remote service. On <em>localhost.")) {
+  throw new Error("website hero must lead with the localhost service outcome");
+}
+
 if (!releaseGate.homebrew_cta_enabled) {
   if (!indexHtml.includes("Homebrew package in release qualification")) {
     throw new Error("website must show Homebrew qualification message while CTA is dark");

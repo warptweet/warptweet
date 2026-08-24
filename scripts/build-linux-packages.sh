@@ -185,6 +185,9 @@ if command -v dpkg-deb >/dev/null 2>&1; then
     install -m 0644 "$WT_OUTPUT_INPUT/control" "$WT_DEB_ROOT/DEBIAN/control"
     install -m 0755 "$WT_OUTPUT_INPUT/postinst.sh" "$WT_DEB_ROOT/DEBIAN/postinst"
     install -m 0755 "$WT_OUTPUT_INPUT/prerm.sh" "$WT_DEB_ROOT/DEBIAN/prerm"
+    # Do not emit a Debian md5sums control member. WarpTweet package integrity
+    # is SHA-256 of the .deb plus OpenPGP; payload integrity is
+    # openssh-bundle.sha256. MD5 is not an integrity algorithm here.
     dpkg-deb --root-owner-group --build "$WT_DEB_ROOT" \
         "$WT_OUTPUT_INPUT/warptweet_${WT_VERSION}_${WT_DEB_ARCH}.deb"
     if [ -n "${WARPTWEET_LINUX_GPG_KEY:-}" ]; then

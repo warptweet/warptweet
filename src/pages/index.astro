@@ -10,8 +10,9 @@ import ManifestPanel from "../components/ManifestPanel.astro";
 import ProductRoute from "../components/ProductRoute.astro";
 import ProtocolStack from "../components/ProtocolStack.astro";
 import UseCases from "../components/UseCases.astro";
+import Workflow from "../components/Workflow.astro";
 
-const title = "WarpTweet | Hybrid post-quantum tunnelling";
+const title = "WarpTweet | One remote service on localhost";
 const description =
   "Reach Postgres, a private API, or another TCP service on a remote machine through localhost. No exposed target-service port, VPN mesh, or general-purpose SSH access for the ongoing client.";
 
@@ -31,7 +32,7 @@ const productFacts = [
     <section class="product-hero frame" aria-labelledby="hero-title">
       <div class="product-hero__copy">
         <p class="section-kicker">One service. One local port.</p>
-        <h1 id="hero-title">Hybrid post-quantum <em>tunnelling.</em></h1>
+        <h1 id="hero-title">One remote service. On <em>localhost.</em></h1>
         <p class="product-hero__deck">
           Reach Postgres, a private API, or another TCP service on a remote machine through
           localhost. No exposed target-service port, VPN mesh, or general-purpose SSH access for
@@ -51,6 +52,28 @@ const productFacts = [
       </ul>
     </section>
 
+    <section class="section frame" id="how-it-works" aria-labelledby="how-it-works-title">
+      <div id="cli"></div>
+      <div class="section-heading section-heading--split">
+        <div>
+          <p class="section-kicker">How it works</p>
+          <h2 id="how-it-works-title">Host, invite, connect, localhost.</h2>
+        </div>
+        <p>
+          The host grants one exact numeric target. The client connects once and keeps a durable
+          route until that grant expires.
+        </p>
+      </div>
+      <Workflow />
+      <CLIShowcase />
+      <div class="cli-flow" aria-label="WarpTweet command lifecycle">
+        <span>host</span><i aria-hidden="true">→</i>
+        <span>invite</span><i aria-hidden="true">→</i>
+        <span>connect</span><i aria-hidden="true">→</i>
+        <span>localhost</span>
+      </div>
+    </section>
+
     <section class="section frame" id="use-cases" aria-labelledby="use-cases-title">
       <div class="section-heading section-heading--split">
         <div>
@@ -65,19 +88,6 @@ const productFacts = [
       <UseCases />
     </section>
 
-    <section class="section frame" id="how-it-works" aria-labelledby="how-it-works-title">
-      <div class="section-heading section-heading--split">
-        <div>
-          <p class="section-kicker">Workflow</p>
-          <h2 id="how-it-works-title">Host, invite, connect, localhost.</h2>
-        </div>
-        <p>
-          The host grants one exact numeric target. The client enrolls once and keeps a durable
-          route until that grant expires.
-        </p>
-      </div>
-    </section>
-
     <section class="section frame install-section" id="install" aria-labelledby="install-title">
       <InstallPanel />
     </section>
@@ -86,7 +96,7 @@ const productFacts = [
       <div class="section-heading section-heading--split">
         <div>
           <p class="section-kicker">Features</p>
-          <h2 id="features-title">Tunneling that fits the software you already run.</h2>
+          <h2 id="features-title">A local port for software you already run.</h2>
         </div>
         <p>
           WarpTweet brings a service on another machine to a named local port while it manages the
@@ -114,26 +124,6 @@ const productFacts = [
           a pinned OpenSSH 10.4p1 and OpenSSL 3.5.7 transport engine. The WarpTweet CLI owns the
           profile, manifests, identity lifecycle, route policy, readiness, and supervision.
         </p>
-      </div>
-    </section>
-
-    <section class="section frame cli-section" id="cli" aria-labelledby="cli-title">
-      <div class="section-heading section-heading--split">
-        <div>
-          <p class="section-kicker">Two commands</p>
-          <h2 id="cli-title">Host on one machine. Connect on the other.</h2>
-        </div>
-        <p>
-          On the machine that runs the service, run host against its local port. On your laptop, connect
-          with the invite. Your app talks to localhost. No shell. No VPN mesh.
-        </p>
-      </div>
-      <CLIShowcase />
-      <div class="cli-flow" aria-label="WarpTweet command lifecycle">
-        <span>host</span><i aria-hidden="true">→</i>
-        <span>invite</span><i aria-hidden="true">→</i>
-        <span>connect</span><i aria-hidden="true">→</i>
-        <span>localhost</span>
       </div>
     </section>
 
@@ -172,8 +162,6 @@ const productFacts = [
       </div>
     </section>
 
-
-
     <section class="open-source-section" id="open-source" aria-labelledby="open-source-title">
       <div class="frame open-source-section__inner">
         <div>
@@ -191,7 +179,7 @@ const productFacts = [
             <div><dt>Protocol</dt><dd>Profile v1</dd></div>
             <div><dt>Source</dt><dd>Go + public schemas</dd></div>
           </dl>
-          <a class="button button--paper" href="#cli">See the command flow</a>
+          <a class="button button--paper" href="https://github.com/warptweet/warptweet">View source</a>
         </div>
       </div>
     </section>

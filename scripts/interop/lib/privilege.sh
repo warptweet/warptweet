@@ -10,7 +10,9 @@ interop_collect_privilege_evidence() {
     : >"$_err"
 
     interop_scp_to "$_probe" /tmp/warptweet-privilege-probe.sh
-    if interop_ssh "sh /tmp/warptweet-privilege-probe.sh" >"$_out" 2>"$_err" &&
+    # Probe inspects root-owned host keys and another uid's /proc/fd.
+    # Must run as root: a sudoers lab user (not root@VPS) cannot even stat the key.
+    if interop_ssh "sudo sh /tmp/warptweet-privilege-probe.sh" >"$_out" 2>"$_err" &&
         grep -q '^privilege PASS$' "$_out"; then
         cat "$_out"
         interop_log "privilege evidence written to $_out"

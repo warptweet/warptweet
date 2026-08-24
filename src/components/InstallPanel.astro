@@ -10,10 +10,15 @@ import {
 <div class="install-panel">
   <div class="install-panel__copy">
     <p class="section-kicker">Install</p>
-    <h2 id="install-title">Get WarpTweet onto the machine.</h2>
+    <h2 id="install-title">
+      {homebrewCtaEnabled ? "Get WarpTweet onto the machine." : "Install stays gated until evidence passes."}
+    </h2>
     <p>
-      The primary install path is a signed Homebrew cask that places the package-owned
-      client layout. A controller-only formula is never the website primary path.
+      {
+        homebrewCtaEnabled
+          ? "The primary install path is a signed Homebrew cask that places the package-owned client layout. A controller-only formula is never the website primary path."
+          : "The public path is a signed Homebrew cask that places the package-owned client layout. A controller-only formula is never the website primary path, and the cask command is not shown here until package-to-package evidence passes."
+      }
     </p>
   </div>
 

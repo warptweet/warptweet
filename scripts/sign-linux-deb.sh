@@ -6,6 +6,12 @@ export LC_ALL
 # Sign one assembled WarpTweet .deb. Prefers dpkg-sig. Otherwise embeds a
 # _gpgbuilder member with gpg+ar so Ubuntu hosts without the dpkg-sig package
 # can still produce a verifiable signature.
+#
+# WarpTweet authenticity is the detached OpenPGP .asc of the whole archive
+# (SHA-256 capable). dpkg-sig Version 4 still lists MD5 and SHA-1 on its
+# Files: lines; those are wire fields for that format, not this project's
+# integrity algorithm. The fallback clearsigned document also records SHA-256
+# of each ar member.
 
 fail() {
     echo "sign-linux-deb: $*" >&2
@@ -25,6 +31,14 @@ file_sha1() {
         sha1sum "$1" | awk '{print $1}'
     else
         shasum -a 1 "$1" | awk '{print $1}'
+    fi
+}
+
+file_sha256() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print $1}'
+    else
+        shasum -a 256 "$1" | awk '{print $1}'
     fi
 }
 
@@ -79,6 +93,12 @@ ar p "$WT_DEB" "$WT_DATA" >"$WT_DATA"
     for WT_MEMBER in debian-binary "$WT_CONTROL" "$WT_DATA"; do
         WT_SIZE=$(wc -c <"$WT_MEMBER" | tr -d ' ')
         echo " $(file_md5 "$WT_MEMBER") $(file_sha1 "$WT_MEMBER") $WT_SIZE $WT_MEMBER"
+    done
+    echo
+    echo "SHA256:"
+    for WT_MEMBER in debian-binary "$WT_CONTROL" "$WT_DATA"; do
+        WT_SIZE=$(wc -c <"$WT_MEMBER" | tr -d ' ')
+        echo " $(file_sha256 "$WT_MEMBER") $WT_SIZE $WT_MEMBER"
     done
 } >signdata
 

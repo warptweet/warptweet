@@ -366,9 +366,14 @@ func validatePublicKeyLine(publicKey string) error {
 	if fields[0] != selected.AuthenticationKeyType {
 		return fmt.Errorf("%w: public_key type is not the required composite algorithm", ErrInvalidInvite)
 	}
-	lower := strings.ToLower(publicKey)
+	// PEM/private-key substrings are checked on type and comment only. The
+	// base64 blob is high-entropy and is allowed to contain those bytes.
+	haystack := strings.ToLower(fields[0])
+	if len(fields) > 2 {
+		haystack += " " + strings.ToLower(strings.Join(fields[2:], " "))
+	}
 	for _, forbidden := range []string{"private", "begin openssh", "begin rsa", "begin ec", "seed"} {
-		if strings.Contains(lower, forbidden) {
+		if strings.Contains(haystack, forbidden) {
 			return fmt.Errorf("%w: public_key must not contain private-key material", ErrInvalidInvite)
 		}
 	}

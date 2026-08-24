@@ -1,0 +1,34 @@
+---
+const steps = [
+  {
+    number: "01",
+    title: "Host",
+    body: "On the machine that runs the service, grant one exact loopback target and mint an invite."
+  },
+  {
+    number: "02",
+    title: "Invite",
+    body: "A .wtinvite is a single-use bearer. Transfer it authenticated and delete it after connect."
+  },
+  {
+    number: "03",
+    title: "Connect",
+    body: "On the laptop, connect with flags first. WarpTweet opens one named local port."
+  },
+  {
+    number: "04",
+    title: "Query",
+    body: "Point psql, an SDK, or an agent at 127.0.0.1. Ordinary tools. No shell on the host."
+  }
+];
+---
+
+<ol class="workflow-steps" aria-label="WarpTweet workflow">
+  {steps.map((step) => (
+    <li>
+      <span>{step.number}</span>
+      <h3>{step.title}</h3>
+      <p>{step.body}</p>
+    </li>
+  ))}
+</ol>

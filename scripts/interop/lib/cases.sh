@@ -231,7 +231,9 @@ interop_phase_second_route() {
     if [ -z "$_open2" ]; then
         _open2=127.0.0.1:$_second_port
     fi
-    _n=$(interop_ssh "sudo ls -1 /var/lib/warptweet/clients/*.json 2>/dev/null | wc -l" | tr -d ' ')
+    # Glob must expand as root: clients/ is root:warptweet-sshd and not
+    # listable by a sudoers lab user (curtis@GCP vs root@Vultr).
+    _n=$(interop_ssh "sudo find /var/lib/warptweet/clients -maxdepth 1 -type f -name '*.json' | wc -l" | tr -d ' ')
     if [ "${_n:-0}" -lt 2 ]; then
         interop_record_result second-client-grant positive fail "server client records=$_n"
     else
@@ -514,12 +516,66 @@ interop_phase_reboot_policies() {
 interop_host_clock_mask_units() {
     # Runtime mask (this boot only) so qemu-ga / timesyncd cannot bounce
     # CLOCK_REALTIME underneath rotate and live-expiry.
+    # Record each unit's mask scope and active state so cleanup reverses only
+    # runtime masks this test created and restarts only previously-active units.
     interop_ssh "sudo sh -s" <<'REMOTE'
 set -eu
+_state=/run/warptweet-interop-clock-mask.state
+_masked_symlink() {
+    _path=$1
+    [ -L "$_path" ] || return 1
+    [ "$(readlink "$_path")" = /dev/null ]
+}
+if [ ! -f "$_state" ]; then
+    umask 077
+    _ntp=$(timedatectl show -p NTP --value 2>/dev/null || echo unknown)
+    printf 'NTP %s\n' "$_ntp" >"$_state"
+    for _u in \
+        systemd-timesyncd.service \
+        chrony.service \
+        chronyd.service \
+        ntp.service \
+        ntpsec.service \
+        qemu-guest-agent.service \
+        google-guest-agent.service \
+        google-guest-agent-manager.service \
+        google-osconfig-agent.service
+    do
+        _persistent=0
+        _runtime=0
+        _active=0
+        if _masked_symlink "/etc/systemd/system/$_u"; then
+            _persistent=1
+        fi
+        if _masked_symlink "/run/systemd/system/$_u"; then
+            _runtime=1
+        fi
+        if systemctl is-active --quiet "$_u"; then
+            _active=1
+        fi
+        printf 'UNIT %s %s %s %s\n' "$_u" "$_persistent" "$_runtime" "$_active" >>"$_state"
+    done
+fi
 timedatectl set-ntp false >/dev/null 2>&1 || true
 timedatectl set-local-rtc 0 >/dev/null 2>&1 || true
-for _u in systemd-timesyncd.service chrony.service chronyd.service ntp.service ntpsec.service qemu-guest-agent.service; do
-    systemctl mask --runtime "$_u" >/dev/null 2>&1 || true
+for _u in \
+    systemd-timesyncd.service \
+    chrony.service \
+    chronyd.service \
+    ntp.service \
+    ntpsec.service \
+    qemu-guest-agent.service \
+    google-guest-agent.service \
+    google-guest-agent-manager.service \
+    google-osconfig-agent.service
+do
+    _runtime=0
+    if _masked_symlink "/run/systemd/system/$_u"; then
+        _runtime=1
+    fi
+    if [ "$_runtime" -eq 0 ]; then
+        systemctl mask --runtime "$_u" >/dev/null 2>&1 || true
+    fi
     systemctl stop "$_u" >/dev/null 2>&1 || true
 done
 REMOTE
@@ -528,10 +584,35 @@ REMOTE
 interop_host_clock_unmask_units() {
     interop_ssh "sudo sh -s" <<'REMOTE'
 set -eu
-for _u in systemd-timesyncd.service chrony.service chronyd.service ntp.service ntpsec.service qemu-guest-agent.service; do
-    systemctl unmask "$_u" >/dev/null 2>&1 || true
-done
-timedatectl set-ntp true >/dev/null 2>&1 || true
+_state=/run/warptweet-interop-clock-mask.state
+if [ ! -f "$_state" ]; then
+    exit 0
+fi
+_ntp=unknown
+while read -r _kind _a _b _c _d; do
+    case "$_kind" in
+        NTP)
+            _ntp=$_a
+            ;;
+        UNIT)
+            _u=$_a
+            _runtime=$_c
+            _active=$_d
+            if [ "$_runtime" = 0 ]; then
+                systemctl unmask --runtime "$_u" >/dev/null 2>&1 || true
+            fi
+            if [ "$_active" = 1 ]; then
+                systemctl start "$_u" >/dev/null 2>&1 || true
+            fi
+            ;;
+    esac
+done <"$_state"
+rm -f "$_state"
+case "$_ntp" in
+    yes|true|1) timedatectl set-ntp true >/dev/null 2>&1 || true ;;
+    no|false|0) timedatectl set-ntp false >/dev/null 2>&1 || true ;;
+    *) timedatectl set-ntp true >/dev/null 2>&1 || true ;;
+esac
 REMOTE
 }
 
