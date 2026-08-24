@@ -52,9 +52,11 @@ the host, so `--to 5432` means `127.0.0.1:5432`.
 ## Invite and enrollment contract
 
 The `.wtinvite` binds the exact host public key, enrollment TLS SPKI pin,
-server endpoint, target, principal, wire profile, artifact profile, expiry,
-nonce, and single-use MAC. It contains no private key or reusable management
-capability and is mode 0600 because possession authorizes one enrollment.
+published data and enrollment dials, target, principal, wire profile, artifact
+profile, expiry, and nonce. Invites are unsigned bearers (WT-SR-020); WarpTweet
+does not create an invite MAC key. The file contains no private key or reusable
+management capability and is mode 0600 because possession authorizes one
+enrollment.
 
 Enrollment, rotation, and revocation use TLS 1.3 with the invite-pinned Ed25519
 SPKI and hybrid `X25519MLKEM768` key agreement. The client generates the

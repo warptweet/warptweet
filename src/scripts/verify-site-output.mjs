@@ -21,8 +21,8 @@ const indexHtml = await readFile(resolve(root, "dist/index.html"), "utf8");
 if (releaseGate.kind !== "warptweet.public-release-gate" || releaseGate.schema_version !== 1) {
   throw new Error("public release gate document is invalid");
 }
-if (releaseGate.links?.evidence_checklist !== "packaging/evidence/checklist-v2.json") {
-  throw new Error("public release gate must point at the v2 evidence checklist");
+if (releaseGate.links?.evidence_checklist !== "packaging/evidence/checklist-v3.json") {
+  throw new Error("public release gate must point at the v3 evidence checklist");
 }
 
 const llms = await readFile(resolve(root, "dist/llms.txt"), "utf8");

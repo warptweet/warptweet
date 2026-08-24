@@ -76,8 +76,8 @@ func ValidateGate(gate Gate) error {
 		return fmt.Errorf("qualification_message must be %q", QualificationMessage)
 	}
 	if checklist, ok := gate.Links["evidence_checklist"]; ok {
-		if checklist != "packaging/evidence/checklist-v2.json" {
-			return fmt.Errorf("evidence_checklist must be packaging/evidence/checklist-v2.json")
+		if checklist != "packaging/evidence/checklist-v3.json" {
+			return fmt.Errorf("evidence_checklist must be packaging/evidence/checklist-v3.json")
 		}
 	}
 	if gate.HomebrewCTAEnabled {
@@ -91,7 +91,7 @@ func ValidateGate(gate Gate) error {
 	return nil
 }
 
-// ValidateEnabledCTA ensures an enabled CTA points at complete v2 package evidence.
+// ValidateEnabledCTA ensures an enabled CTA points at a complete v3 index.
 func ValidateEnabledCTA(repositoryRoot string, gate Gate) error {
 	if err := ValidateGate(gate); err != nil {
 		return err
@@ -99,7 +99,7 @@ func ValidateEnabledCTA(repositoryRoot string, gate Gate) error {
 	if !gate.HomebrewCTAEnabled {
 		return nil
 	}
-	checklist, err := releaseevidence.LoadChecklistV2(releaseevidence.DefaultChecklistV2Path(repositoryRoot))
+	checklist, err := releaseevidence.LoadChecklistV3(releaseevidence.DefaultChecklistV3Path(repositoryRoot))
 	if err != nil {
 		return err
 	}
@@ -111,30 +111,35 @@ func ValidateEnabledCTA(repositoryRoot string, gate Gate) error {
 	if err := strictjson.RejectDuplicateObjectNames(raw); err != nil {
 		return fmt.Errorf("invalid required evidence document: %w", err)
 	}
-	var report releaseevidence.ReportV2
-	if err := decodeExactlyOneJSON(raw, &report); err != nil {
-		return fmt.Errorf("decode required evidence document: %w", err)
+	index, err := releaseevidence.DecodeIndexV3(raw)
+	if err != nil {
+		return fmt.Errorf("decode required evidence index: %w", err)
 	}
-	if err := releaseevidence.ValidateReportV2(checklist, report); err != nil {
-		return fmt.Errorf("invalid required evidence document: %w", err)
+	if err := releaseevidence.ValidateIndexDocumentV3(checklist, index); err != nil {
+		return fmt.Errorf("invalid required evidence index: %w", err)
 	}
-	if err := releaseevidence.BindArtifactDigests(repositoryRoot, report); err != nil {
-		return fmt.Errorf("evidence artifacts: %w", err)
+	for i, report := range index.Reports {
+		if report.ClientPackagePath == "" && report.ServerPackagePath == "" {
+			continue
+		}
+		if err := releaseevidence.BindArtifactDigestsV3(repositoryRoot, report); err != nil {
+			return fmt.Errorf("evidence artifacts in report %d: %w", i, err)
+		}
 	}
-	if !releaseevidence.CompleteV2(report) {
-		return fmt.Errorf("required evidence document is incomplete")
+	if !releaseevidence.CompleteIndexV3(checklist, index.Reports) {
+		return fmt.Errorf("required evidence index is incomplete")
 	}
 	return nil
 }
 
-// VerifyRepository authenticates the canonical checklist and keeps the CTA
-// dark unless a complete matrix index is supplied.
+// VerifyRepository authenticates the canonical v3 checklist and keeps the CTA
+// dark unless a complete v3 index is supplied.
 func VerifyRepository(repositoryRoot string) error {
 	gate, err := LoadGate(DefaultGatePath(repositoryRoot))
 	if err != nil {
 		return err
 	}
-	checklist, err := releaseevidence.LoadChecklistV2(releaseevidence.DefaultChecklistV2Path(repositoryRoot))
+	checklist, err := releaseevidence.LoadChecklistV3(releaseevidence.DefaultChecklistV3Path(repositoryRoot))
 	if err != nil {
 		return err
 	}
@@ -144,7 +149,7 @@ func VerifyRepository(repositoryRoot string) error {
 	if !gate.HomebrewCTAEnabled {
 		return nil
 	}
-	return fmt.Errorf("homebrew CTA cannot enable without a complete signed evidence index")
+	return ValidateEnabledCTA(repositoryRoot, gate)
 }
 
 // DefaultGatePath returns the repository public-release gate path.

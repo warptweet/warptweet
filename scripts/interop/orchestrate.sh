@@ -103,7 +103,7 @@ interop_pin_host_clock || true
 
 # --- Server preflight (best-effort doctor-server) ---
 if interop_ssh "sudo '$WARPTWEET_INTEROP_SERVER_CTRL' doctor-server --config /etc/warptweet/server.wt" >/tmp/wt-interop-doctor-server.out 2>/tmp/wt-interop-doctor-server.err; then
-    interop_record_result engine-identity-trust-preflight positive pass "doctor-server preflight_ready (or accepted)"
+    interop_log "doctor-server before host succeeded; recording after host"
 else
     # host may create server.wt; try after host if this fails.
     interop_log "doctor-server before host failed (may be ok pre-init); will retry after host"
@@ -127,14 +127,15 @@ interop_ssh "sudo rm -f '$_remote_invite'"
 
 # `host` is the sole public bootstrap path. It must establish both listeners
 # before reporting the invite.
-if ! interop_ssh "sudo rm -f '$_remote_invite' && sudo '$WARPTWEET_INTEROP_SERVER_CTRL' host --to 127.0.0.1:${WARPTWEET_INTEROP_TARGET_PORT} --listen '${WARPTWEET_INTEROP_SERVER_LISTEN}' --name '${WARPTWEET_INTEROP_CLIENT_NAME}' --out '$_remote_invite'" >/tmp/wt-interop-host.out 2>/tmp/wt-interop-host.err; then
+_host_pub=$(interop_host_publication_args)
+if ! interop_ssh "sudo rm -f '$_remote_invite' && sudo '$WARPTWEET_INTEROP_SERVER_CTRL' host --to 127.0.0.1:${WARPTWEET_INTEROP_TARGET_PORT} ${_host_pub} --name '${WARPTWEET_INTEROP_CLIENT_NAME}' --out '$_remote_invite'" >/tmp/wt-interop-host.out 2>/tmp/wt-interop-host.err; then
     interop_record_result invite-enroll-single-use positive fail "warptweet host failed: $(tr '\n' ' ' </tmp/wt-interop-host.err | cut -c1-200)"
     interop_emit_evidence || true
     interop_die "host failed"
 fi
 interop_log "host ready"
 # Issued invite must pin the target. A second host --to a different port must fail.
-if interop_ssh "sudo '$WARPTWEET_INTEROP_SERVER_CTRL' host --to 127.0.0.1:18432 --listen '${WARPTWEET_INTEROP_SERVER_LISTEN}' --no-invite" >/tmp/wt-interop-target-change.out 2>/tmp/wt-interop-target-change.err; then
+if interop_ssh "sudo '$WARPTWEET_INTEROP_SERVER_CTRL' host --to 127.0.0.1:18432 ${_host_pub} --no-invite" >/tmp/wt-interop-target-change.out 2>/tmp/wt-interop-target-change.err; then
     interop_record_result target-change-denial positive fail "host allowed target change while an invite exists"
 else
     interop_record_result target-change-denial positive pass "host refused target change while invite or grant exists"
@@ -155,7 +156,7 @@ chmod 0600 "$WARPTWEET_INTEROP_INVITE"
 interop_log "invite at $WARPTWEET_INTEROP_INVITE"
 
 # Re-read the two readiness boundaries that `host` has established.
-_listen_port=${WARPTWEET_INTEROP_SERVER_LISTEN##*:}
+_listen_port=$(interop_hostport_port "$WARPTWEET_INTEROP_SERVER_LISTEN")
 if ! interop_ssh "ss -lntp 2>/dev/null | grep -q ':$_listen_port' || netstat -lntp 2>/dev/null | grep -q ':$_listen_port'"; then
     interop_record_result engine-identity-trust-preflight positive fail "host reported ready without SSH listener"
     interop_emit_evidence || true

@@ -93,7 +93,7 @@ interop_phase_live_expiry() {
     _port=$((24000 + $(date -u +%s) % 4000))
     _target=${WARPTWEET_INTEROP_TARGET_PORT:-5432}
     _remote_invite="/tmp/${_name}.wtinvite"
-    if ! interop_ssh "sudo rm -f '$_remote_invite' && sudo '$WARPTWEET_INTEROP_SERVER_CTRL' host --to 127.0.0.1:${_target} --listen '${WARPTWEET_INTEROP_SERVER_LISTEN}' --name '$_name' --access-for 30s --out '$_remote_invite'" >/tmp/wt-interop-host-exp.out 2>/tmp/wt-interop-host-exp.err; then
+    if ! interop_ssh "sudo rm -f '$_remote_invite' && sudo '$WARPTWEET_INTEROP_SERVER_CTRL' host --to 127.0.0.1:${_target} $(interop_host_publication_args) --name '$_name' --access-for 30s --out '$_remote_invite'" >/tmp/wt-interop-host-exp.out 2>/tmp/wt-interop-host-exp.err; then
         interop_record_result live-expiry-and-revocation positive fail "short-grant host failed"
         return 0
     fi
@@ -205,7 +205,7 @@ interop_phase_second_route() {
     _second_port=$((22000 + $(date -u +%s) % 4000))
     _remote_invite="/tmp/${_second}.wtinvite"
     _target_port=${WARPTWEET_INTEROP_TARGET_PORT:-$WARPTWEET_INTEROP_ECHO_PORT}
-    if ! interop_ssh "sudo rm -f '$_remote_invite' && sudo '$WARPTWEET_INTEROP_SERVER_CTRL' host --to 127.0.0.1:${_target_port} --listen '${WARPTWEET_INTEROP_SERVER_LISTEN}' --name '$_second' --out '$_remote_invite'" >/tmp/wt-interop-host2.out 2>/tmp/wt-interop-host2.err; then
+    if ! interop_ssh "sudo rm -f '$_remote_invite' && sudo '$WARPTWEET_INTEROP_SERVER_CTRL' host --to 127.0.0.1:${_target_port} $(interop_host_publication_args) --name '$_second' --out '$_remote_invite'" >/tmp/wt-interop-host2.out 2>/tmp/wt-interop-host2.err; then
         interop_record_result second-client-grant positive fail "second host invite failed"
         interop_record_result two-independent-routes positive fail "second host invite failed"
         return 0
@@ -256,11 +256,13 @@ interop_phase_forwarding() {
         interop_record_result forwarding-surface-rejected negative not_run "packaged ssh missing"
         return 0
     fi
-    _host=${WARPTWEET_INTEROP_SERVER_LISTEN}
+    _host=$(interop_published_data_dial)
+    _dial_host=$(interop_hostport_host "$_host")
+    _dial_port=$(interop_hostport_port "$_host")
     # Authenticated session/exec must be refused by the data plane even if a key exists.
     if "$_ssh" -o BatchMode=yes -o StrictHostKeyChecking=no -o GlobalKnownHostsFile=/dev/null \
         -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 \
-        -p "${_host##*:}" "warptweet@${_host%%:*}" true >/tmp/wt-interop-exec.out 2>/tmp/wt-interop-exec.err; then
+        -p "${_dial_port}" "warptweet@${_dial_host}" true >/tmp/wt-interop-exec.out 2>/tmp/wt-interop-exec.err; then
         interop_record_result forwarding-surface-rejected negative fail "packaged ssh exec succeeded"
     else
         interop_record_result forwarding-surface-rejected negative pass "session/exec refused (no shell on data plane)"
@@ -283,11 +285,13 @@ interop_phase_classical_kex() {
         interop_record_result classical-only-kex-host-client negative not_run "packaged ssh missing"
         return 0
     fi
-    _host=${WARPTWEET_INTEROP_SERVER_LISTEN}
+    _host=$(interop_published_data_dial)
+    _dial_host=$(interop_hostport_host "$_host")
+    _dial_port=$(interop_hostport_port "$_host")
     if "$_ssh" -o BatchMode=yes -o StrictHostKeyChecking=no -o GlobalKnownHostsFile=/dev/null \
         -o UserKnownHostsFile=/dev/null -o ConnectTimeout=5 \
         -o KexAlgorithms=curve25519-sha256 -o HostKeyAlgorithms=ssh-ed25519 \
-        -p "${_host##*:}" "warptweet@${_host%%:*}" true >/tmp/wt-interop-classical.out 2>/tmp/wt-interop-classical.err; then
+        -p "${_dial_port}" "warptweet@${_dial_host}" true >/tmp/wt-interop-classical.out 2>/tmp/wt-interop-classical.err; then
         interop_record_result classical-only-kex-host-client negative fail "classical-only KEX was accepted"
     else
         interop_record_result classical-only-kex-host-client negative pass "classical-only KEX and host key refused"
@@ -332,11 +336,11 @@ PY
         interop_record_result malformed-keys-messages negative fail "truncated invite was accepted"
         return 0
     fi
-    _host=${WARPTWEET_INTEROP_SERVER_LISTEN}
-    python3 - "$_host" <<'PY' >/tmp/wt-interop-malformed-ssh.out 2>/tmp/wt-interop-malformed-ssh.err || true
+    _host=$(interop_published_data_dial)
+    python3 - "$(interop_hostport_host "$_host")" "$(interop_hostport_port "$_host")" <<'PY' >/tmp/wt-interop-malformed-ssh.out 2>/tmp/wt-interop-malformed-ssh.err || true
 import socket, sys
-host, port = sys.argv[1].rsplit(":", 1)
-s = socket.create_connection((host, int(port)), 5)
+host, port = sys.argv[1], int(sys.argv[2])
+s = socket.create_connection((host, port), 5)
 s.sendall(b"SSH-2.0-evil\r\n" + b"\x00" * 64)
 s.settimeout(3)
 try:
@@ -413,14 +417,16 @@ PY
 }
 
 interop_phase_bounded_floods() {
-    _host=${WARPTWEET_INTEROP_SERVER_LISTEN}
-    python3 - "$_host" <<'PY' >/tmp/wt-interop-flood.out 2>/tmp/wt-interop-flood.err || true
+    _data=$(interop_published_data_dial)
+    _enroll=$(interop_published_enroll_dial)
+    python3 - "$(interop_hostport_host "$_data")" "$(interop_hostport_port "$_data")" \
+        "$(interop_hostport_host "$_enroll")" "$(interop_hostport_port "$_enroll")" <<'PY' >/tmp/wt-interop-flood.out 2>/tmp/wt-interop-flood.err || true
 import socket, sys, threading
-host, port_s = sys.argv[1].rsplit(":", 1)
-port = int(port_s)
+data_host, data_port = sys.argv[1], int(sys.argv[2])
+enroll_host, enroll_port = sys.argv[3], int(sys.argv[4])
 errors = []
 
-def hit(target_port):
+def hit(host, target_port):
     try:
         s = socket.create_connection((host, target_port), 2)
         s.settimeout(1)
@@ -434,8 +440,8 @@ def hit(target_port):
 
 threads = []
 for _ in range(16):
-    threads.append(threading.Thread(target=hit, args=(port,)))
-    threads.append(threading.Thread(target=hit, args=(29722,)))
+    threads.append(threading.Thread(target=hit, args=(data_host, data_port)))
+    threads.append(threading.Thread(target=hit, args=(enroll_host, enroll_port)))
 for t in threads:
     t.start()
 for t in threads:
@@ -773,7 +779,7 @@ interop_phase_pid_reuse() {
 
 interop_phase_silent_renewal() {
     _before=$(interop_ssh "sudo python3 -c \"import json,glob,os; p=glob.glob('/var/lib/warptweet/clients/*.json'); print(max((json.load(open(f)).get('authorization_not_after') or '') for f in p) if p else '')\"" 2>/dev/null || true)
-    interop_ssh "sudo '$WARPTWEET_INTEROP_SERVER_CTRL' host --to 127.0.0.1:${WARPTWEET_INTEROP_TARGET_PORT:-5432} --listen '${WARPTWEET_INTEROP_SERVER_LISTEN}' --access-for 365d --no-invite" >/tmp/wt-interop-silent.out 2>/tmp/wt-interop-silent.err || true
+    interop_ssh "sudo '$WARPTWEET_INTEROP_SERVER_CTRL' host --to 127.0.0.1:${WARPTWEET_INTEROP_TARGET_PORT:-5432} $(interop_host_publication_args) --access-for 365d --no-invite" >/tmp/wt-interop-silent.out 2>/tmp/wt-interop-silent.err || true
     _after=$(interop_ssh "sudo python3 -c \"import json,glob; p=glob.glob('/var/lib/warptweet/clients/*.json'); print(max((json.load(open(f)).get('authorization_not_after') or '') for f in p) if p else '')\"" 2>/dev/null || true)
     if [ -n "$_before" ] && [ -n "$_after" ] && [ "$_after" != "$_before" ]; then
         interop_record_result silent-renewal-and-port-reassignment negative fail "host --access-for changed existing authorization_not_after"

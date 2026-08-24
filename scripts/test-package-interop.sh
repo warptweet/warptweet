@@ -60,7 +60,7 @@ esac
 
 WT_SCRIPT_DIRECTORY=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 WT_REPOSITORY_ROOT=$(CDPATH= cd -- "$WT_SCRIPT_DIRECTORY/.." && pwd)
-WT_CHECKLIST="$WT_REPOSITORY_ROOT/packaging/evidence/checklist-v2.json"
+WT_CHECKLIST="$WT_REPOSITORY_ROOT/packaging/evidence/checklist-v3.json"
 if [ ! -f "$WT_CHECKLIST" ]; then
     fail "checklist missing: $WT_CHECKLIST"
 fi
@@ -282,30 +282,26 @@ run_case_not_run engine-and-package-tamper negative "requires dual-host tamper h
 run_case_not_run bounded-floods negative "requires dual-host flood harness"
 run_case_not_run availability-faults negative "requires dual-host fault harness"
 
-WT_SCHEMA=2
-if [ -n "${WARPTWEET_EVIDENCE_SCHEMA_VERSION:-}" ] && [ "$WARPTWEET_EVIDENCE_SCHEMA_VERSION" != "2" ]; then
-    fail "only evidence schema 2 is supported"
+WT_SCHEMA=3
+if [ -n "${WARPTWEET_EVIDENCE_SCHEMA_VERSION:-}" ] && [ "$WARPTWEET_EVIDENCE_SCHEMA_VERSION" != "3" ]; then
+    fail "only evidence schema 3 is supported"
 fi
-WT_CONTRACT_DIGEST=$(sed -n 's/^[[:space:]]*ContractChecklistSHA256 = "\([0-9a-f]\{64\}\)".*/\1/p' \
-    "$WT_REPOSITORY_ROOT/internal/adoptionresult/result.go" | head -n 1)
+WT_CONTRACT_DIGEST=$(digest_file "$WT_CHECKLIST")
 if [ -z "$WT_CONTRACT_DIGEST" ]; then
-    fail "cannot derive contract_checklist_sha256 from adoptionresult"
+    fail "cannot hash packaging/evidence/checklist-v3.json"
 fi
-if [ "$WT_SCHEMA" = "2" ]; then
-    run_case_not_run second-client-grant positive "requires dual-host second client"
-    run_case_not_run two-independent-routes positive "requires dual-route package matrix"
-    run_case_not_run reboot-unless-stopped-manual-down positive "requires real reboot runners"
-    run_case_not_run live-expiry-and-revocation positive "requires live session expiry runners"
-    run_case_not_run clock-rollback-fail-closed positive "requires packaged clock manipulation"
-    run_case_not_run target-change-denial positive "requires packaged host target-change runner"
-    run_case_not_run compose-loopback-postgres positive "requires Compose loopback package runner"
-    run_case_not_run agent-skill-delivery positive "requires published skill HTTP bytes"
-    run_case_not_run pid-reuse-and-stop-failure negative "requires PID-reuse package harness"
-    run_case_not_run silent-renewal-and-port-reassignment negative "requires renewal and port-collision package harness"
-fi
+run_case_not_run second-client-grant positive "requires dual-host second client"
+run_case_not_run two-independent-routes positive "requires dual-route package matrix"
+run_case_not_run reboot-unless-stopped-manual-down positive "requires real reboot runners"
+run_case_not_run live-expiry-and-revocation positive "requires live session expiry runners"
+run_case_not_run clock-rollback-fail-closed positive "requires packaged clock manipulation"
+run_case_not_run target-change-denial positive "requires packaged host target-change runner"
+run_case_not_run compose-loopback-postgres positive "requires Compose loopback package runner"
+run_case_not_run agent-skill-delivery positive "requires published skill HTTP bytes"
+run_case_not_run pid-reuse-and-stop-failure negative "requires PID-reuse package harness"
+run_case_not_run silent-renewal-and-port-reassignment negative "requires renewal and port-collision package harness"
 
 WT_FINISHED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-WT_RESULTS_JSON=$(awk 'BEGIN{printf "["} {if(n++)printf ","; printf "%s",$0} END{printf "]"}' "$WT_RESULTS_FILE")
 
 WT_CLIENT_PLATFORM=${WARPTWEET_CLIENT_PLATFORM:-$(uname -s)}
 WT_SERVER_PLATFORM=${WARPTWEET_SERVER_PLATFORM:-linux}
@@ -327,39 +323,104 @@ if [ "${WARPTWEET_ALLOW_SOURCE_TREE:-}" = "1" ]; then
     WT_PKG_TO_PKG=false
 fi
 
-cat >"$WARPTWEET_EVIDENCE_OUTPUT" <<EOF
-{
-  "kind": "warptweet.release-evidence",
-  "schema_version": 2,
-  "contract_id": "warptweet.adoption-release.v1",
-  "contract_checklist_sha256": "$WT_CONTRACT_DIGEST",
-  "release_version": "$WARPTWEET_RELEASE_VERSION",
-  "source_commit": "$WARPTWEET_SOURCE_COMMIT",
-  "clean_tree_proof": "${WARPTWEET_CLEAN_TREE_PROOF:-not_recorded}",
-  "client_package_sha256": "$WARPTWEET_CLIENT_PACKAGE_SHA256",
-  "server_package_sha256": "$WARPTWEET_SERVER_PACKAGE_SHA256",
-  "client_artifact_profile_id": "$WARPTWEET_CLIENT_ARTIFACT_PROFILE_ID",
-  "server_artifact_profile_id": "$WARPTWEET_SERVER_ARTIFACT_PROFILE_ID",
-  "client_engine_manifest_sha256": "$WARPTWEET_CLIENT_ENGINE_MANIFEST_SHA256",
-  "server_engine_manifest_sha256": "$WARPTWEET_SERVER_ENGINE_MANIFEST_SHA256",
-  "client_platform": "$WT_CLIENT_PLATFORM",
-  "server_platform": "$WT_SERVER_PLATFORM",
-  "client_architecture": "$WT_CLIENT_ARCH",
-  "server_architecture": "$WT_SERVER_ARCH",
-  "host_target": "${WARPTWEET_HOST_TARGET:-127.0.0.1:5432}",
-  "authorization_policy": "${WARPTWEET_AUTHORIZATION_POLICY:-30d-default-365d-max}",
-  "route_count": ${WARPTWEET_ROUTE_COUNT:-0},
-  "restart_policies": ["unless-stopped", "manual"],
-  "test_identity": "$WT_TEST_IDENTITY",
-  "commands": ["./scripts/test-package-interop.sh"],
-  "started_at": "$WT_STARTED_AT",
-  "finished_at": "$WT_FINISHED_AT",
-  "redacted_log_path": "$WT_REDACTED_LOG",
-  "package_to_package": $WT_PKG_TO_PKG,
-  "source_tree_substitution": $WT_SRC_SUB,
-  "results": $WT_RESULTS_JSON
+WT_DRAFT=$(mktemp "$WT_TMP/evidence-draft.XXXXXX")
+WT_CLEAN_PROOF=${WARPTWEET_CLEAN_TREE_PROOF:-not_recorded}
+WT_CLEAN_TREE=false
+case "$WT_CLEAN_PROOF" in
+    clean | git-status-empty) WT_CLEAN_TREE=true ;;
+esac
+export WT_CONTRACT_DIGEST WT_CLIENT_PLATFORM WT_SERVER_PLATFORM WT_CLIENT_ARCH WT_SERVER_ARCH
+export WT_TEST_IDENTITY WT_STARTED_AT WT_FINISHED_AT WT_PKG_TO_PKG WT_SRC_SUB WT_CLEAN_PROOF WT_CLEAN_TREE WT_REDACTED_LOG
+export WARPTWEET_RELEASE_VERSION WARPTWEET_SOURCE_COMMIT
+export WARPTWEET_CLIENT_PACKAGE_SHA256 WARPTWEET_SERVER_PACKAGE_SHA256
+export WARPTWEET_CLIENT_ARTIFACT_PROFILE_ID WARPTWEET_SERVER_ARTIFACT_PROFILE_ID
+export WARPTWEET_CLIENT_ENGINE_MANIFEST_SHA256 WARPTWEET_SERVER_ENGINE_MANIFEST_SHA256
+export WARPTWEET_HOST_TARGET WARPTWEET_AUTHORIZATION_POLICY WARPTWEET_ROUTE_COUNT
+python3 - "$WT_RESULTS_FILE" "$WT_DRAFT" <<PY
+import json, os, sys
+results = []
+with open(sys.argv[1], encoding="utf-8") as handle:
+    for line in handle:
+        line = line.strip()
+        if line:
+            results.append(json.loads(line))
+document = {
+    "kind": "warptweet.release-evidence",
+    "schema_version": 3,
+    "contract_id": "warptweet.adoption-release.v1",
+    "contract_checklist_sha256": os.environ["WT_CONTRACT_DIGEST"],
+    "release_version": os.environ["WARPTWEET_RELEASE_VERSION"],
+    "source_commit": os.environ["WARPTWEET_SOURCE_COMMIT"],
+    "clean_tree_proof": os.environ.get("WT_CLEAN_PROOF", "not_recorded"),
+    "client_package_sha256": os.environ["WARPTWEET_CLIENT_PACKAGE_SHA256"],
+    "server_package_sha256": os.environ["WARPTWEET_SERVER_PACKAGE_SHA256"],
+    "client_artifact_profile_id": os.environ["WARPTWEET_CLIENT_ARTIFACT_PROFILE_ID"],
+    "server_artifact_profile_id": os.environ["WARPTWEET_SERVER_ARTIFACT_PROFILE_ID"],
+    "client_engine_manifest_sha256": os.environ["WARPTWEET_CLIENT_ENGINE_MANIFEST_SHA256"],
+    "server_engine_manifest_sha256": os.environ["WARPTWEET_SERVER_ENGINE_MANIFEST_SHA256"],
+    "client_platform": os.environ["WT_CLIENT_PLATFORM"],
+    "server_platform": os.environ["WT_SERVER_PLATFORM"],
+    "client_architecture": os.environ["WT_CLIENT_ARCH"],
+    "server_architecture": os.environ["WT_SERVER_ARCH"],
+    "host_target": os.environ.get("WARPTWEET_HOST_TARGET", "127.0.0.1:5432"),
+    "authorization_policy": os.environ.get("WARPTWEET_AUTHORIZATION_POLICY", "30d-default-365d-max"),
+    "route_count": int(os.environ.get("WARPTWEET_ROUTE_COUNT", "0") or "0"),
+    "restart_policies": ["unless-stopped", "manual"],
+    "test_identity": os.environ["WT_TEST_IDENTITY"],
+    "commands": ["./scripts/test-package-interop.sh"],
+    "started_at": os.environ["WT_STARTED_AT"],
+    "finished_at": os.environ["WT_FINISHED_AT"],
+    "package_to_package": os.environ["WT_PKG_TO_PKG"] == "true",
+    "source_tree_substitution": os.environ["WT_SRC_SUB"] == "true",
+    "cell_classes": ["matrix"],
+    "results": results,
+    "networking": {
+        "cell_id": "",
+        "publication_model": "direct",
+        "published_endpoint_generation": 1,
+        "invite_schema_version": 3,
+        "invite_dials_match_published": True,
+        "binds": {
+            "data": {"address": "127.0.0.1", "port": 2222},
+            "enrollment": {"address": "127.0.0.1", "port": 29722},
+        },
+        "dials": {
+            "data": {"host": "127.0.0.1", "port": 2222},
+            "enrollment": {"host": "127.0.0.1", "port": 29722},
+        },
+        "observed_listeners": {
+            "data": "127.0.0.1:2222",
+            "enrollment": "127.0.0.1:29722",
+            "match_binds": True,
+        },
+        "test_dnat_absent": True,
+        "loopback_alias_absent": True,
+        "client_dials": [
+            {"leg": "data", "host": "127.0.0.1", "port": 2222, "status": "not_run"},
+            {"leg": "enrollment", "host": "127.0.0.1", "port": 29722, "status": "not_run"},
+        ],
+        "spki_result": {"status": "not_run"},
+        "host_key_result": {"status": "not_run"},
+        "enrollment_resolved_addr": "127.0.0.1",
+        "data_resolved_addr": "127.0.0.1",
+        "operator_firewall_assumptions": "package-interop script; no dual-host publication",
+        "operator_load_balancer_assumptions": "none; not a proxy load balancer",
+        "package_only": os.environ["WT_PKG_TO_PKG"] == "true",
+        "clean_tree": os.environ["WT_CLEAN_TREE"] == "true",
+    },
 }
-EOF
+if os.environ.get("WT_REDACTED_LOG"):
+    document["redacted_log_path"] = os.environ["WT_REDACTED_LOG"]
+with open(sys.argv[2], "w", encoding="utf-8") as handle:
+    json.dump(document, handle, indent=2)
+    handle.write("\n")
+PY
+if ! (
+    cd "$WT_REPOSITORY_ROOT" &&
+        CGO_ENABLED=0 go run ./cmd/write-release-evidence --root "$WT_REPOSITORY_ROOT" --in "$WT_DRAFT" --out "$WARPTWEET_EVIDENCE_OUTPUT"
+); then
+    fail "Validate before write rejected the evidence document"
+fi
 
 pass "wrote evidence document $WARPTWEET_EVIDENCE_OUTPUT"
 

@@ -1,33 +1,31 @@
 # shellcheck shell=sh
-# Emit warptweet.release-evidence JSON from Phase A results (partial matrix OK).
+# Emit warptweet.release-evidence v3 JSON. Validate before write.
 
 # Exit codes:
 #   0 — every result is pass (full checklist complete)
 #   1 — incomplete only (pass + expected not_run; no fail)
-#   2 — at least one executed case has status fail
+#   2 — at least one executed case has status fail, or Validate failed
 interop_emit_evidence() {
     _finished=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-    _results=$(awk 'BEGIN{printf "["} {if(n++)printf ","; printf "%s",$0} END{printf "]"}' "$WARPTWEET_INTEROP_RESULTS_FILE")
-
-    # Fill remaining checklist ids as not_run so the document is schema-complete
-    # but not Complete() for CTA until dual-host matrix is finished.
-    _schema=${WARPTWEET_EVIDENCE_SCHEMA_VERSION:-2}
+    _schema=${WARPTWEET_EVIDENCE_SCHEMA_VERSION:-3}
     case "$_schema" in
-        1|2) ;;
+        3) ;;
         *)
-            interop_log "unsupported WARPTWEET_EVIDENCE_SCHEMA_VERSION=$_schema"
+            interop_log "unsupported WARPTWEET_EVIDENCE_SCHEMA_VERSION=$_schema (v3 only)"
             return 2
             ;;
     esac
-    _checklist_ids="pkg-signature-and-manifest engine-identity-trust-preflight invite-enroll-single-use composite-auth exact-kex-aead rekey-same-profile pid-bound-readiness deterministic-target-payload stop-restart-rotate-revoke-upgrade classical-only-kex-host-client wrong-host-pin malformed-keys-messages invite-fail-closed forwarding-surface-rejected local-state-mutation engine-and-package-tamper bounded-floods availability-faults"
-    if [ "$_schema" = "2" ]; then
-        _checklist_ids="$_checklist_ids second-client-grant two-independent-routes reboot-unless-stopped-manual-down live-expiry-and-revocation clock-rollback-fail-closed target-change-denial compose-loopback-postgres agent-skill-delivery pid-reuse-and-stop-failure silent-renewal-and-port-reassignment"
-    fi
+    _checklist_ids="pkg-signature-and-manifest engine-identity-trust-preflight invite-enroll-single-use composite-auth exact-kex-aead rekey-same-profile pid-bound-readiness deterministic-target-payload stop-restart-rotate-revoke-upgrade classical-only-kex-host-client wrong-host-pin malformed-keys-messages invite-fail-closed forwarding-surface-rejected local-state-mutation engine-and-package-tamper bounded-floods availability-faults second-client-grant two-independent-routes reboot-unless-stopped-manual-down live-expiry-and-revocation clock-rollback-fail-closed target-change-denial compose-loopback-postgres agent-skill-delivery pid-reuse-and-stop-failure silent-renewal-and-port-reassignment"
 
     _have="$WARPTWEET_INTEROP_WORK/have_ids.txt"
     : >"$_have"
     if [ -s "$WARPTWEET_INTEROP_RESULTS_FILE" ]; then
         sed -n 's/.*"id":"\([^"]*\)".*/\1/p' "$WARPTWEET_INTEROP_RESULTS_FILE" >"$_have"
+    fi
+    _dup=$(sort "$_have" | uniq -d)
+    if [ -n "$_dup" ]; then
+        interop_log "duplicate result ids before write: $_dup"
+        return 2
     fi
 
     _extra="$WARPTWEET_INTEROP_WORK/extra.ndjson"
@@ -44,10 +42,8 @@ interop_emit_evidence() {
                 "$_id" "$_class" >>"$_extra"
         fi
     done
-
     if [ -s "$_extra" ]; then
         cat "$_extra" >>"$WARPTWEET_INTEROP_RESULTS_FILE"
-        _results=$(awk 'BEGIN{printf "["} {if(n++)printf ","; printf "%s",$0} END{printf "]"}' "$WARPTWEET_INTEROP_RESULTS_FILE")
     fi
 
     _pkg_to_pkg=${WARPTWEET_INTEROP_PACKAGE_TO_PACKAGE:-false}
@@ -66,77 +62,181 @@ interop_emit_evidence() {
         ! grep '"id":"reboot-unless-stopped-manual-down"' "$WARPTWEET_INTEROP_RESULTS_FILE" | grep -q '"status":"not_run"'; then
         _restart_policies='["unless-stopped", "manual"]'
     fi
-    if [ "$_schema" = "2" ]; then
-        _repo=${WT_REPO_ROOT:-}
-        if [ -z "$_repo" ] && [ -n "${WARPTWEET_INTEROP_ROOT:-}" ]; then
-            _repo=$(CDPATH= cd -- "$WARPTWEET_INTEROP_ROOT/../.." && pwd)
-        fi
-        _contract_digest=$(sed -n 's/^[[:space:]]*ContractChecklistSHA256 = "\([0-9a-f]\{64\}\)".*/\1/p' \
-            "$_repo/internal/adoptionresult/result.go" | head -n 1)
-        if [ -z "$_contract_digest" ]; then
-            interop_log "cannot derive contract_checklist_sha256 from adoptionresult"
-            return 2
-        fi
-        cat >"$WARPTWEET_INTEROP_EVIDENCE_OUTPUT" <<EOF
-{
-  "kind": "warptweet.release-evidence",
-  "schema_version": 2,
-  "contract_id": "warptweet.adoption-release.v1",
-  "contract_checklist_sha256": "$_contract_digest",
-  "release_version": "$WARPTWEET_RELEASE_VERSION",
-  "source_commit": "$WARPTWEET_SOURCE_COMMIT",
-  "clean_tree_proof": "${WARPTWEET_CLEAN_TREE_PROOF:-not_recorded}",
-  "client_package_sha256": "$WARPTWEET_CLIENT_PACKAGE_SHA256",
-  "server_package_sha256": "$WARPTWEET_SERVER_PACKAGE_SHA256",
-  "client_artifact_profile_id": "$WARPTWEET_CLIENT_ARTIFACT_PROFILE_ID",
-  "server_artifact_profile_id": "$WARPTWEET_SERVER_ARTIFACT_PROFILE_ID",
-  "client_engine_manifest_sha256": "$WARPTWEET_CLIENT_ENGINE_MANIFEST_SHA256",
-  "server_engine_manifest_sha256": "$WARPTWEET_SERVER_ENGINE_MANIFEST_SHA256",
-  "client_platform": "$(uname -s)",
-  "server_platform": "linux",
-  "client_architecture": "$(uname -m)",
-  "server_architecture": "$_server_arch",
-  "host_target": "${WARPTWEET_HOST_TARGET:-127.0.0.1:5432}",
-  "authorization_policy": "${WARPTWEET_AUTHORIZATION_POLICY:-30d-default-365d-max}",
-  "route_count": $_route_count,
-  "restart_policies": $_restart_policies,
-  "test_identity": "interop-phase-a-mac-client",
-  "commands": ["./scripts/interop/orchestrate.sh"],
-  "started_at": "$WARPTWEET_INTEROP_STARTED_AT",
-  "finished_at": "$_finished",
-  "redacted_log_path": "",
-  "package_to_package": $_pkg_to_pkg,
-  "source_tree_substitution": $_src_sub,
-  "results": $_results
+
+    _repo=${WT_REPO_ROOT:-}
+    if [ -z "$_repo" ] && [ -n "${WARPTWEET_INTEROP_ROOT:-}" ]; then
+        _repo=$(CDPATH= cd -- "$WARPTWEET_INTEROP_ROOT/../.." && pwd)
+    fi
+    if [ -z "$_repo" ] || [ ! -f "$_repo/packaging/evidence/checklist-v3.json" ]; then
+        interop_log "cannot locate repository root for checklist-v3.json"
+        return 2
+    fi
+
+    interop_fill_networking_defaults || true
+
+    _draft="$WARPTWEET_INTEROP_WORK/evidence-draft.json"
+    rm -f "$_draft"
+    WARPTWEET_INTEROP_FINISHED_AT=$_finished \
+        WARPTWEET_SERVER_ARCHITECTURE=$_server_arch \
+        WARPTWEET_ROUTE_COUNT=$_route_count \
+        WARPTWEET_INTEROP_PACKAGE_TO_PACKAGE=$_pkg_to_pkg \
+        WARPTWEET_INTEROP_SOURCE_TREE_SUBSTITUTION=$_src_sub \
+        python3 - "$WARPTWEET_INTEROP_RESULTS_FILE" "$_draft" "$_restart_policies" <<'PY'
+import json, os, sys
+
+results_path, draft_path, restart_raw = sys.argv[1], sys.argv[2], sys.argv[3]
+results = []
+with open(results_path, encoding="utf-8") as handle:
+    for line in handle:
+        line = line.strip()
+        if line:
+            results.append(json.loads(line))
+restart_policies = json.loads(restart_raw)
+
+def env(name, default=""):
+    return os.environ.get(name, default)
+
+def as_bool(name, default="false"):
+    return env(name, default).lower() == "true"
+
+def hostport(value, default_port):
+    value = value.strip()
+    if not value:
+        return "", default_port
+    if value.startswith("["):
+        host = value[1:value.index("]")]
+        port = int(value.rsplit(":", 1)[-1])
+        return host, port
+    host, port_s = value.rsplit(":", 1)
+    return host, int(port_s)
+
+listen = env("WARPTWEET_INTEROP_SERVER_LISTEN")
+advertise = env("WARPTWEET_INTEROP_SERVER_ADVERTISE")
+enroll_listen = env("WARPTWEET_INTEROP_ENROLL_LISTEN")
+enroll_advertise = env("WARPTWEET_INTEROP_ENROLL_ADVERTISE")
+bind_host, bind_port = hostport(listen, 2222)
+data_dial = advertise or listen
+data_host, data_port = hostport(data_dial, bind_port)
+if enroll_listen:
+    enroll_bind_host, enroll_bind_port = hostport(enroll_listen, 29722)
+else:
+    enroll_bind_host, enroll_bind_port = bind_host, 29722
+if enroll_advertise:
+    enroll_dial_host, enroll_dial_port = hostport(enroll_advertise, 29722)
+else:
+    enroll_dial_host, enroll_dial_port = data_host, 29722
+
+cell_classes = [item for item in env("WARPTWEET_INTEROP_CELL_CLASSES", "matrix").split(",") if item]
+model = env("WARPTWEET_INTEROP_PUBLICATION_MODEL")
+if not model:
+    model = "one_to_one_nat" if advertise and advertise != listen else "direct"
+generation = int(env("WARPTWEET_INTEROP_PUBLISHED_ENDPOINT_GENERATION", "1") or "1")
+observed_data = env("WARPTWEET_INTEROP_OBSERVED_DATA_LISTENER") or f"{bind_host}:{bind_port}"
+observed_enroll = env("WARPTWEET_INTEROP_OBSERVED_ENROLL_LISTENER") or f"{enroll_bind_host}:{enroll_bind_port}"
+match_binds = as_bool("WARPTWEET_INTEROP_LISTENERS_MATCH_BINDS", "true")
+clean_proof = env("WARPTWEET_CLEAN_TREE_PROOF", "not_recorded")
+clean_tree = clean_proof in ("clean", "git-status-empty")
+package_only = as_bool("WARPTWEET_INTEROP_PACKAGE_TO_PACKAGE", "false")
+client_platform = env("WARPTWEET_CLIENT_PLATFORM") or os.uname().sysname
+client_arch = env("WARPTWEET_CLIENT_ARCHITECTURE") or os.uname().machine
+data_resolved = env("WARPTWEET_INTEROP_DATA_RESOLVED_ADDR") or data_host
+enroll_resolved = env("WARPTWEET_INTEROP_ENROLL_RESOLVED_ADDR") or enroll_dial_host
+dial_status = env("WARPTWEET_INTEROP_CLIENT_DIAL_STATUS", "not_run")
+spki_status = env("WARPTWEET_INTEROP_SPKI_STATUS", "not_run")
+host_key_status = env("WARPTWEET_INTEROP_HOST_KEY_STATUS", "not_run")
+
+document = {
+    "kind": "warptweet.release-evidence",
+    "schema_version": 3,
+    "contract_id": "warptweet.adoption-release.v1",
+    "contract_checklist_sha256": "",
+    "release_version": env("WARPTWEET_RELEASE_VERSION"),
+    "source_commit": env("WARPTWEET_SOURCE_COMMIT"),
+    "clean_tree_proof": clean_proof,
+    "client_package_sha256": env("WARPTWEET_CLIENT_PACKAGE_SHA256"),
+    "server_package_sha256": env("WARPTWEET_SERVER_PACKAGE_SHA256"),
+    "client_artifact_profile_id": env("WARPTWEET_CLIENT_ARTIFACT_PROFILE_ID"),
+    "server_artifact_profile_id": env("WARPTWEET_SERVER_ARTIFACT_PROFILE_ID"),
+    "client_engine_manifest_sha256": env("WARPTWEET_CLIENT_ENGINE_MANIFEST_SHA256"),
+    "server_engine_manifest_sha256": env("WARPTWEET_SERVER_ENGINE_MANIFEST_SHA256"),
+    "client_platform": client_platform,
+    "server_platform": "linux",
+    "client_architecture": client_arch,
+    "server_architecture": env("WARPTWEET_SERVER_ARCHITECTURE", "unknown"),
+    "host_target": env("WARPTWEET_HOST_TARGET", "127.0.0.1:5432"),
+    "authorization_policy": env("WARPTWEET_AUTHORIZATION_POLICY", "30d-default-365d-max"),
+    "route_count": int(env("WARPTWEET_ROUTE_COUNT", "0") or "0"),
+    "restart_policies": restart_policies,
+    "test_identity": "interop-phase-a-mac-client",
+    "commands": ["./scripts/interop/orchestrate.sh"],
+    "started_at": env("WARPTWEET_INTEROP_STARTED_AT"),
+    "finished_at": env("WARPTWEET_INTEROP_FINISHED_AT"),
+    "package_to_package": package_only,
+    "source_tree_substitution": as_bool("WARPTWEET_INTEROP_SOURCE_TREE_SUBSTITUTION", "false"),
+    "cell_classes": cell_classes,
+    "results": results,
+    "networking": {
+        "cell_id": env("WARPTWEET_INTEROP_NETWORKING_CELL_ID"),
+        "publication_model": model,
+        "published_endpoint_generation": generation,
+        "invite_schema_version": 3,
+        "invite_dials_match_published": as_bool("WARPTWEET_INTEROP_INVITE_DIALS_MATCH", "true"),
+        "binds": {
+            "data": {"address": bind_host, "port": bind_port},
+            "enrollment": {"address": enroll_bind_host, "port": enroll_bind_port},
+        },
+        "dials": {
+            "data": {"host": data_host, "port": data_port},
+            "enrollment": {"host": enroll_dial_host, "port": enroll_dial_port},
+        },
+        "observed_listeners": {
+            "data": observed_data,
+            "enrollment": observed_enroll,
+            "match_binds": match_binds,
+        },
+        "test_dnat_absent": as_bool("WARPTWEET_INTEROP_TEST_DNAT_ABSENT", "true"),
+        "loopback_alias_absent": as_bool("WARPTWEET_INTEROP_LOOPBACK_ALIAS_ABSENT", "true"),
+        "client_dials": [
+            {"leg": "data", "host": data_host, "port": data_port, "status": dial_status},
+            {"leg": "enrollment", "host": enroll_dial_host, "port": enroll_dial_port, "status": dial_status},
+        ],
+        "spki_result": {"status": spki_status},
+        "host_key_result": {"status": host_key_status},
+        "enrollment_resolved_addr": enroll_resolved,
+        "data_resolved_addr": data_resolved,
+        "operator_firewall_assumptions": env(
+            "WARPTWEET_INTEROP_FIREWALL_ASSUMPTIONS",
+            "operator-stated: inbound 2222/tcp and 29722/tcp; no guest DNAT helper",
+        ),
+        "operator_load_balancer_assumptions": env(
+            "WARPTWEET_INTEROP_LB_ASSUMPTIONS",
+            "none; not a proxy load balancer",
+        ),
+        "package_only": package_only,
+        "clean_tree": clean_tree,
+    },
 }
-EOF
-    else
-        cat >"$WARPTWEET_INTEROP_EVIDENCE_OUTPUT" <<EOF
-{
-  "kind": "warptweet.release-evidence",
-  "schema_version": 1,
-  "release_version": "$WARPTWEET_RELEASE_VERSION",
-  "source_commit": "$WARPTWEET_SOURCE_COMMIT",
-  "client_package_sha256": "$WARPTWEET_CLIENT_PACKAGE_SHA256",
-  "server_package_sha256": "$WARPTWEET_SERVER_PACKAGE_SHA256",
-  "client_artifact_profile_id": "$WARPTWEET_CLIENT_ARTIFACT_PROFILE_ID",
-  "server_artifact_profile_id": "$WARPTWEET_SERVER_ARTIFACT_PROFILE_ID",
-  "client_engine_manifest_sha256": "$WARPTWEET_CLIENT_ENGINE_MANIFEST_SHA256",
-  "server_engine_manifest_sha256": "$WARPTWEET_SERVER_ENGINE_MANIFEST_SHA256",
-  "client_platform": "$(uname -s)",
-  "server_platform": "linux",
-  "client_architecture": "$(uname -m)",
-  "server_architecture": "$_server_arch",
-  "test_identity": "interop-phase-a-mac-client",
-  "commands": ["./scripts/interop/orchestrate.sh"],
-  "started_at": "$WARPTWEET_INTEROP_STARTED_AT",
-  "finished_at": "$_finished",
-  "redacted_log_path": "",
-  "package_to_package": $_pkg_to_pkg,
-  "source_tree_substitution": $_src_sub,
-  "results": $_results
-}
-EOF
+redacted = env("WARPTWEET_REDACTED_LOG_PATH")
+if redacted:
+    document["redacted_log_path"] = redacted
+with open(draft_path, "w", encoding="utf-8") as handle:
+    json.dump(document, handle, indent=2)
+    handle.write("\n")
+PY
+    if [ ! -s "$_draft" ]; then
+        interop_log "failed to assemble v3 evidence draft"
+        return 2
+    fi
+
+    if ! (
+        cd "$_repo" &&
+            CGO_ENABLED=0 go run ./cmd/write-release-evidence \
+                --root "$_repo" \
+                --in "$_draft" \
+                --out "$WARPTWEET_INTEROP_EVIDENCE_OUTPUT"
+    ); then
+        interop_log "Validate before write failed; evidence not written"
+        return 2
     fi
     interop_log "wrote evidence $WARPTWEET_INTEROP_EVIDENCE_OUTPUT"
 
@@ -150,4 +250,56 @@ EOF
     fi
     interop_log "evidence complete (all pass)"
     return 0
+}
+
+interop_fill_networking_defaults() {
+    if [ -z "${WARPTWEET_INTEROP_CLIENT_DIAL_STATUS:-}" ]; then
+        if grep -q '"id":"invite-enroll-single-use".*"status":"pass"' "$WARPTWEET_INTEROP_RESULTS_FILE" 2>/dev/null; then
+            WARPTWEET_INTEROP_CLIENT_DIAL_STATUS=pass
+            WARPTWEET_INTEROP_SPKI_STATUS=pass
+            WARPTWEET_INTEROP_HOST_KEY_STATUS=pass
+        else
+            WARPTWEET_INTEROP_CLIENT_DIAL_STATUS=not_run
+            WARPTWEET_INTEROP_SPKI_STATUS=not_run
+            WARPTWEET_INTEROP_HOST_KEY_STATUS=not_run
+        fi
+        export WARPTWEET_INTEROP_CLIENT_DIAL_STATUS WARPTWEET_INTEROP_SPKI_STATUS WARPTWEET_INTEROP_HOST_KEY_STATUS
+    fi
+    if [ -z "${WARPTWEET_INTEROP_PUBLISHED_ENDPOINT_GENERATION:-}" ]; then
+        _gen=$(interop_ssh "sudo python3 -c \"import json; print(json.load(open('/etc/warptweet/server.wt')).get('network',{}).get('published_endpoint_generation',1))\"" 2>/dev/null || true)
+        case "$_gen" in
+            ''|*[!0-9]*) _gen=1 ;;
+        esac
+        WARPTWEET_INTEROP_PUBLISHED_ENDPOINT_GENERATION=$_gen
+        export WARPTWEET_INTEROP_PUBLISHED_ENDPOINT_GENERATION
+    fi
+    if [ -z "${WARPTWEET_INTEROP_TEST_DNAT_ABSENT:-}" ] || [ -z "${WARPTWEET_INTEROP_LOOPBACK_ALIAS_ABSENT:-}" ]; then
+        _probe=$(interop_ssh "sudo sh -s" <<'REMOTE' 2>/dev/null || true
+set -eu
+if command -v iptables >/dev/null 2>&1; then
+    iptables -t nat -S 2>/dev/null | grep -E 'DNAT|REDIRECT' && echo HAS_DNAT || echo NO_DNAT
+else
+    echo NO_DNAT
+fi
+ip -o addr show lo 2>/dev/null | awk '{print $4}'
+REMOTE
+        )
+        if printf '%s\n' "$_probe" | grep -q HAS_DNAT; then
+            WARPTWEET_INTEROP_TEST_DNAT_ABSENT=false
+        else
+            WARPTWEET_INTEROP_TEST_DNAT_ABSENT=${WARPTWEET_INTEROP_TEST_DNAT_ABSENT:-true}
+        fi
+        _adv=${WARPTWEET_INTEROP_SERVER_ADVERTISE:-}
+        if [ -n "$_adv" ]; then
+            _adv_host=$(interop_hostport_host "$_adv")
+            if printf '%s\n' "$_probe" | grep -F "$_adv_host" >/dev/null 2>&1; then
+                WARPTWEET_INTEROP_LOOPBACK_ALIAS_ABSENT=false
+            else
+                WARPTWEET_INTEROP_LOOPBACK_ALIAS_ABSENT=${WARPTWEET_INTEROP_LOOPBACK_ALIAS_ABSENT:-true}
+            fi
+        else
+            WARPTWEET_INTEROP_LOOPBACK_ALIAS_ABSENT=${WARPTWEET_INTEROP_LOOPBACK_ALIAS_ABSENT:-true}
+        fi
+        export WARPTWEET_INTEROP_TEST_DNAT_ABSENT WARPTWEET_INTEROP_LOOPBACK_ALIAS_ABSENT
+    fi
 }

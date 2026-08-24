@@ -470,7 +470,7 @@ Darwin client uses Application Support / Caches layout and service user `_warptw
 Use these as discussion prompts; they are intentional incomplete areas or drift, not silent bugs alone.
 
 1. **Product CLI path implemented** (`host`/`connect`, `.wtinvite`, enroll accept, rotate/revoke). Operator verbs remain for advanced use.
-2. **Enrollment/management is invite-pinned HTTPS** — exact TLS 1.3, hybrid `X25519MLKEM768`, `http/1.1`, and the invite-pinned Ed25519 SPKI. Air-gapped `--proof` remains available. Invites carry the MAC-bound SPKI and `enroll_port` (default 29722).
+2. **Enrollment/management is invite-pinned HTTPS** — exact TLS 1.3, hybrid `X25519MLKEM768`, `http/1.1`, and the invite-pinned Ed25519 SPKI. Air-gapped `--proof` remains available. Invites carry the SPKI and the published enrollment dial (default port 29722). HMAC is gone (WT-SR-020).
 3. **Server durable invites/clients** under `/var/lib/warptweet/{invites,clients,server}/` are internal state, distinct from operator-facing `.wtinvite` files and from `installlayout` engine/manifest paths.
 4. **`gen host` / `gen client`** designed as advanced verbs; keygen is embedded in `host` / `enroll` / `rotate` instead.
 5. **No supported e2e release** — two-endpoint interop, negotiated-algorithm observation, rekey, and confinement evidence still pending in the gate checklist (WP8). Local control-plane confidence: `scripts/test-enrollment-control-plane.sh`. Phase A dual-host spine: `scripts/interop/orchestrate.sh` (pinned packages + echo payload; remaining cases `not_run`).
@@ -525,7 +525,7 @@ Use these as discussion prompts; they are intentional incomplete areas or drift,
 1. **Boundary check** — local-forward-only product vs feature pressure (shells, multi-target, classical fallback).
 2. **Document model** — confirm `.wt` vs invite vs private key paths stay cleanly separated.
 3. **CLI dual surface** — product `host`/`connect` vs operator verbs; packaging/website already teach `connect`.
-4. **Invite trust** — operator transfer channel, MAC server-side only, single-use store, TTL, management-interface restrictions, offline proof.
+4. **Invite trust** — operator transfer channel, unsigned bearer, single-use store, TTL, management-interface restrictions, offline proof. HMAC is gone (WT-SR-020).
 5. **Crypto language** — vendor-qualified binding wording; no quantum-proof / FIPS / standardized claims.
 6. **Release bar** — what still blocks “supported e2e” (enrollment endpoint, dual-host invite, algorithm observation, package evidence).
 

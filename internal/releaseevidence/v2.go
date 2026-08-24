@@ -19,6 +19,7 @@ const (
 )
 
 // ReportV2 is one package-to-package evidence artifact for the v2 checklist.
+// It is frozen. Networking evidence lives on ReportV3; do not add fields here.
 type ReportV2 struct {
 	Kind                       string   `json:"kind"`
 	SchemaVersion              int      `json:"schema_version"`

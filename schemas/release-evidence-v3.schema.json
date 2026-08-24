@@ -1,0 +1,417 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://warptweet.com/schemas/release-evidence-v3.schema.json",
+  "title": "WarpTweet release evidence v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "kind",
+    "schema_version",
+    "contract_id",
+    "contract_checklist_sha256",
+    "release_version",
+    "source_commit",
+    "clean_tree_proof",
+    "client_package_sha256",
+    "server_package_sha256",
+    "client_artifact_profile_id",
+    "server_artifact_profile_id",
+    "client_engine_manifest_sha256",
+    "server_engine_manifest_sha256",
+    "client_platform",
+    "server_platform",
+    "client_architecture",
+    "server_architecture",
+    "host_target",
+    "authorization_policy",
+    "route_count",
+    "restart_policies",
+    "test_identity",
+    "commands",
+    "started_at",
+    "finished_at",
+    "results",
+    "package_to_package",
+    "source_tree_substitution",
+    "cell_classes",
+    "networking"
+  ],
+  "properties": {
+    "kind": {
+      "const": "warptweet.release-evidence"
+    },
+    "schema_version": {
+      "const": 3
+    },
+    "contract_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "contract_checklist_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "release_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "source_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "clean_tree_proof": {
+      "type": "string",
+      "minLength": 1
+    },
+    "client_package_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "server_package_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "client_package_path": {
+      "type": "string"
+    },
+    "server_package_path": {
+      "type": "string"
+    },
+    "client_artifact_profile_id": {
+      "type": "string",
+      "enum": ["darwin-arm64", "darwin-amd64", "linux-amd64", "linux-arm64"]
+    },
+    "server_artifact_profile_id": {
+      "type": "string",
+      "enum": ["linux-amd64", "linux-arm64"]
+    },
+    "client_engine_manifest_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "server_engine_manifest_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "client_platform": {
+      "type": "string",
+      "minLength": 1
+    },
+    "server_platform": {
+      "type": "string",
+      "minLength": 1
+    },
+    "client_architecture": {
+      "type": "string",
+      "minLength": 1
+    },
+    "server_architecture": {
+      "type": "string",
+      "minLength": 1
+    },
+    "host_target": {
+      "type": "string",
+      "minLength": 1
+    },
+    "authorization_policy": {
+      "type": "string",
+      "minLength": 1
+    },
+    "route_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "restart_policies": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": ["unless-stopped", "manual"]
+      }
+    },
+    "test_identity": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evaluator_identity": {
+      "type": "string"
+    },
+    "commands": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "started_at": {
+      "type": "string",
+      "format": "date-time",
+      "minLength": 1
+    },
+    "finished_at": {
+      "type": "string",
+      "format": "date-time",
+      "minLength": 1
+    },
+    "redacted_log_path": {
+      "type": "string"
+    },
+    "package_to_package": {
+      "const": true
+    },
+    "source_tree_substitution": {
+      "const": false
+    },
+    "cell_classes": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": ["matrix", "networking"]
+      }
+    },
+    "results": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "class", "status"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "class": {
+            "type": "string",
+            "enum": ["positive", "negative"]
+          },
+          "status": {
+            "type": "string",
+            "enum": ["pass", "fail", "blocked", "not_run"]
+          },
+          "detail": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "networking": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cell_id",
+        "publication_model",
+        "published_endpoint_generation",
+        "invite_schema_version",
+        "invite_dials_match_published",
+        "binds",
+        "dials",
+        "observed_listeners",
+        "test_dnat_absent",
+        "loopback_alias_absent",
+        "client_dials",
+        "spki_result",
+        "host_key_result",
+        "enrollment_resolved_addr",
+        "data_resolved_addr",
+        "operator_firewall_assumptions",
+        "operator_load_balancer_assumptions",
+        "package_only",
+        "clean_tree"
+      ],
+      "properties": {
+        "cell_id": {
+          "type": "string"
+        },
+        "publication_model": {
+          "type": "string",
+          "enum": [
+            "direct",
+            "one_to_one_nat",
+            "port_mapped",
+            "dns_dial",
+            "ipv6_bind_equals_dial",
+            "passthrough_nlb"
+          ]
+        },
+        "published_endpoint_generation": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "invite_schema_version": {
+          "const": 3
+        },
+        "invite_dials_match_published": {
+          "type": "boolean"
+        },
+        "binds": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["data", "enrollment"],
+          "properties": {
+            "data": { "$ref": "#/$defs/bindEndpoint" },
+            "enrollment": { "$ref": "#/$defs/bindEndpoint" }
+          }
+        },
+        "dials": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["data", "enrollment"],
+          "properties": {
+            "data": { "$ref": "#/$defs/dialEndpoint" },
+            "enrollment": { "$ref": "#/$defs/dialEndpoint" }
+          }
+        },
+        "observed_listeners": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["data", "enrollment", "match_binds"],
+          "properties": {
+            "data": {
+              "type": "string",
+              "minLength": 1
+            },
+            "enrollment": {
+              "type": "string",
+              "minLength": 1
+            },
+            "match_binds": {
+              "type": "boolean"
+            }
+          }
+        },
+        "test_dnat_absent": {
+          "type": "boolean"
+        },
+        "loopback_alias_absent": {
+          "type": "boolean"
+        },
+        "client_dials": {
+          "type": "array",
+          "minItems": 2,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["leg", "host", "port", "status"],
+            "properties": {
+              "leg": {
+                "type": "string",
+                "enum": ["data", "enrollment"]
+              },
+              "host": {
+                "type": "string",
+                "minLength": 1
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535
+              },
+              "status": {
+                "type": "string",
+                "enum": ["pass", "fail", "not_run"]
+              },
+              "error_class": {
+                "type": "string",
+                "enum": [
+                  "dns_resolution",
+                  "tcp_connect",
+                  "tls_negotiate",
+                  "tls_spki",
+                  "invite_authorization",
+                  "ssh_host_key",
+                  "forward_target"
+                ]
+              }
+            }
+          }
+        },
+        "spki_result": { "$ref": "#/$defs/checkResult" },
+        "host_key_result": { "$ref": "#/$defs/checkResult" },
+        "enrollment_resolved_addr": {
+          "type": "string"
+        },
+        "data_resolved_addr": {
+          "type": "string"
+        },
+        "operator_firewall_assumptions": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operator_load_balancer_assumptions": {
+          "type": "string",
+          "minLength": 1
+        },
+        "package_only": {
+          "type": "boolean"
+        },
+        "clean_tree": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "bindEndpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["address", "port"],
+      "properties": {
+        "address": {
+          "type": "string",
+          "minLength": 1
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "dialEndpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host", "port"],
+      "properties": {
+        "host": {
+          "type": "string",
+          "minLength": 1
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535
+        }
+      }
+    },
+    "checkResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["pass", "fail", "not_run"]
+        },
+        "detail": {
+          "type": "string"
+        },
+        "error_class": {
+          "type": "string",
+          "enum": [
+            "dns_resolution",
+            "tcp_connect",
+            "tls_negotiate",
+            "tls_spki",
+            "invite_authorization",
+            "ssh_host_key",
+            "forward_target"
+          ]
+        }
+      }
+    }
+  }
+}

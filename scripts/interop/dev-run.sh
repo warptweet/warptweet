@@ -83,11 +83,14 @@ fi
 : "${WARPTWEET_INTEROP_SSH_PORT:=22}"
 export WARPTWEET_INTEROP_SERVER_USER WARPTWEET_INTEROP_SSH_PORT
 
-# Listen default: host:2222 when host is an IP or hostname.
+# Listen is the guest bind. Default to SERVER_HOST:2222 only when that address
+# sits on the NIC (public VPS). GCE 1:1 NAT must set LISTEN to the guest NIC
+# and ADVERTISE to the public dial. Never default ADVERTISE=LISTEN.
 if [ -z "${WARPTWEET_INTEROP_SERVER_LISTEN:-}" ]; then
     WARPTWEET_INTEROP_SERVER_LISTEN="${WARPTWEET_INTEROP_SERVER_HOST}:2222"
 fi
 export WARPTWEET_INTEROP_SERVER_LISTEN
+# ADVERTISE stays unset unless the operator exported it.
 
 # Host key: local-dev may TOFU via keyscan when neither pin is set.
 if [ -z "${WARPTWEET_INTEROP_SSH_KNOWN_HOSTS:-}" ] && [ -z "${WARPTWEET_INTEROP_SSH_HOST_KEY_FINGERPRINT:-}" ]; then
@@ -232,7 +235,7 @@ mkdir -p "$WARPTWEET_INTEROP_WORK"
 WARPTWEET_INTEROP_EVIDENCE_OUTPUT=$WARPTWEET_INTEROP_WORK/evidence-$(date -u +%Y%m%dT%H%M%SZ).json
 export WARPTWEET_INTEROP_WORK WARPTWEET_INTEROP_EVIDENCE_OUTPUT
 
-interop_dev_log "server=$WARPTWEET_INTEROP_SERVER_HOST listen=$WARPTWEET_INTEROP_SERVER_LISTEN"
+interop_dev_log "server=$WARPTWEET_INTEROP_SERVER_HOST listen=$WARPTWEET_INTEROP_SERVER_LISTEN advertise=${WARPTWEET_INTEROP_SERVER_ADVERTISE:-}"
 interop_dev_log "artifacts=$WARPTWEET_INTEROP_ARTIFACTS"
 interop_dev_log "server_pkg=$WARPTWEET_INTEROP_SERVER_PACKAGE_FILE"
 interop_dev_log "client_pkg=$WARPTWEET_INTEROP_CLIENT_PACKAGE_FILE"

@@ -80,9 +80,71 @@ interop_record_result() {
     _class=$2
     _status=$3
     _detail=$(interop_json_escape "${4:-}")
+    if [ -n "${WARPTWEET_INTEROP_RESULTS_FILE:-}" ] && [ -s "$WARPTWEET_INTEROP_RESULTS_FILE" ] &&
+        grep -F "\"id\":\"$_id\"" "$WARPTWEET_INTEROP_RESULTS_FILE" >/dev/null 2>&1; then
+        interop_die "duplicate result id $_id"
+    fi
     printf '{"id":"%s","class":"%s","status":"%s","detail":"%s"}\n' \
         "$_id" "$_class" "$_status" "$_detail" >>"$WARPTWEET_INTEROP_RESULTS_FILE"
     interop_log "result $_id=$_status ${_detail}"
+}
+
+# LISTEN is the guest bind. Pass --advertise only when ADVERTISE is explicitly
+# set. Never default ADVERTISE=LISTEN: omitting --advertise publishes listen.
+interop_host_publication_args() {
+    printf '%s' "--listen '${WARPTWEET_INTEROP_SERVER_LISTEN}'"
+    if [ -n "${WARPTWEET_INTEROP_SERVER_ADVERTISE:-}" ]; then
+        printf '%s' " --advertise '${WARPTWEET_INTEROP_SERVER_ADVERTISE}'"
+    fi
+    if [ -n "${WARPTWEET_INTEROP_ENROLL_LISTEN:-}" ]; then
+        printf '%s' " --enroll-listen '${WARPTWEET_INTEROP_ENROLL_LISTEN}'"
+    fi
+    if [ -n "${WARPTWEET_INTEROP_ENROLL_ADVERTISE:-}" ]; then
+        printf '%s' " --enroll-advertise '${WARPTWEET_INTEROP_ENROLL_ADVERTISE}'"
+    fi
+}
+
+interop_hostport_host() {
+    python3 -c 'import sys
+v=sys.argv[1]
+if v.startswith("["):
+    print(v[1:v.index("]")])
+else:
+    print(v.rsplit(":",1)[0])
+' "$1"
+}
+
+interop_hostport_port() {
+    python3 -c 'import sys
+v=sys.argv[1]
+if v.startswith("["):
+    print(v.rsplit(":",1)[-1])
+else:
+    print(v.rsplit(":",1)[-1])
+' "$1"
+}
+
+# Mac TCP uses published dials. When advertise is unset the product publishes
+# listen as the dial; that is not defaulting ADVERTISE=LISTEN.
+interop_published_data_dial() {
+    if [ -n "${WARPTWEET_INTEROP_SERVER_ADVERTISE:-}" ]; then
+        printf '%s' "$WARPTWEET_INTEROP_SERVER_ADVERTISE"
+    else
+        printf '%s' "$WARPTWEET_INTEROP_SERVER_LISTEN"
+    fi
+}
+
+interop_published_enroll_dial() {
+    if [ -n "${WARPTWEET_INTEROP_ENROLL_ADVERTISE:-}" ]; then
+        printf '%s' "$WARPTWEET_INTEROP_ENROLL_ADVERTISE"
+        return 0
+    fi
+    _data=$(interop_published_data_dial)
+    _host=$(interop_hostport_host "$_data")
+    case "$_host" in
+        *:*) printf '[%s]:29722' "$_host" ;;
+        *) printf '%s:29722' "$_host" ;;
+    esac
 }
 
 interop_load_config() {
@@ -130,7 +192,12 @@ interop_load_config() {
             WARPTWEET_INTEROP_CLIENT_CTRL=/opt/warptweet/bin/warptweet
         fi
     fi
-    : "${WARPTWEET_INTEROP_SERVER_LISTEN:?WARPTWEET_INTEROP_SERVER_LISTEN is required (ip:port)}"
+    : "${WARPTWEET_INTEROP_SERVER_LISTEN:?WARPTWEET_INTEROP_SERVER_LISTEN is required (bind ip:port)}"
+    : "${WARPTWEET_INTEROP_SERVER_ADVERTISE:=}"
+    : "${WARPTWEET_INTEROP_ENROLL_LISTEN:=}"
+    : "${WARPTWEET_INTEROP_ENROLL_ADVERTISE:=}"
+    export WARPTWEET_INTEROP_SERVER_LISTEN WARPTWEET_INTEROP_SERVER_ADVERTISE
+    export WARPTWEET_INTEROP_ENROLL_LISTEN WARPTWEET_INTEROP_ENROLL_ADVERTISE
     : "${WARPTWEET_INTEROP_ECHO_PORT:=18432}"
     if [ -z "${WARPTWEET_INTEROP_CLIENT_NAME:-}" ]; then
         WARPTWEET_INTEROP_CLIENT_NAME=interop-mac-$(date -u +%Y%m%dT%H%M%SZ | tr 'A-Z' 'a-z')

@@ -15,6 +15,12 @@ const (
 	Kind = "warptweet.release-evidence"
 	// ChecklistKind is the checklist document kind.
 	ChecklistKind = "warptweet.release-evidence-checklist"
+	// IndexKind is the v3 public-index document kind.
+	IndexKind = "warptweet.release-evidence-index"
+	// CellClassMatrix marks a report that fills one public-index matrix pair.
+	CellClassMatrix = "matrix"
+	// CellClassNetworking marks a report that fills one additional networking cell.
+	CellClassNetworking = "networking"
 )
 
 // Case is one positive or negative evidence requirement.

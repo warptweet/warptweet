@@ -12,8 +12,9 @@ Yes for **activating** the Homebrew command.
 | Flip website to `brew install --cask warptweet/tap/warptweet` | Only after complete package-to-package evidence |
 
 WP8 delivered the checklist and harness. Hosted dual-host runners must still
-produce a complete `warptweet.release-evidence` document. Until that exists,
-the website must say `Homebrew package in release qualification`.
+produce a complete v3 `warptweet.release-evidence-index` covering the
+architecture matrix and required networking cells. Until that exists, the
+website must say `Homebrew package in release qualification`.
 
 ## Release order
 
@@ -41,8 +42,8 @@ the website must say `Homebrew package in release qualification`.
 
 To enable the CTA:
 
-1. Produce complete package-interop evidence for the published digests.
-2. Commit the evidence document under the repository (or release branch).
+1. Produce a complete v3 package-interop evidence index for the published digests.
+2. Commit the index under the repository (or release branch).
 3. Set `required_evidence_document` to that path.
 4. Set `homebrew_cta_enabled` to `true`.
 5. Run `internal/publicrelease.ValidateEnabledCTA` and website `pnpm run verify`.

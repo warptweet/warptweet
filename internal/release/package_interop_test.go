@@ -89,9 +89,9 @@ func TestReleaseEvidenceChecklistMatchesHomebrewDelivery(t *testing.T) {
 	t.Parallel()
 
 	root := repositoryRoot(t)
-	checklist, err := releaseevidence.LoadChecklistV2(releaseevidence.DefaultChecklistV2Path(root))
+	checklist, err := releaseevidence.LoadChecklistV3(releaseevidence.DefaultChecklistV3Path(root))
 	if err != nil {
-		t.Fatalf("LoadChecklistV2: %v", err)
+		t.Fatalf("LoadChecklistV3: %v", err)
 	}
 	requiredPositive := []string{
 		"pkg-signature-and-manifest",
@@ -142,7 +142,7 @@ func TestReleaseEvidenceChecklistMatchesHomebrewDelivery(t *testing.T) {
 			t.Errorf("missing negative case %q", id)
 		}
 	}
-	schemaPath := filepath.Join(root, "schemas", "release-evidence-v2.schema.json")
+	schemaPath := filepath.Join(root, "schemas", "release-evidence-v3.schema.json")
 	schema := string(readFile(t, schemaPath))
 	for _, required := range []string{
 		`"const": "warptweet.release-evidence"`,
@@ -152,9 +152,66 @@ func TestReleaseEvidenceChecklistMatchesHomebrewDelivery(t *testing.T) {
 		`"server_package_sha256"`,
 		`"contract_id"`,
 		`"host_target"`,
+		`"published_endpoint_generation"`,
+		`"test_dnat_absent"`,
+		`"enrollment_resolved_addr"`,
 	} {
 		if !strings.Contains(schema, required) {
 			t.Errorf("schema omits %q", required)
 		}
+	}
+	v2 := string(readFile(t, filepath.Join(root, "schemas", "release-evidence-v2.schema.json")))
+	if !strings.Contains(v2, `"additionalProperties": false`) {
+		t.Error("v2 schema must keep additionalProperties false")
+	}
+	if strings.Contains(v2, `"test_dnat_absent"`) {
+		t.Error("v2 schema must not grow networking fields")
+	}
+	if len(releaseevidence.RequiredMatrixCells(checklist.Checklist())) != 4 {
+		t.Fatal("v3 public index must keep the four-cell architecture matrix")
+	}
+}
+
+func TestInteropListenIsBindAdvertiseIsExplicit(t *testing.T) {
+	t.Parallel()
+
+	root := repositoryRoot(t)
+	files := []string{
+		filepath.Join(root, "scripts", "interop", "lib", "common.sh"),
+		filepath.Join(root, "scripts", "interop", "dev-run.sh"),
+		filepath.Join(root, "scripts", "interop", "lib", "cases.sh"),
+		filepath.Join(root, "scripts", "interop", "orchestrate.sh"),
+		filepath.Join(root, "scripts", "interop", "config.example.env"),
+	}
+	for _, path := range files {
+		contents := string(readFile(t, path))
+		for _, forbidden := range []string{
+			"WARPTWEET_INTEROP_SERVER_ADVERTISE=\"${WARPTWEET_INTEROP_SERVER_LISTEN}\"",
+			"WARPTWEET_INTEROP_SERVER_ADVERTISE=$WARPTWEET_INTEROP_SERVER_LISTEN",
+			"WARPTWEET_INTEROP_SERVER_ADVERTISE=${WARPTWEET_INTEROP_SERVER_LISTEN}",
+			"wt-gcp-bind",
+			"iptables -t nat -A",
+			"iptables -t nat -I",
+			"DNAT --to-destination",
+			"ip addr add",
+		} {
+			if strings.Contains(contents, forbidden) {
+				t.Errorf("%s contains forbidden %q", path, forbidden)
+			}
+		}
+	}
+	common := string(readFile(t, filepath.Join(root, "scripts", "interop", "lib", "common.sh")))
+	for _, required := range []string{
+		"interop_host_publication_args",
+		"interop_published_data_dial",
+		"Pass --advertise only when",
+	} {
+		if !strings.Contains(common, required) {
+			t.Errorf("common.sh omits %q", required)
+		}
+	}
+	if !strings.Contains(common, "Never default ADVERTISE=LISTEN") &&
+		!strings.Contains(common, "never default ADVERTISE=LISTEN") {
+		t.Error("common.sh must state that ADVERTISE is never defaulted to LISTEN")
 	}
 }

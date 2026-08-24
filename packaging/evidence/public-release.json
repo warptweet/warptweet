@@ -8,13 +8,13 @@
   "required_evidence_document": "",
   "links": {
     "cask_template": "homebrew/Casks/warptweet.rb.tmpl",
-    "evidence_checklist": "packaging/evidence/checklist-v2.json",
+    "evidence_checklist": "packaging/evidence/checklist-v3.json",
     "security_policy": "SECURITY.md",
     "uninstall_macos": "docs/2026-08-12_macos-pkg-and-cask.md",
     "package_interop": "docs/2026-08-12_package-interop-evidence.md"
   },
   "notes": [
-    "Set homebrew_cta_enabled to true only after a complete package-to-package evidence document exists for the published artifacts.",
-    "required_evidence_document must be a repository-relative path to a validated warptweet.release-evidence JSON file when the CTA is enabled."
+    "Set homebrew_cta_enabled to true only after a complete v3 release-evidence index exists for the published artifacts.",
+    "required_evidence_document must be a repository-relative path to a validated warptweet.release-evidence-index JSON file when the CTA is enabled."
   ]
 }

@@ -63,9 +63,13 @@ cp scripts/interop/config.example.env scripts/interop/config.env
 # edit pins, host, artifact filenames, server listen IP:port
 ```
 
-`WARPTWEET_INTEROP_SERVER_LISTEN` must be a **concrete** address the Mac can
-reach for both SSH product port and enroll port (default 29722), e.g.
-`203.0.113.10:2222`.
+`WARPTWEET_INTEROP_SERVER_LISTEN` is the **guest bind**. It must be a concrete
+numeric address on the server NIC, e.g. `10.168.0.2:2222`.
+
+`WARPTWEET_INTEROP_SERVER_ADVERTISE` is the published data dial. It is unset by
+default. The harness passes `--advertise` only when this is set. Never default
+`ADVERTISE=LISTEN`. On GCE 1:1 NAT set advertise to the public address, e.g.
+`34.20.174.226:2222`. Mac TCP, including bounded floods, uses published dials.
 
 ## Run (local-dev happy path, zero make args)
 

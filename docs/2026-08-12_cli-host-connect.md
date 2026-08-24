@@ -125,7 +125,7 @@ warptweet host --to 5432 --stdout
 ```text
 warptweet host --to 5432
 warptweet host --to 127.0.0.1:5432
-warptweet host --to 10.0.0.5:5432 --listen 0.0.0.0:2222
+warptweet host --to 127.0.0.1:5432 --listen 10.168.0.2:2222 --advertise 34.20.174.226:2222
 ```
 
 ### Defaults
