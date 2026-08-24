@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"strings"
 	"time"
 )
 
@@ -17,11 +18,31 @@ const (
 	connectAggregateLimit = 8 * time.Second
 )
 
-// Class names recorded on the client for locator failures.
+// Class names recorded on the client for locator and launch failures.
+// These appear in client logs, client status, and package evidence.
+// They do not appear on host status.
 const (
-	ClassDNSResolution = "dns_resolution"
-	ClassTCPConnect    = "tcp_connect"
+	ClassDNSResolution       = "dns_resolution"
+	ClassTCPConnect          = "tcp_connect"
+	ClassTLSNegotiate        = "tls_negotiate"
+	ClassTLSSPKI             = "tls_spki"
+	ClassInviteAuthorization = "invite_authorization"
+	ClassSSHHostKey          = "ssh_host_key"
+	ClassForwardTarget       = "forward_target"
 )
+
+// ClientErrorClasses is the frozen client-only error class list.
+func ClientErrorClasses() []string {
+	return []string{
+		ClassDNSResolution,
+		ClassTCPConnect,
+		ClassTLSNegotiate,
+		ClassTLSSPKI,
+		ClassInviteAuthorization,
+		ClassSSHHostKey,
+		ClassForwardTarget,
+	}
+}
 
 // ResolvedDialPlan is one resolve-once result. Callers construct one immutable
 // ClientSpec per attempted candidate and never re-resolve.
@@ -63,6 +84,11 @@ func (err *ClassifiedError) Unwrap() error {
 }
 
 func classified(class, message string, err error) error {
+	return Classified(class, message, err)
+}
+
+// Classified returns a stable client error class wrapping err.
+func Classified(class, message string, err error) error {
 	return &ClassifiedError{Class: class, Message: message, Err: err}
 }
 
@@ -235,9 +261,48 @@ func defaultDial(ctx context.Context, addr netip.Addr, port uint16, timeout time
 
 // ErrorClass returns the client error class for err, or empty.
 func ErrorClass(err error) string {
+	if err == nil {
+		return ""
+	}
 	var classifiedErr *ClassifiedError
 	if errors.As(err, &classifiedErr) {
 		return classifiedErr.Class
 	}
-	return ""
+	return classifyClientMessage(err.Error())
+}
+
+func classifyClientMessage(message string) string {
+	lower := strings.ToLower(message)
+	switch {
+	case strings.Contains(lower, "spki pin mismatch") || strings.Contains(lower, "tls_spki"):
+		return ClassTLSSPKI
+	case strings.Contains(lower, "host key verification") ||
+		strings.Contains(lower, "remote host identification has changed") ||
+		strings.Contains(lower, "ssh_host_key"):
+		return ClassSSHHostKey
+	case strings.Contains(lower, "administratively prohibited") ||
+		strings.Contains(lower, "connect failed to") ||
+		strings.Contains(lower, "channel open failed") ||
+		strings.Contains(lower, "forward_target"):
+		return ClassForwardTarget
+	case strings.Contains(lower, "invite_authorization") ||
+		strings.Contains(lower, "enrollment rejected") ||
+		strings.Contains(lower, "enrollment forbidden") ||
+		strings.Contains(lower, "enrollment proof"):
+		return ClassInviteAuthorization
+	case strings.Contains(lower, "tls_negotiate") ||
+		strings.Contains(lower, "tls:") ||
+		strings.Contains(lower, "tls handshake") ||
+		strings.Contains(lower, "first record does not look like a tls"):
+		return ClassTLSNegotiate
+	case strings.Contains(lower, "dns_resolution") || strings.Contains(lower, "no such host"):
+		return ClassDNSResolution
+	case strings.Contains(lower, "tcp_connect") ||
+		strings.Contains(lower, "connection refused") ||
+		strings.Contains(lower, "i/o timeout") ||
+		strings.Contains(lower, "network is unreachable"):
+		return ClassTCPConnect
+	default:
+		return ""
+	}
 }

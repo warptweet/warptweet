@@ -35,7 +35,7 @@ func TestSubmitEnrollmentRotateRevokeRoundTrip(t *testing.T) {
 	enrollPort := uint16(listener.Addr().(*net.TCPAddr).Port)
 	certPath := filepath.Join(t.TempDir(), "tls.crt")
 	keyPath := filepath.Join(t.TempDir(), "tls.key")
-	enrollmentPin, _, _, err := EnsureTLSIdentity(certPath, keyPath, []net.IP{net.ParseIP("127.0.0.1")}, now)
+	enrollmentPin, _, _, err := EnsureTLSIdentity(certPath, keyPath, now)
 	if err != nil {
 		t.Fatalf("EnsureTLSIdentity: %v", err)
 	}
@@ -85,17 +85,16 @@ func TestSubmitEnrollmentRotateRevokeRoundTrip(t *testing.T) {
 			return
 		}
 		writeJSONResponse(writer, EnrollmentProof{
-			InviteID:      record.InviteID,
-			ClientID:      record.ClientID,
-			HostPublicKey: invite.HostPublicKey,
-			PublicKey:     record.PublicKey,
-			Target:        "198.51.100.20:5432",
-			Principal:     record.Principal,
-			ProfileID:     record.ProfileID,
-			Nonce:         "",
-			AcceptedAt:    time.Now().UTC().Format(time.RFC3339Nano),
-			ServerAddress: "127.0.0.1",
-			EnrollPort:    enrollPort,
+			InviteID:             record.InviteID,
+			ClientID:             record.ClientID,
+			HostPublicKey:        invite.HostPublicKey,
+			PublicKey:            record.PublicKey,
+			Target:               "198.51.100.20:5432",
+			Principal:            record.Principal,
+			ProfileID:            record.ProfileID,
+			Nonce:                "",
+			AcceptedAt:           time.Now().UTC().Format(time.RFC3339Nano),
+			PublishedEndpointSet: record.PublishedEndpointSet,
 		})
 	})
 	mux.HandleFunc("/v1/revoke", func(writer http.ResponseWriter, httpRequest *http.Request) {
@@ -204,7 +203,7 @@ func TestSubmitEnrollmentFailClosedCases(t *testing.T) {
 	enrollPort := uint16(listener.Addr().(*net.TCPAddr).Port)
 	certPath := filepath.Join(t.TempDir(), "tls.crt")
 	keyPath := filepath.Join(t.TempDir(), "tls.key")
-	enrollmentPin, _, _, err := EnsureTLSIdentity(certPath, keyPath, []net.IP{net.ParseIP("127.0.0.1")}, now)
+	enrollmentPin, _, _, err := EnsureTLSIdentity(certPath, keyPath, now)
 	if err != nil {
 		t.Fatalf("EnsureTLSIdentity: %v", err)
 	}
@@ -295,7 +294,7 @@ func TestSubmitEnrollmentPlanWalksDNSCandidatesWithoutDefaultResolver(t *testing
 	enrollPort := uint16(listener.Addr().(*net.TCPAddr).Port)
 	certPath := filepath.Join(t.TempDir(), "tls.crt")
 	keyPath := filepath.Join(t.TempDir(), "tls.key")
-	enrollmentPin, _, _, err := EnsureTLSIdentity(certPath, keyPath, []net.IP{net.ParseIP("127.0.0.1")}, now)
+	enrollmentPin, _, _, err := EnsureTLSIdentity(certPath, keyPath, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -397,6 +396,11 @@ func newTestEnrollHandler(
 			http.Error(writer, err.Error(), http.StatusBadRequest)
 			return
 		}
+		set, setErr := invite.PublishedSet()
+		if setErr != nil {
+			http.Error(writer, setErr.Error(), http.StatusBadRequest)
+			return
+		}
 		result, err := Accept(AcceptInput{
 			Directory:        invitesDir,
 			ClientsDirectory: clientsDir,
@@ -406,7 +410,7 @@ func newTestEnrollHandler(
 			ProfileID:        profile.CurrentID,
 			TargetAddress:    invite.TargetAddress,
 			TargetPort:       invite.TargetPort,
-			ServerAddress:    "127.0.0.1",
+			Published:        set,
 			Now:              time.Now().UTC(),
 			InstallAuthorization: func(string, time.Time) error {
 				if authPath == "" {

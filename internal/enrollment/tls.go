@@ -12,11 +12,12 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"net"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"warptweet.com/warptweet/internal/locator"
 )
 
 const (
@@ -38,7 +39,7 @@ const (
 // newly generated. renewed is true when a certificate was written.
 // The full identity transaction is serialized with one cross-process lock over
 // the shared key and certificate paths.
-func EnsureTLSIdentity(certPath, keyPath string, addresses []net.IP, now time.Time) (pin string, keyCreated bool, renewed bool, err error) {
+func EnsureTLSIdentity(certPath, keyPath string, now time.Time) (pin string, keyCreated bool, renewed bool, err error) {
 	if strings.TrimSpace(certPath) == "" || strings.TrimSpace(keyPath) == "" {
 		return "", false, false, errors.New("enrollment TLS certificate and key paths are required")
 	}
@@ -55,14 +56,14 @@ func EnsureTLSIdentity(certPath, keyPath string, addresses []net.IP, now time.Ti
 		return "", false, false, err
 	}
 	defer unlock()
-	return ensureTLSIdentityLocked(certPath, keyPath, addresses, now)
+	return ensureTLSIdentityLocked(certPath, keyPath, now)
 }
 
 func enrollmentTLSIdentityLockName(keyPath, certPath string) string {
 	return "." + filepath.Base(keyPath) + "." + filepath.Base(certPath) + ".lock"
 }
 
-func ensureTLSIdentityLocked(certPath, keyPath string, addresses []net.IP, now time.Time) (pin string, keyCreated bool, renewed bool, err error) {
+func ensureTLSIdentityLocked(certPath, keyPath string, now time.Time) (pin string, keyCreated bool, renewed bool, err error) {
 	privateKey, keyCreated, err := loadOrCreateEnrollmentKey(keyPath)
 	if err != nil {
 		return "", false, false, err
@@ -94,7 +95,7 @@ func ensureTLSIdentityLocked(certPath, keyPath string, addresses []net.IP, now t
 	if !renew {
 		return pin, false, false, nil
 	}
-	if err := writeEnrollmentCertificate(certPath, privateKey, addresses, now); err != nil {
+	if err := writeEnrollmentCertificate(certPath, privateKey, now); err != nil {
 		return "", false, false, err
 	}
 	return pin, keyCreated, true, nil
@@ -142,32 +143,38 @@ func PinnedClientTLSConfig(expectedSPKI string, now func() time.Time) (*tls.Conf
 		NextProtos:         []string{EnrollmentALPN},
 		InsecureSkipVerify: true, // verified below against the invite pin
 		VerifyConnection: func(state tls.ConnectionState) error {
+			tlsErr := func(message string, err error) error {
+				if err == nil {
+					err = errors.New(message)
+				}
+				return locator.Classified(locator.ClassTLSNegotiate, "tls_negotiate", err)
+			}
 			if state.Version != tls.VersionTLS13 {
-				return errors.New("enrollment TLS did not negotiate TLS 1.3")
+				return tlsErr("enrollment TLS did not negotiate TLS 1.3", nil)
 			}
 			if state.NegotiatedProtocol != EnrollmentALPN {
-				return errors.New("enrollment TLS ALPN mismatch")
+				return tlsErr("enrollment TLS ALPN mismatch", nil)
 			}
 			if len(state.PeerCertificates) != 1 {
-				return errors.New("enrollment TLS peer must present exactly one certificate")
+				return tlsErr("enrollment TLS peer must present exactly one certificate", nil)
 			}
 			certificate := state.PeerCertificates[0]
 			if _, ok := certificate.PublicKey.(ed25519.PublicKey); !ok {
-				return errors.New("enrollment TLS peer certificate must use Ed25519")
+				return tlsErr("enrollment TLS peer certificate must use Ed25519", nil)
 			}
 			if err := certificate.CheckSignature(certificate.SignatureAlgorithm, certificate.RawTBSCertificate, certificate.Signature); err != nil {
-				return fmt.Errorf("enrollment TLS certificate is not self-signed: %w", err)
+				return tlsErr("enrollment TLS certificate is not self-signed", err)
 			}
 			current := now().UTC()
 			if current.Before(certificate.NotBefore) || current.After(certificate.NotAfter) {
-				return errors.New("enrollment TLS certificate is outside its validity period")
+				return tlsErr("enrollment TLS certificate is outside its validity period", nil)
 			}
 			actual, err := SPKISHA256(certificate.PublicKey)
 			if err != nil {
-				return err
+				return tlsErr("enrollment TLS SPKI", err)
 			}
 			if actual != expectedSPKI {
-				return errors.New("enrollment TLS SPKI pin mismatch")
+				return locator.Classified(locator.ClassTLSSPKI, "tls_spki", errors.New("enrollment TLS SPKI pin mismatch"))
 			}
 			return nil
 		},
@@ -221,7 +228,7 @@ func loadOrCreateEnrollmentKey(path string) (ed25519.PrivateKey, bool, error) {
 	return privateKey, true, nil
 }
 
-func writeEnrollmentCertificate(path string, privateKey ed25519.PrivateKey, addresses []net.IP, now time.Time) error {
+func writeEnrollmentCertificate(path string, privateKey ed25519.PrivateKey, now time.Time) error {
 	serialLimit := new(big.Int).Lsh(big.NewInt(1), 128)
 	serial, err := rand.Int(rand.Reader, serialLimit)
 	if err != nil {
@@ -236,7 +243,8 @@ func writeEnrollmentCertificate(path string, privateKey ed25519.PrivateKey, addr
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
 		IsCA:                  false,
-		IPAddresses:           append([]net.IP(nil), addresses...),
+		IPAddresses:           nil,
+		DNSNames:              nil,
 	}
 	der, err := x509.CreateCertificate(rand.Reader, template, template, privateKey.Public(), privateKey)
 	if err != nil {

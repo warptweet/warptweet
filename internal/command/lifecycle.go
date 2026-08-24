@@ -24,6 +24,7 @@ import (
 	"warptweet.com/warptweet/internal/installlayout"
 	"warptweet.com/warptweet/internal/knownhosts"
 	"warptweet.com/warptweet/internal/lifecycle"
+	"warptweet.com/warptweet/internal/locator"
 	"warptweet.com/warptweet/internal/outcome"
 	"warptweet.com/warptweet/internal/profile"
 	"warptweet.com/warptweet/internal/provisioner"
@@ -240,9 +241,12 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		return err
 	}
 
-	enrollPort := proof.EnrollPort
-	if enrollPort == 0 {
-		enrollPort = invite.EnrollmentPort()
+	verifiedSet, err := invite.PublishedSet()
+	if err != nil {
+		return err
+	}
+	if !proof.PublishedEndpointSet.Equal(verifiedSet) {
+		return fmt.Errorf("%w: enrollment proof published set does not match invite", enrollment.ErrInvalidInvite)
 	}
 	receipt := enrollmentReceipt{
 		InviteID:                     invite.InviteID,
@@ -253,8 +257,7 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		AuthorizationDurationSeconds: proof.AuthorizationDurationSeconds,
 		Generation:                   generationID,
 		ManagementToken:              managementToken,
-		ServerAddress:                firstNonEmptyString(proof.ServerAddress, invite.Data.Host),
-		EnrollPort:                   enrollPort,
+		PublishedEndpointSet:         verifiedSet,
 		PublicKey:                    publicKey,
 		HostPublicKey:                invite.HostPublicKey,
 		EnrollmentTLSSPKISHA256:      invite.EnrollmentTLSSPKISHA256(),
@@ -601,9 +604,6 @@ func runRotate(ctx context.Context, arguments []string, stdout, stderr io.Writer
 	receipt.ManagementToken = pending.NextManagementToken
 	receipt.PublicKey = publicKey
 	receipt.AcceptedAt = proof.AcceptedAt
-	if proof.EnrollPort != 0 {
-		receipt.EnrollPort = proof.EnrollPort
-	}
 	if err := writeEnrollmentReceipt(layout.ClientManifestPath, receipt); err != nil {
 		return failCleanup(err)
 	}
@@ -770,15 +770,14 @@ type enrollmentReceipt struct {
 	AuthorizationDurationSeconds int64  `json:"authorization_duration_seconds,omitempty"`
 	Generation                   string `json:"generation"`
 	ManagementToken              string `json:"management_token,omitempty"`
-	ServerAddress                string `json:"server_address"`
-	EnrollPort                   uint16 `json:"enroll_port,omitempty"`
-	PublicKey                    string `json:"public_key,omitempty"`
-	HostPublicKey                string `json:"host_public_key,omitempty"`
-	EnrollmentTLSSPKISHA256      string `json:"enrollment_tls_spki_sha256"`
-	Target                       string `json:"target,omitempty"`
-	Principal                    string `json:"principal,omitempty"`
-	ProfileID                    string `json:"profile_id,omitempty"`
-	RevokedAt                    string `json:"revoked_at,omitempty"`
+	locator.PublishedEndpointSet
+	PublicKey               string `json:"public_key,omitempty"`
+	HostPublicKey           string `json:"host_public_key,omitempty"`
+	EnrollmentTLSSPKISHA256 string `json:"enrollment_tls_spki_sha256"`
+	Target                  string `json:"target,omitempty"`
+	Principal               string `json:"principal,omitempty"`
+	ProfileID               string `json:"profile_id,omitempty"`
+	RevokedAt               string `json:"revoked_at,omitempty"`
 }
 
 type pendingRotation struct {
@@ -1010,13 +1009,6 @@ func managedTunnelRunning(state lifecycle.State) bool {
 	}
 }
 
-func (receipt enrollmentReceipt) enrollPortOrDefault() uint16 {
-	if receipt.EnrollPort == 0 {
-		return enrollment.DefaultEnrollmentPort
-	}
-	return receipt.EnrollPort
-}
-
 func enrollmentReceiptDir(clientManifestPath string) string {
 	return filepath.Join(filepath.Dir(clientManifestPath), "enrollment")
 }
@@ -1211,8 +1203,7 @@ func persistRouteEnrollment(routeID, listenEndpoint string, receipt enrollmentRe
 		AuthorizationDurationSeconds: receipt.AuthorizationDurationSeconds,
 		Generation:                   receipt.Generation,
 		ManagementToken:              receipt.ManagementToken,
-		ServerAddress:                receipt.ServerAddress,
-		EnrollPort:                   receipt.EnrollPort,
+		PublishedEndpointSet:         receipt.PublishedEndpointSet,
 		PublicKey:                    receipt.PublicKey,
 		HostPublicKey:                receipt.HostPublicKey,
 		EnrollmentTLSSPKISHA256:      receipt.EnrollmentTLSSPKISHA256,
@@ -1290,9 +1281,8 @@ func syncRouteReceipt(routeID string, receipt enrollmentReceipt) error {
 	}
 	current.Generation = firstNonEmptyString(receipt.Generation, current.Generation)
 	current.ManagementToken = receipt.ManagementToken
-	current.ServerAddress = firstNonEmptyString(receipt.ServerAddress, current.ServerAddress)
-	if receipt.EnrollPort != 0 {
-		current.EnrollPort = receipt.EnrollPort
+	if receipt.PublishedEndpointSet.Generation != 0 {
+		current.PublishedEndpointSet = receipt.PublishedEndpointSet
 	}
 	current.PublicKey = firstNonEmptyString(receipt.PublicKey, current.PublicKey)
 	current.HostPublicKey = firstNonEmptyString(receipt.HostPublicKey, current.HostPublicKey)
@@ -1372,6 +1362,13 @@ func routeStatusPayload(routeID string, state lifecycle.State) map[string]any {
 		"generation":      state.Generation,
 		"last_error":      state.Error,
 	}
+	if state.ErrorClass != "" {
+		payload["error_class"] = state.ErrorClass
+	} else if state.Error != "" {
+		if class := locator.ErrorClass(errors.New(state.Error)); class != "" {
+			payload["error_class"] = class
+		}
+	}
 	store, err := productionRouteStore()
 	if err != nil {
 		return payload
@@ -1384,7 +1381,13 @@ func routeStatusPayload(routeID string, state lifecycle.State) map[string]any {
 		payload["client_id"] = receipt.ClientID
 		payload["authorization_not_after"] = receipt.AuthorizationNotAfter
 		payload["authorization_duration_seconds"] = receipt.AuthorizationDurationSeconds
-		payload["server_endpoint"] = receipt.ServerAddress
+		if dataHost, err := receipt.Data.Host.Canonical(); err == nil {
+			payload["data_dial"] = fmt.Sprintf("%s:%d", dataHost, receipt.Data.Port)
+		}
+		if enrollHost, err := receipt.Enrollment.Host.Canonical(); err == nil {
+			payload["enrollment_dial"] = fmt.Sprintf("%s:%d", enrollHost, receipt.Enrollment.Port)
+		}
+		payload["published_endpoint_generation"] = receipt.PublishedEndpointSet.Generation
 		payload["target_endpoint"] = receipt.Target
 		payload["authorization_state"] = authorizationState(receipt, state)
 	}

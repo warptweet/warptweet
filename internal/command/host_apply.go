@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"net"
 	"net/netip"
 	"os"
 	"time"
@@ -47,7 +46,7 @@ type hostApplyEnv struct {
 	ProbeTCP        func(endpoint netip.AddrPort) bool
 
 	EnsureIdentity   func(ctx context.Context) (publicKey string, created bool, err error)
-	EnsureTLS        func(addrs []net.IP, now time.Time) (pin string, created, renewed bool, err error)
+	EnsureTLS        func(now time.Time) (pin string, created, renewed bool, err error)
 	WriteSSHD        func(manifest server.Config) error
 	AllowTestDigests bool
 }
@@ -90,11 +89,10 @@ func productionHostApplyEnv() hostApplyEnv {
 		EnsureIdentity: func(ctx context.Context) (string, bool, error) {
 			return ensureHostIdentity(ctx)
 		},
-		EnsureTLS: func(addrs []net.IP, now time.Time) (string, bool, bool, error) {
+		EnsureTLS: func(now time.Time) (string, bool, bool, error) {
 			return enrollment.EnsureTLSIdentity(
 				installlayout.ServerEnrollmentTLSCertPath,
 				installlayout.ServerEnrollmentTLSKeyPath,
-				addrs,
 				now,
 			)
 		},
@@ -173,10 +171,7 @@ func applyHostConfiguration(ctx context.Context, env hostApplyEnv, input hostApp
 	if env.EnsureTLS == nil {
 		return hostApplyResult{}, errors.New("enrollment TLS helper is required")
 	}
-	pin, createdTLS, renewedTLS, err := env.EnsureTLS(
-		[]net.IP{net.IP(publication.DataListen.Address.AsSlice())},
-		env.Now,
-	)
+	pin, createdTLS, renewedTLS, err := env.EnsureTLS(env.Now)
 	if err != nil {
 		return hostApplyResult{}, fmt.Errorf("ensure enrollment TLS identity: %w", err)
 	}

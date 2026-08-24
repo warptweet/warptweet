@@ -62,7 +62,7 @@ func TestAcceptStoresClientAndRevokeBurnsToken(t *testing.T) {
 		ProfileID:            profile.CurrentID,
 		TargetAddress:        invite.TargetAddress,
 		TargetPort:           invite.TargetPort,
-		ServerAddress:        invite.Data.Host,
+		Published:            publishedFromInvite(t, invite),
 		Now:                  now.Add(time.Minute),
 		InstallAuthorization: func(string, time.Time) error { return nil },
 	})
@@ -205,7 +205,7 @@ func TestRevokeClientAsHostDoesNotNeedBearerToken(t *testing.T) {
 		ProfileID:            profile.CurrentID,
 		TargetAddress:        invite.TargetAddress,
 		TargetPort:           invite.TargetPort,
-		ServerAddress:        invite.Data.Host,
+		Published:            publishedFromInvite(t, invite),
 		Now:                  now.Add(time.Minute),
 		InstallAuthorization: func(string, time.Time) error { return nil },
 	})
@@ -285,7 +285,7 @@ func TestRevokeClientAsHostRemovesPendingRotationKey(t *testing.T) {
 		ProfileID:            profile.CurrentID,
 		TargetAddress:        invite.TargetAddress,
 		TargetPort:           invite.TargetPort,
-		ServerAddress:        invite.Data.Host,
+		Published:            publishedFromInvite(t, invite),
 		Now:                  now.Add(time.Minute),
 		InstallAuthorization: func(string, time.Time) error { return nil },
 	})
@@ -365,7 +365,7 @@ func TestReconcilePendingRevocationsCompletesStuckRecord(t *testing.T) {
 		ProfileID:            profile.CurrentID,
 		TargetAddress:        invite.TargetAddress,
 		TargetPort:           invite.TargetPort,
-		ServerAddress:        invite.Data.Host,
+		Published:            publishedFromInvite(t, invite),
 		Now:                  now.Add(time.Minute),
 		InstallAuthorization: func(string, time.Time) error { return nil },
 	})
@@ -454,6 +454,7 @@ func TestRotateClientIssuesNewToken(t *testing.T) {
 		ProfileID:            profile.CurrentID,
 		TargetAddress:        invite.TargetAddress,
 		TargetPort:           invite.TargetPort,
+		Published:            publishedFromInvite(t, invite),
 		Now:                  now.Add(time.Minute),
 		InstallAuthorization: func(string, time.Time) error { return nil },
 	})
@@ -578,6 +579,7 @@ func TestRotateClientRejectsHostExpiredGrant(t *testing.T) {
 		ProfileID:            profile.CurrentID,
 		TargetAddress:        invite.TargetAddress,
 		TargetPort:           invite.TargetPort,
+		Published:            publishedFromInvite(t, invite),
 		Now:                  now.Add(time.Minute),
 		InstallAuthorization: func(string, time.Time) error { return nil },
 	})

@@ -122,6 +122,23 @@ func (invite Invite) DataPort() uint16 {
 	return invite.Data.Port
 }
 
+// PublishedSet returns the canonical published locator carried by this invite.
+func (invite Invite) PublishedSet() (locator.PublishedEndpointSet, error) {
+	dataHost, err := locator.ParseDialHost(invite.Data.Host)
+	if err != nil {
+		return locator.PublishedEndpointSet{}, err
+	}
+	enrollHost, err := locator.ParseDialHost(invite.Enrollment.Host)
+	if err != nil {
+		return locator.PublishedEndpointSet{}, err
+	}
+	return locator.PublishedEndpointSet{
+		Generation: invite.PublishedEndpointGeneration,
+		Data:       locator.DialEndpoint{Host: dataHost, Port: invite.Data.Port},
+		Enrollment: locator.DialEndpoint{Host: enrollHost, Port: invite.Enrollment.Port},
+	}.Canonical()
+}
+
 // BuildClientManifest renders a client .wt document from one invite and digest.
 func BuildClientManifest(invite Invite, tunnelID string, listenPort uint16, sshDigest string) (config.Config, error) {
 	if _, err := locator.ParseDialHost(invite.Data.Host); err != nil {
@@ -184,7 +201,8 @@ type EnrollmentRequest struct {
 
 // EnrollmentProof is the non-secret server binding returned after accept.
 // The management capability is generated and retained by the client; the
-// server never returns or stores its raw value.
+// server never returns or stores its raw value. The published set is copied
+// from the host manifest, never from EnrollmentRequest.
 type EnrollmentProof struct {
 	InviteID                     string `json:"invite_id"`
 	ClientID                     string `json:"client_id"`
@@ -197,8 +215,7 @@ type EnrollmentProof struct {
 	AcceptedAt                   string `json:"accepted_at"`
 	AuthorizationNotAfter        string `json:"authorization_not_after"`
 	AuthorizationDurationSeconds int64  `json:"authorization_duration_seconds"`
-	ServerAddress                string `json:"server_address,omitempty"`
-	EnrollPort                   uint16 `json:"enroll_port,omitempty"`
+	locator.PublishedEndpointSet
 }
 
 // EncodeEnrollmentRequest returns canonical request JSON.
@@ -225,6 +242,17 @@ func ValidateEnrollmentProof(proof EnrollmentProof, invite Invite, publicKey str
 	}
 	if proof.AuthorizationDurationSeconds != invite.AuthorizationDurationSeconds {
 		return fmt.Errorf("%w: enrollment proof authorization duration mismatch", ErrInvalidInvite)
+	}
+	wantSet, err := invite.PublishedSet()
+	if err != nil {
+		return fmt.Errorf("%w: invite published set: %v", ErrInvalidInvite, err)
+	}
+	gotSet, err := proof.PublishedEndpointSet.Canonical()
+	if err != nil {
+		return fmt.Errorf("%w: enrollment proof published set: %v", ErrInvalidInvite, err)
+	}
+	if !wantSet.Equal(gotSet) {
+		return fmt.Errorf("%w: enrollment proof published set does not match invite", ErrInvalidInvite)
 	}
 	acceptedAt, err := grant.ParseUTC(proof.AcceptedAt)
 	if err != nil {

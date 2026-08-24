@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,7 +13,16 @@ import (
 
 	"warptweet.com/warptweet/internal/enrollment"
 	"warptweet.com/warptweet/internal/grant"
+	"warptweet.com/warptweet/internal/locator"
 )
+
+func testClientPublishedSet() locator.PublishedEndpointSet {
+	return locator.PublishedEndpointSet{
+		Generation: 1,
+		Data:       locator.DialEndpoint{Host: locator.IPDialHost(netip.MustParseAddr("192.0.2.10")), Port: 2222},
+		Enrollment: locator.DialEndpoint{Host: locator.IPDialHost(netip.MustParseAddr("192.0.2.10")), Port: 29722},
+	}
+}
 
 func TestRegisterRejectsMissingAndExpiredGrants(t *testing.T) {
 	t.Parallel()
@@ -47,6 +57,7 @@ func TestRegisterRejectsMissingAndExpiredGrants(t *testing.T) {
 		AuthorizationNotAfter:        notAfter,
 		AuthorizationDurationSeconds: 2592000,
 		Generation:                   "20260816T120000Z",
+		PublishedEndpointSet:         testClientPublishedSet(),
 		TargetAddress:                "127.0.0.1",
 		TargetPort:                   5432,
 	}); err != nil {
@@ -105,6 +116,7 @@ func TestRegisterRejectsForeignExecutable(t *testing.T) {
 		AuthorizationNotAfter:        notAfter,
 		AuthorizationDurationSeconds: 2592000,
 		Generation:                   "20260816T120000Z",
+		PublishedEndpointSet:         testClientPublishedSet(),
 		TargetAddress:                "127.0.0.1",
 		TargetPort:                   5432,
 	}); err != nil {
@@ -201,6 +213,7 @@ func TestRegisterAndUnregisterRemovesRecord(t *testing.T) {
 		AuthorizationNotAfter:        notAfter,
 		AuthorizationDurationSeconds: 2592000,
 		Generation:                   "20260816T120000Z",
+		PublishedEndpointSet:         testClientPublishedSet(),
 		TargetAddress:                "127.0.0.1",
 		TargetPort:                   5432,
 	}); err != nil {

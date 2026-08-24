@@ -66,13 +66,7 @@ func SubmitEnrollmentPlan(
 		return EnrollmentProof{}, netip.Addr{}, fmt.Errorf("%w: decode enrollment proof: %v", ErrInvalidInvite, err)
 	}
 	if err := ValidateEnrollmentProof(proof, invite, request.PublicKey); err != nil {
-		return EnrollmentProof{}, netip.Addr{}, err
-	}
-	if proof.ServerAddress == "" {
-		proof.ServerAddress = invite.Data.Host
-	}
-	if proof.EnrollPort == 0 {
-		proof.EnrollPort = invite.EnrollmentPort()
+		return EnrollmentProof{}, netip.Addr{}, locator.Classified(locator.ClassInviteAuthorization, "invite_authorization", err)
 	}
 	return proof, selected, nil
 }
@@ -170,7 +164,7 @@ func postJSONTo(ctx context.Context, url string, body []byte, enrollmentTLSSPKIS
 	}
 	response, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("enrollment request: %w", err)
+		return nil, classifyEnrollmentTransport(err)
 	}
 	defer response.Body.Close()
 
@@ -187,7 +181,37 @@ func postJSONTo(ctx context.Context, url string, body []byte, enrollmentTLSSPKIS
 		if message == "" {
 			message = response.Status
 		}
-		return nil, fmt.Errorf("%w: enrollment rejected: %s", ErrInvalidInvite, message)
+		return nil, locator.Classified(
+			locator.ClassInviteAuthorization,
+			"invite_authorization",
+			fmt.Errorf("%w: enrollment rejected: %s", ErrInvalidInvite, message),
+		)
 	}
 	return payload, nil
+}
+
+func classifyEnrollmentTransport(err error) error {
+	if err == nil {
+		return nil
+	}
+	if class := locator.ErrorClass(err); class != "" {
+		return err
+	}
+	message := err.Error()
+	switch {
+	case strings.Contains(message, "SPKI pin mismatch"):
+		return locator.Classified(locator.ClassTLSSPKI, "tls_spki", err)
+	case strings.Contains(message, "tls:") ||
+		strings.Contains(message, "TLS") ||
+		strings.Contains(message, "x509:") ||
+		strings.Contains(strings.ToLower(message), "handshake"):
+		return locator.Classified(locator.ClassTLSNegotiate, "tls_negotiate", err)
+	case strings.Contains(strings.ToLower(message), "connection refused") ||
+		strings.Contains(strings.ToLower(message), "i/o timeout") ||
+		strings.Contains(strings.ToLower(message), "network is unreachable") ||
+		strings.Contains(strings.ToLower(message), "connect:"):
+		return locator.Classified(locator.ClassTCPConnect, "tcp_connect", err)
+	default:
+		return fmt.Errorf("enrollment request: %w", err)
+	}
 }

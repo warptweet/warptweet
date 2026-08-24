@@ -1,6 +1,11 @@
 package enrollment
 
-import "net/netip"
+import (
+	"net/netip"
+	"testing"
+
+	"warptweet.com/warptweet/internal/locator"
+)
 
 const (
 	testEnrollmentTLSSPKIPin = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -24,4 +29,13 @@ func testCreateInput() CreateInput {
 		ArtifactProfileID:           "linux-amd64",
 		HostPublicKey:               "ssh-mldsa44-ed25519@openssh.com AAAA host",
 	}
+}
+
+func publishedFromInvite(t *testing.T, invite Invite) locator.PublishedEndpointSet {
+	t.Helper()
+	set, err := invite.PublishedSet()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return set
 }

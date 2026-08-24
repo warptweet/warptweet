@@ -3,12 +3,23 @@ package routestate
 import (
 	"bytes"
 	"errors"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"warptweet.com/warptweet/internal/locator"
 )
+
+func testPublishedSet() locator.PublishedEndpointSet {
+	return locator.PublishedEndpointSet{
+		Generation: 1,
+		Data:       locator.DialEndpoint{Host: locator.IPDialHost(netip.MustParseAddr("192.0.2.10")), Port: 2222},
+		Enrollment: locator.DialEndpoint{Host: locator.IPDialHost(netip.MustParseAddr("192.0.2.10")), Port: 29722},
+	}
+}
 
 func TestValidateRouteID(t *testing.T) {
 	t.Parallel()
@@ -65,6 +76,7 @@ func TestStoreReserveAndListInvalid(t *testing.T) {
 		AuthorizationNotAfter:        "2026-09-15T12:00:00Z",
 		AuthorizationDurationSeconds: 2592000,
 		Generation:                   "20260816T120000Z",
+		PublishedEndpointSet:         testPublishedSet(),
 	}); err != nil {
 		t.Fatalf("WriteReceipt: %v", err)
 	}
@@ -196,6 +208,17 @@ func TestWriteReceiptRequiresHostExpiry(t *testing.T) {
 		AuthorizationNotAfter:        time.Now().UTC().Add(30 * 24 * time.Hour).Format(time.RFC3339Nano),
 		AuthorizationDurationSeconds: 2592000,
 		Generation:                   "20260816T120000Z",
+	}); err == nil {
+		t.Fatal("WriteReceipt accepted a receipt without published endpoint set")
+	}
+	if err := store.WriteReceipt(Receipt{
+		RouteID:                      "db",
+		ClientID:                     "c1",
+		AcceptedAt:                   time.Now().UTC().Format(time.RFC3339Nano),
+		AuthorizationNotAfter:        time.Now().UTC().Add(30 * 24 * time.Hour).Format(time.RFC3339Nano),
+		AuthorizationDurationSeconds: 2592000,
+		Generation:                   "20260816T120000Z",
+		PublishedEndpointSet:         testPublishedSet(),
 	}); err != nil {
 		t.Fatalf("WriteReceipt: %v", err)
 	}

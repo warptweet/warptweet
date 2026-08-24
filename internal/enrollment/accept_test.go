@@ -67,7 +67,7 @@ func TestAcceptResumesPendingAuthorizationWithoutBurningInvite(t *testing.T) {
 		ProfileID:        profile.CurrentID,
 		TargetAddress:    invite.TargetAddress,
 		TargetPort:       invite.TargetPort,
-		ServerAddress:    invite.Data.Host,
+		Published:        publishedFromInvite(t, invite),
 		Now:              now.Add(time.Minute),
 		InstallAuthorization: func(string, time.Time) error {
 			return errors.New("injected authorization failure")
@@ -198,6 +198,7 @@ func TestAcceptConsumesInviteOnce(t *testing.T) {
 		ProfileID:     profile.CurrentID,
 		TargetAddress: invite.TargetAddress,
 		TargetPort:    invite.TargetPort,
+		Published:     publishedFromInvite(t, invite),
 		Now:           now.Add(time.Minute),
 		InstallAuthorization: func(string, time.Time) error {
 			return nil
@@ -217,6 +218,7 @@ func TestAcceptConsumesInviteOnce(t *testing.T) {
 		ProfileID:     profile.CurrentID,
 		TargetAddress: invite.TargetAddress,
 		TargetPort:    invite.TargetPort,
+		Published:     publishedFromInvite(t, invite),
 		Now:           now.Add(2 * time.Minute),
 		InstallAuthorization: func(string, time.Time) error {
 			return nil
@@ -272,6 +274,7 @@ func TestAcceptRejectsNonceMismatch(t *testing.T) {
 		ProfileID:     profile.CurrentID,
 		TargetAddress: invite.TargetAddress,
 		TargetPort:    invite.TargetPort,
+		Published:     publishedFromInvite(t, invite),
 		Now:           now.Add(time.Minute),
 		InstallAuthorization: func(string, time.Time) error {
 			return nil
@@ -348,6 +351,7 @@ func TestEnrollmentHTTPHandlerAcceptsValidRequest(t *testing.T) {
 			ProfileID:     profile.CurrentID,
 			TargetAddress: invite.TargetAddress,
 			TargetPort:    invite.TargetPort,
+			Published:     publishedFromInvite(t, invite),
 			Now:           time.Now().UTC(),
 			InstallAuthorization: func(string, time.Time) error {
 				return os.WriteFile(authPath, line, 0o600)

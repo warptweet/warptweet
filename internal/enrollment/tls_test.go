@@ -6,7 +6,6 @@ import (
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -23,11 +22,11 @@ func TestEnrollmentTLSIdentityPinsExactHybridTLS(t *testing.T) {
 	directory := t.TempDir()
 	certPath := filepath.Join(directory, "tls.crt")
 	keyPath := filepath.Join(directory, "tls.key")
-	pin, created, renewed, err := EnsureTLSIdentity(certPath, keyPath, []net.IP{net.ParseIP("127.0.0.1")}, now)
+	pin, created, renewed, err := EnsureTLSIdentity(certPath, keyPath, now)
 	if err != nil || !created || !renewed {
 		t.Fatalf("EnsureTLSIdentity: pin=%q created=%v renewed=%v err=%v", pin, created, renewed, err)
 	}
-	samePin, createdAgain, renewedAgain, err := EnsureTLSIdentity(certPath, keyPath, []net.IP{net.ParseIP("127.0.0.1")}, now.Add(time.Hour))
+	samePin, createdAgain, renewedAgain, err := EnsureTLSIdentity(certPath, keyPath, now.Add(time.Hour))
 	if err != nil || createdAgain || renewedAgain || samePin != pin {
 		t.Fatalf("identity was not stable: pin=%q created=%v renewed=%v err=%v", samePin, createdAgain, renewedAgain, err)
 	}
@@ -55,6 +54,7 @@ func TestEnrollmentTLSIdentityPinsExactHybridTLS(t *testing.T) {
 	if err := clientConfig.VerifyConnection(state); err != nil {
 		t.Fatalf("pinned TLS verification: %v", err)
 	}
+	assertEmptySAN(t, leaf)
 	wrongConfig, err := PinnedClientTLSConfig(strings.Repeat("f", 64), func() time.Time { return now })
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +71,7 @@ func TestEnrollmentTLSRenewalPreservesSPKI(t *testing.T) {
 	directory := t.TempDir()
 	certPath := filepath.Join(directory, "tls.crt")
 	keyPath := filepath.Join(directory, "tls.key")
-	first, _, _, err := EnsureTLSIdentity(certPath, keyPath, nil, now)
+	first, _, _, err := EnsureTLSIdentity(certPath, keyPath, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,7 +79,7 @@ func TestEnrollmentTLSRenewalPreservesSPKI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, created, renewed, err := EnsureTLSIdentity(certPath, keyPath, nil, now.Add(EnrollmentCertificateLifetime-EnrollmentCertificateRenewBefore/2))
+	second, created, renewed, err := EnsureTLSIdentity(certPath, keyPath, now.Add(EnrollmentCertificateLifetime-EnrollmentCertificateRenewBefore/2))
 	if err != nil || created || !renewed || second != first {
 		t.Fatalf("renewal changed identity: first=%q second=%q created=%v renewed=%v err=%v", first, second, created, renewed, err)
 	}
@@ -90,13 +90,50 @@ func TestEnrollmentTLSRenewalPreservesSPKI(t *testing.T) {
 	if !afterLeaf.NotAfter.After(beforeLeaf.NotAfter) {
 		t.Fatalf("renewal did not extend validity: before=%s after=%s", beforeLeaf.NotAfter, afterLeaf.NotAfter)
 	}
+	assertEmptySAN(t, beforeLeaf)
+	assertEmptySAN(t, afterLeaf)
+}
+
+func TestEnrollmentTLSCertificatesHaveEmptySAN(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
+	directory := t.TempDir()
+	certPath := filepath.Join(directory, "tls.crt")
+	keyPath := filepath.Join(directory, "tls.key")
+	if _, _, _, err := EnsureTLSIdentity(certPath, keyPath, now); err != nil {
+		t.Fatal(err)
+	}
+	leaf, err := loadEnrollmentLeaf(certPath, keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertEmptySAN(t, leaf)
+	if _, created, renewed, err := EnsureTLSIdentity(certPath, keyPath, now.Add(time.Hour)); err != nil || created || renewed {
+		t.Fatalf("locator-independent call renewed: created=%v renewed=%v err=%v", created, renewed, err)
+	}
+	same, err := loadEnrollmentLeaf(certPath, keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if same.SerialNumber.Cmp(leaf.SerialNumber) != 0 {
+		t.Fatal("stable identity rewrote the certificate")
+	}
+	assertEmptySAN(t, same)
+}
+
+func assertEmptySAN(t *testing.T, leaf *x509.Certificate) {
+	t.Helper()
+	if len(leaf.IPAddresses) != 0 || len(leaf.DNSNames) != 0 {
+		t.Fatalf("enrollment certificate has SAN IPAddresses=%v DNSNames=%v", leaf.IPAddresses, leaf.DNSNames)
+	}
 }
 
 func TestEnsureTLSIdentityConcurrentProcesses(t *testing.T) {
 	if os.Getenv("WT_ENROLLMENT_TLS_WORKER") == "1" {
 		certPath := os.Getenv("WT_ENROLLMENT_TLS_CERT")
 		keyPath := os.Getenv("WT_ENROLLMENT_TLS_KEY")
-		pin, _, _, err := EnsureTLSIdentity(certPath, keyPath, []net.IP{net.ParseIP("127.0.0.1")}, time.Now().UTC())
+		pin, _, _, err := EnsureTLSIdentity(certPath, keyPath, time.Now().UTC())
 		if err != nil {
 			t.Fatalf("worker EnsureTLSIdentity: %v", err)
 		}

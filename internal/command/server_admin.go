@@ -153,10 +153,8 @@ func runServerStatus(ctx context.Context, arguments []string, stdout, stderr io.
 		status["target"] = fmt.Sprintf("%s:%d", manifest.Target.Address, manifest.Target.Port)
 		status["dedicated_user"] = manifest.DedicatedUser
 		status["manifest"] = "present"
-		if addr := manifest.Network.Enrollment.Listen.Address; addr.IsValid() && !addr.IsUnspecified() {
-			if url, err := enrollment.EnrollmentURL(addr.String(), manifest.Network.Enrollment.Listen.Port); err == nil {
-				status["enroll_url"] = url
-			}
+		if url, err := enrollmentURLForManifest(manifest); err == nil {
+			status["enroll_url"] = url
 		}
 	} else {
 		status["manifest"] = "missing"

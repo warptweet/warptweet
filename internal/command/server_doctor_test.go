@@ -93,7 +93,7 @@ func TestServerDoctorOutputContainsOnlyNonSecretAttestationFacts(t *testing.T) {
 		StaticLibcryptoSHA256:       strings.Repeat("d", 64),
 		HostPublicKeySHA256:         strings.Repeat("c", 64),
 		AuthorizedKeyCount:          1,
-	}, profile.AuthenticationBindingOpenSSHVendor, profile.SupportStatusPublishedMatrix)
+	}, profile.AuthenticationBindingOpenSSHVendor, profile.SupportStatusPublishedMatrix, nil)
 
 	if output.Status != "preflight_ready" || output.Role != "server" ||
 		output.Profile != "profile-id" ||

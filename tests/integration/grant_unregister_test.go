@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"warptweet.com/warptweet/internal/enrollment"
 	"warptweet.com/warptweet/internal/grant"
 	"warptweet.com/warptweet/internal/grantsession"
+	"warptweet.com/warptweet/internal/locator"
 )
 
 func TestKeyAuthenticatedSessionRemovesRegistrarRecord(t *testing.T) {
@@ -46,8 +48,13 @@ func TestKeyAuthenticatedSessionRemovesRegistrarRecord(t *testing.T) {
 		AuthorizationNotAfter:        notAfter,
 		AuthorizationDurationSeconds: 2592000,
 		Generation:                   "20260816T120000Z",
-		TargetAddress:                "127.0.0.1",
-		TargetPort:                   5432,
+		PublishedEndpointSet: locator.PublishedEndpointSet{
+			Generation: 1,
+			Data:       locator.DialEndpoint{Host: locator.IPDialHost(netip.MustParseAddr("192.0.2.10")), Port: 2222},
+			Enrollment: locator.DialEndpoint{Host: locator.IPDialHost(netip.MustParseAddr("192.0.2.10")), Port: 29722},
+		},
+		TargetAddress: "127.0.0.1",
+		TargetPort:    5432,
 	}); err != nil {
 		t.Fatalf("store client: %v", err)
 	}

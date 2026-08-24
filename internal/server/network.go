@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math"
 	"net/netip"
+
+	"warptweet.com/warptweet/internal/locator"
 )
 
 // BindEndpoint is a concrete local socket. Address is always a numeric IP.
@@ -13,10 +15,7 @@ type BindEndpoint struct {
 }
 
 // DialEndpoint is a published locator. Host is an IP literal or DNS name.
-type DialEndpoint struct {
-	Host DialHost `json:"host"`
-	Port uint16   `json:"port"`
-}
+type DialEndpoint = locator.DialEndpoint
 
 // ServiceEndpoints is one published service: local bind and client dial.
 type ServiceEndpoints struct {
@@ -32,12 +31,8 @@ type Network struct {
 }
 
 // PublishedEndpointSet is the atomic published locator carried by invite,
-// proof, receipts, and routes.
-type PublishedEndpointSet struct {
-	Generation uint64
-	Data       DialEndpoint
-	Enrollment DialEndpoint
-}
+// proof, receipts, and routes. EnrollmentRequest does not carry it.
+type PublishedEndpointSet = locator.PublishedEndpointSet
 
 // HostIdentity is enrollment SPKI and the SSH host key. It is not a locator.
 type HostIdentity struct {
@@ -80,7 +75,7 @@ func (network Network) PublishedSet() PublishedEndpointSet {
 // SamePublishedLocators reports whether the canonical data and enrollment
 // dials are equal. It ignores published_endpoint_generation.
 func SamePublishedLocators(left, right PublishedEndpointSet) bool {
-	return sameDialEndpoint(left.Data, right.Data) && sameDialEndpoint(left.Enrollment, right.Enrollment)
+	return locator.SamePublishedLocators(left, right)
 }
 
 // DialFromBind publishes a bind address as an IP locator on the same port.
@@ -147,7 +142,7 @@ func nextPublishedEndpointGeneration(current uint64) (uint64, error) {
 }
 
 func sameDialEndpoint(left, right DialEndpoint) bool {
-	return left.Port == right.Port && left.Host.Equal(right.Host)
+	return left.Equal(right)
 }
 
 func bindLocatorKey(endpoint BindEndpoint) string {

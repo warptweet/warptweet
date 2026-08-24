@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"warptweet.com/warptweet/internal/locator"
 	"warptweet.com/warptweet/internal/strictjson"
 )
 
@@ -53,16 +54,15 @@ type Receipt struct {
 	AuthorizationDurationSeconds int64  `json:"authorization_duration_seconds"`
 	Generation                   string `json:"generation"`
 	ManagementToken              string `json:"management_token,omitempty"`
-	ServerAddress                string `json:"server_address"`
-	EnrollPort                   uint16 `json:"enroll_port,omitempty"`
-	PublicKey                    string `json:"public_key,omitempty"`
-	HostPublicKey                string `json:"host_public_key,omitempty"`
-	EnrollmentTLSSPKISHA256      string `json:"enrollment_tls_spki_sha256"`
-	Target                       string `json:"target,omitempty"`
-	ListenEndpoint               string `json:"listen_endpoint,omitempty"`
-	Principal                    string `json:"principal,omitempty"`
-	ProfileID                    string `json:"profile_id,omitempty"`
-	RevokedAt                    string `json:"revoked_at,omitempty"`
+	locator.PublishedEndpointSet
+	PublicKey               string `json:"public_key,omitempty"`
+	HostPublicKey           string `json:"host_public_key,omitempty"`
+	EnrollmentTLSSPKISHA256 string `json:"enrollment_tls_spki_sha256"`
+	Target                  string `json:"target,omitempty"`
+	ListenEndpoint          string `json:"listen_endpoint,omitempty"`
+	Principal               string `json:"principal,omitempty"`
+	ProfileID               string `json:"profile_id,omitempty"`
+	RevokedAt               string `json:"revoked_at,omitempty"`
 }
 
 // ListedRoute is one enumeration result. Invalid routes remain visible.
@@ -257,6 +257,9 @@ func ValidateReceipt(receipt Receipt) error {
 	}
 	if receipt.ClientID == "" || receipt.AuthorizationNotAfter == "" || receipt.AuthorizationDurationSeconds <= 0 || receipt.Generation == "" {
 		return fmt.Errorf("%w: receipt is missing required authorization fields", ErrInvalidRoute)
+	}
+	if _, err := receipt.PublishedEndpointSet.Canonical(); err != nil {
+		return fmt.Errorf("%w: receipt published endpoint set: %v", ErrInvalidRoute, err)
 	}
 	return nil
 }

@@ -128,6 +128,7 @@ func TestBuildClientManifestAndProof(t *testing.T) {
 		AcceptedAt:                   "2026-08-16T12:00:00Z",
 		AuthorizationNotAfter:        "2026-09-15T12:00:00Z",
 		AuthorizationDurationSeconds: 2592000,
+		PublishedEndpointSet:         publishedFromInvite(t, invite),
 	}
 	if err := ValidateEnrollmentProof(proof, invite, proof.PublicKey); err != nil {
 		t.Fatalf("ValidateEnrollmentProof: %v", err)

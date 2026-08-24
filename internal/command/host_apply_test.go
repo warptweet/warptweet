@@ -3,7 +3,6 @@ package command
 import (
 	"context"
 	"errors"
-	"net"
 	"net/netip"
 	"os"
 	"path/filepath"
@@ -275,7 +274,7 @@ func newTestHostApply(t *testing.T) (hostApplyEnv, hostApplyInput) {
 	certPath := filepath.Join(certDir, "tls.crt")
 	keyPath := filepath.Join(certDir, "tls.key")
 	now := time.Date(2026, 8, 24, 12, 0, 0, 0, time.UTC)
-	pin, _, _, err := enrollment.EnsureTLSIdentity(certPath, keyPath, []net.IP{net.ParseIP("10.168.0.2")}, now)
+	pin, _, _, err := enrollment.EnsureTLSIdentity(certPath, keyPath, now)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +293,7 @@ func newTestHostApply(t *testing.T) (hostApplyEnv, hostApplyInput) {
 		EnsureIdentity: func(context.Context) (string, bool, error) {
 			return "ssh-mldsa44-ed25519@openssh.com AAAA host", true, nil
 		},
-		EnsureTLS: func([]net.IP, time.Time) (string, bool, bool, error) {
+		EnsureTLS: func(time.Time) (string, bool, bool, error) {
 			return pin, false, false, nil
 		},
 		ApplyDataPlane:   func(bool, netip.AddrPort) (string, error) { return "direct_ready", nil },

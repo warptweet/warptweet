@@ -34,8 +34,10 @@ type AcceptInput struct {
 	ProfileID        string
 	TargetAddress    string
 	TargetPort       uint16
-	ServerAddress    string
-	Now              time.Time
+	// Published is the host-manifest published set copied onto the proof and
+	// client record. It is never taken from EnrollmentRequest.
+	Published locator.PublishedEndpointSet
+	Now       time.Time
 	// InstallAuthorization must make the exact public key authorization
 	// durable and is required for the production acceptance path. It must be
 	// idempotent because Accept may call it again after an interrupted reply.
@@ -73,6 +75,10 @@ func Accept(input AcceptInput) (AcceptResult, error) {
 	}
 	if input.TargetAddress == "" || input.TargetPort == 0 {
 		return AcceptResult{}, fmt.Errorf("%w: target is required", ErrInvalidInvite)
+	}
+	published, err := input.Published.Canonical()
+	if err != nil {
+		return AcceptResult{}, fmt.Errorf("%w: published endpoint set: %v", ErrInvalidInvite, err)
 	}
 
 	now := input.Now.UTC()
@@ -143,7 +149,6 @@ func Accept(input AcceptInput) (AcceptResult, error) {
 	if err != nil {
 		return AcceptResult{}, fmt.Errorf("%w: %v", ErrInvalidInvite, err)
 	}
-	serverAddress := firstNonEmpty(input.ServerAddress, record.Data.Host)
 	if input.ClientsDirectory != "" {
 		wantClient := ClientRecord{
 			ClientID:                     clientID,
@@ -157,7 +162,7 @@ func Accept(input AcceptInput) (AcceptResult, error) {
 			Principal:                    record.Principal,
 			ProfileID:                    record.ProfileID,
 			ArtifactProfileID:            record.ArtifactProfileID,
-			ServerAddress:                serverAddress,
+			PublishedEndpointSet:         published,
 			TargetAddress:                record.TargetAddress,
 			TargetPort:                   record.TargetPort,
 			Status:                       ClientStatusEnrollmentPending,
@@ -196,7 +201,6 @@ func Accept(input AcceptInput) (AcceptResult, error) {
 		return AcceptResult{}, err
 	}
 
-	enrollPort := consumed.EnrollmentPort()
 	proof := EnrollmentProof{
 		InviteID:                     consumed.InviteID,
 		ClientID:                     clientID,
@@ -209,8 +213,7 @@ func Accept(input AcceptInput) (AcceptResult, error) {
 		AcceptedAt:                   acceptedAt,
 		AuthorizationNotAfter:        notAfterEncoded,
 		AuthorizationDurationSeconds: authorizationSeconds,
-		ServerAddress:                serverAddress,
-		EnrollPort:                   enrollPort,
+		PublishedEndpointSet:         published,
 	}
 	return AcceptResult{
 		Proof:     proof,
@@ -232,7 +235,8 @@ func resumeAcceptedEnrollment(input AcceptInput, invite Record, clientID, public
 		client.InviteID != invite.InviteID ||
 		client.TunnelID != input.Request.TunnelID ||
 		client.PublicKey != publicKey ||
-		!constantTimeDigestEqual(client.ManagementTokenSHA256, HashManagementToken(input.Request.ManagementToken)) {
+		!constantTimeDigestEqual(client.ManagementTokenSHA256, HashManagementToken(input.Request.ManagementToken)) ||
+		!client.PublishedEndpointSet.Equal(input.Published) {
 		return AcceptResult{}, fmt.Errorf("%w: invite retry does not match accepted enrollment", ErrInvalidInvite)
 	}
 	if input.InstallAuthorization == nil {
@@ -264,7 +268,7 @@ func storeOrResumePendingClient(directory string, want ClientRecord) (ClientReco
 		!constantTimeDigestEqual(existing.ManagementTokenSHA256, want.ManagementTokenSHA256) ||
 		existing.Principal != want.Principal ||
 		existing.ProfileID != want.ProfileID ||
-		existing.ServerAddress != want.ServerAddress ||
+		!existing.PublishedEndpointSet.Equal(want.PublishedEndpointSet) ||
 		existing.AuthorizationDurationSeconds != want.AuthorizationDurationSeconds ||
 		existing.TargetAddress != want.TargetAddress ||
 		existing.TargetPort != want.TargetPort {
@@ -274,7 +278,10 @@ func storeOrResumePendingClient(directory string, want ClientRecord) (ClientReco
 }
 
 func acceptedResult(input AcceptInput, invite Record, client ClientRecord, publicKey string) AcceptResult {
-	enrollPort := invite.EnrollmentPort()
+	published := client.PublishedEndpointSet
+	if canonical, err := input.Published.Canonical(); err == nil {
+		published = canonical
+	}
 	proof := EnrollmentProof{
 		InviteID:                     invite.InviteID,
 		ClientID:                     client.ClientID,
@@ -287,19 +294,9 @@ func acceptedResult(input AcceptInput, invite Record, client ClientRecord, publi
 		AcceptedAt:                   client.AcceptedAt,
 		AuthorizationNotAfter:        client.AuthorizationNotAfter,
 		AuthorizationDurationSeconds: client.AuthorizationDurationSeconds,
-		ServerAddress:                firstNonEmpty(input.ServerAddress, invite.Data.Host),
-		EnrollPort:                   enrollPort,
+		PublishedEndpointSet:         published,
 	}
 	return AcceptResult{Proof: proof, PublicKey: publicKey, Invite: invite.Invite, ClientID: client.ClientID}
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
 }
 
 // EnrollmentURL builds the client enrollment URL for a server address.

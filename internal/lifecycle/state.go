@@ -42,6 +42,7 @@ type State struct {
 	TargetHealth   string `json:"target_health"`
 	UpdatedAt      string `json:"updated_at"`
 	Error          string `json:"error,omitempty"`
+	ErrorClass     string `json:"error_class,omitempty"`
 	Generation     string `json:"generation,omitempty"`
 }
 

@@ -526,22 +526,23 @@ func runDoctor(
 }
 
 type serverDoctorOutput struct {
-	Status                      string `json:"status"`
-	Role                        string `json:"role"`
-	Profile                     string `json:"profile"`
-	AuthenticationBindingStatus string `json:"authentication_binding_status"`
-	SupportStatus               string `json:"support_status"`
-	EngineVersion               string `json:"engine_version"`
-	OpenSSLVersion              string `json:"openssl_version"`
-	OpenSSLVersionText          string `json:"openssl_version_text"`
-	OpenSSLLinkage              string `json:"openssl_linkage"`
-	ExecutableFormat            string `json:"executable_format"`
-	StaticLibcryptoSHA256       string `json:"static_libcrypto_sha256"`
-	SSHDPath                    string `json:"sshd_path"`
-	SSHDBinarySHA256            string `json:"sshd_sha256"`
-	OpenSSHBundleManifestSHA256 string `json:"openssh_bundle_manifest_sha256"`
-	HostPublicKeySHA256         string `json:"host_public_key_sha256"`
-	AuthorizedKeyCount          int    `json:"authorized_key_count"`
+	Status                      string                `json:"status"`
+	Role                        string                `json:"role"`
+	Profile                     string                `json:"profile"`
+	AuthenticationBindingStatus string                `json:"authentication_binding_status"`
+	SupportStatus               string                `json:"support_status"`
+	EngineVersion               string                `json:"engine_version"`
+	OpenSSLVersion              string                `json:"openssl_version"`
+	OpenSSLVersionText          string                `json:"openssl_version_text"`
+	OpenSSLLinkage              string                `json:"openssl_linkage"`
+	ExecutableFormat            string                `json:"executable_format"`
+	StaticLibcryptoSHA256       string                `json:"static_libcrypto_sha256"`
+	SSHDPath                    string                `json:"sshd_path"`
+	SSHDBinarySHA256            string                `json:"sshd_sha256"`
+	OpenSSHBundleManifestSHA256 string                `json:"openssh_bundle_manifest_sha256"`
+	HostPublicKeySHA256         string                `json:"host_public_key_sha256"`
+	AuthorizedKeyCount          int                   `json:"authorized_key_count"`
+	Warnings                    []serverDoctorWarning `json:"warnings,omitempty"`
 }
 
 func runDoctorServer(ctx context.Context, arguments []string, stdout, stderr io.Writer) error {
@@ -571,6 +572,7 @@ func runDoctorServer(ctx context.Context, arguments []string, stdout, stderr io.
 		report,
 		selectedProfile.AuthenticationBindingStatus,
 		selectedProfile.SupportStatus,
+		publicationWarnings(manifest),
 	))
 }
 
@@ -578,6 +580,7 @@ func newServerDoctorOutput(
 	report engine.ServerPreflightReport,
 	authenticationBindingStatus profile.AuthenticationBindingStatus,
 	supportStatus profile.SupportStatus,
+	warnings []serverDoctorWarning,
 ) serverDoctorOutput {
 	return serverDoctorOutput{
 		Status:                      "preflight_ready",
@@ -596,6 +599,7 @@ func newServerDoctorOutput(
 		OpenSSHBundleManifestSHA256: report.OpenSSHBundleManifestSHA256,
 		HostPublicKeySHA256:         report.HostPublicKeySHA256,
 		AuthorizedKeyCount:          report.AuthorizedKeyCount,
+		Warnings:                    warnings,
 	}
 }
 
@@ -809,10 +813,16 @@ func runTunnel(
 		} else {
 			message = runErr.Error()
 		}
+		errorClass := ""
+		if message != "" {
+			errorClass = locator.ErrorClass(runErr)
+			logger.Error("WarpTweet tunnel failed", "error_class", errorClass, "err", runErr)
+		}
 		if stateErr := lifecycleStore.Write(lifecycle.State{
 			TunnelID: tunnelID.value, Phase: phase,
 			ListenEndpoint: fmt.Sprintf("%s:%d", spec.ListenAddress, spec.ListenPort),
 			TargetHealth:   lifecycle.TargetHealthNotChecked, Error: message,
+			ErrorClass: errorClass,
 		}); stateErr != nil {
 			runErr = errors.Join(runErr, fmt.Errorf("write managed lifecycle exit: %w", stateErr))
 		}

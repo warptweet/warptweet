@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"warptweet.com/warptweet/internal/grant"
+	"warptweet.com/warptweet/internal/locator"
 )
 
 const (
@@ -30,18 +31,18 @@ const (
 // ClientRecord is durable server-side enrollment state for one client. Raw
 // management capabilities are never stored here.
 type ClientRecord struct {
-	ClientID                      string `json:"client_id"`
-	GrantID                       string `json:"grant_id"`
-	TunnelID                      string `json:"tunnel_id"`
-	RouteID                       string `json:"route_id"`
-	InviteID                      string `json:"invite_id"`
-	PublicKey                     string `json:"public_key"`
-	PublicKeySHA256               string `json:"public_key_sha256"`
-	ManagementTokenSHA256         string `json:"management_token_sha256"`
-	Principal                     string `json:"principal"`
-	ProfileID                     string `json:"profile_id"`
-	ArtifactProfileID             string `json:"artifact_profile_id"`
-	ServerAddress                 string `json:"server_address"`
+	ClientID              string `json:"client_id"`
+	GrantID               string `json:"grant_id"`
+	TunnelID              string `json:"tunnel_id"`
+	RouteID               string `json:"route_id"`
+	InviteID              string `json:"invite_id"`
+	PublicKey             string `json:"public_key"`
+	PublicKeySHA256       string `json:"public_key_sha256"`
+	ManagementTokenSHA256 string `json:"management_token_sha256"`
+	Principal             string `json:"principal"`
+	ProfileID             string `json:"profile_id"`
+	ArtifactProfileID     string `json:"artifact_profile_id"`
+	locator.PublishedEndpointSet
 	TargetAddress                 string `json:"target_address"`
 	TargetPort                    uint16 `json:"target_port"`
 	Status                        string `json:"status"`
