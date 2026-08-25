@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 
 	"warptweet.com/warptweet/internal/releaseevidence"
 )
@@ -65,9 +64,6 @@ func run(root, checklistPath, inPath, outPath string, asIndex bool) error {
 func readInput(path string) ([]byte, error) {
 	if path == "-" {
 		return io.ReadAll(os.Stdin)
-	}
-	if filepath.IsAbs(path) || path == filepath.Clean(path) {
-		return os.ReadFile(path)
 	}
 	return os.ReadFile(path)
 }

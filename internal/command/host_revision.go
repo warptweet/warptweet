@@ -29,7 +29,9 @@ type hostRevision struct {
 }
 
 func (rev hostRevision) equal(other hostRevision) bool {
-	return rev.NetworkSHA256 == other.NetworkSHA256 && rev.CertLeafSHA256 == other.CertLeafSHA256
+	return rev.SchemaVersion == other.SchemaVersion &&
+		rev.NetworkSHA256 == other.NetworkSHA256 &&
+		rev.CertLeafSHA256 == other.CertLeafSHA256
 }
 
 func computeHostRevision(kind string, network server.Network, certPath string) (hostRevision, error) {
@@ -86,7 +88,7 @@ func writeHostRevision(path string, rev hostRevision) error {
 	return writeFileAtomicJSON(path, rev, 0o600)
 }
 
-func loadHostRevision(path string) (hostRevision, bool, error) {
+func loadHostRevision(path, kind string) (hostRevision, bool, error) {
 	contents, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -97,6 +99,9 @@ func loadHostRevision(path string) (hostRevision, bool, error) {
 	var rev hostRevision
 	if err := json.Unmarshal(contents, &rev); err != nil {
 		return hostRevision{}, false, err
+	}
+	if rev.Kind != kind || rev.SchemaVersion != hostRevisionVer {
+		return hostRevision{}, false, nil
 	}
 	return rev, true, nil
 }

@@ -102,7 +102,7 @@ Render reviewable OpenSSH policy:
   --config /absolute/private/path/server.wt
 ```
 
-`render-client` selects one declaration from the client manifest. The v1 declaration is valid only when its listener address is exactly `127.0.0.1`. Rendering and validation may inspect a candidate manifest anywhere; production `doctor` and `run` require the installed manifest at `/etc/warptweet/client.wt`.
+`render-client` selects one declaration from the client manifest. The listener address must be exactly `127.0.0.1`. Rendering and validation may inspect a candidate manifest anywhere; production `doctor` and `run` require the installed manifest at `/etc/warptweet/client.wt`.
 
 ## Trust inputs
 

@@ -6,9 +6,12 @@ import (
 	"encoding/binary"
 	"fmt"
 	"net/netip"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
+
+const netlinkRecvTimeout = 2 * time.Second
 
 // KernelRouteLookup performs one RTM_GETROUTE lookup on NETLINK_ROUTE.
 func KernelRouteLookup(family int, dst netip.Addr) (RouteReply, error) {
@@ -39,11 +42,14 @@ func KernelRouteLookup(family int, dst netip.Addr) (RouteReply, error) {
 	if err := unix.Sendto(fd, req, 0, &unix.SockaddrNetlink{Family: unix.AF_NETLINK}); err != nil {
 		return RouteReply{}, fmt.Errorf("inspect-network: netlink send: %w", err)
 	}
+	if err := setNetlinkRecvTimeout(fd, netlinkRecvTimeout); err != nil {
+		return RouteReply{}, err
+	}
 
 	buf := make([]byte, 64<<10)
-	n, _, err := unix.Recvfrom(fd, buf, 0)
+	n, err := recvNetlink(fd, buf)
 	if err != nil {
-		return RouteReply{}, fmt.Errorf("inspect-network: netlink recv: %w", err)
+		return RouteReply{}, err
 	}
 	if n <= 0 {
 		return RouteReply{Evidence: "empty netlink datagram"}, nil
@@ -60,4 +66,23 @@ func KernelRouteLookup(family int, dst netip.Addr) (RouteReply, error) {
 		return RouteReply{}, err
 	}
 	return reply, nil
+}
+
+func setNetlinkRecvTimeout(fd int, timeout time.Duration) error {
+	tv := unix.NsecToTimeval(timeout.Nanoseconds())
+	if err := unix.SetsockoptTimeval(fd, unix.SOL_SOCKET, unix.SO_RCVTIMEO, &tv); err != nil {
+		return fmt.Errorf("inspect-network: netlink SO_RCVTIMEO: %w", err)
+	}
+	return nil
+}
+
+func recvNetlink(fd int, buf []byte) (int, error) {
+	n, _, err := unix.Recvfrom(fd, buf, 0)
+	if err != nil {
+		if err == unix.EAGAIN || err == unix.EWOULDBLOCK {
+			return 0, fmt.Errorf("inspect-network: netlink recv timed out; pass --listen")
+		}
+		return 0, fmt.Errorf("inspect-network: netlink recv: %w", err)
+	}
+	return n, nil
 }

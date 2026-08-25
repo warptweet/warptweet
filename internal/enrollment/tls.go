@@ -145,9 +145,9 @@ func PinnedClientTLSConfig(expectedSPKI string, now func() time.Time) (*tls.Conf
 		VerifyConnection: func(state tls.ConnectionState) error {
 			tlsErr := func(message string, err error) error {
 				if err == nil {
-					err = errors.New(message)
+					return locator.Classified(locator.ClassTLSNegotiate, "tls_negotiate", errors.New(message))
 				}
-				return locator.Classified(locator.ClassTLSNegotiate, "tls_negotiate", err)
+				return locator.Classified(locator.ClassTLSNegotiate, "tls_negotiate", fmt.Errorf("%s: %w", message, err))
 			}
 			if state.Version != tls.VersionTLS13 {
 				return tlsErr("enrollment TLS did not negotiate TLS 1.3", nil)

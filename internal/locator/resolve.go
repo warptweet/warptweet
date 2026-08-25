@@ -83,10 +83,6 @@ func (err *ClassifiedError) Unwrap() error {
 	return err.Err
 }
 
-func classified(class, message string, err error) error {
-	return Classified(class, message, err)
-}
-
 // Classified returns a stable client error class wrapping err.
 func Classified(class, message string, err error) error {
 	return &ClassifiedError{Class: class, Message: message, Err: err}
@@ -100,12 +96,12 @@ func Resolve(ctx context.Context, host DialHost, options ResolveOptions) (Resolv
 	}
 	canonical, err := host.Canonical()
 	if err != nil {
-		return ResolvedDialPlan{}, classified(ClassDNSResolution, "dial host", err)
+		return ResolvedDialPlan{}, Classified(ClassDNSResolution, "dial host", err)
 	}
 	if host.IP.IsValid() {
 		addr := canonicalAddr(host.IP)
 		if err := validateAnswer(addr, options.AllowLoopback); err != nil {
-			return ResolvedDialPlan{}, classified(ClassDNSResolution, "dial host", err)
+			return ResolvedDialPlan{}, Classified(ClassDNSResolution, "dial host", err)
 		}
 		return ResolvedDialPlan{Host: host, Candidates: []netip.Addr{addr}}, nil
 	}
@@ -118,11 +114,11 @@ func Resolve(ctx context.Context, host DialHost, options ResolveOptions) (Resolv
 	defer cancel()
 	raw, err := lookup(lookupCtx, canonical+".")
 	if err != nil {
-		return ResolvedDialPlan{}, classified(ClassDNSResolution, "dns_resolution", err)
+		return ResolvedDialPlan{}, Classified(ClassDNSResolution, "dns_resolution", err)
 	}
 	candidates := FilterAnswers(raw, options.AllowLoopback)
 	if len(candidates) == 0 {
-		return ResolvedDialPlan{}, classified(ClassDNSResolution, "dns_resolution", errors.New("no usable addresses"))
+		return ResolvedDialPlan{}, Classified(ClassDNSResolution, "dns_resolution", errors.New("no usable addresses"))
 	}
 	return ResolvedDialPlan{Host: DialHost{Name: canonical}, Candidates: candidates}, nil
 }
@@ -185,10 +181,10 @@ func Select(ctx context.Context, plan ResolvedDialPlan, port uint16, options Res
 		ctx = context.Background()
 	}
 	if port == 0 {
-		return netip.Addr{}, classified(ClassTCPConnect, "tcp_connect", errors.New("port must be nonzero"))
+		return netip.Addr{}, Classified(ClassTCPConnect, "tcp_connect", errors.New("port must be nonzero"))
 	}
 	if len(plan.Candidates) == 0 {
-		return netip.Addr{}, classified(ClassTCPConnect, "tcp_connect", errors.New("no candidates"))
+		return netip.Addr{}, Classified(ClassTCPConnect, "tcp_connect", errors.New("no candidates"))
 	}
 	dial := options.Dial
 	if dial == nil {
@@ -197,6 +193,9 @@ func Select(ctx context.Context, plan ResolvedDialPlan, port uint16, options Res
 	deadline := time.Now().Add(connectAggregateLimit)
 	var last error
 	for _, candidate := range plan.Candidates {
+		if err := ctx.Err(); err != nil {
+			return netip.Addr{}, Classified(ClassTCPConnect, "tcp_connect", err)
+		}
 		remaining := time.Until(deadline)
 		if remaining <= 0 {
 			break
@@ -212,11 +211,14 @@ func Select(ctx context.Context, plan ResolvedDialPlan, port uint16, options Res
 			return candidate, nil
 		}
 		last = err
+		if err := ctx.Err(); err != nil {
+			return netip.Addr{}, Classified(ClassTCPConnect, "tcp_connect", err)
+		}
 	}
 	if last == nil {
 		last = errors.New("connect aggregate timeout")
 	}
-	return netip.Addr{}, classified(ClassTCPConnect, "tcp_connect", last)
+	return netip.Addr{}, Classified(ClassTCPConnect, "tcp_connect", last)
 }
 
 func validateAnswer(addr netip.Addr, allowLoopback bool) error {

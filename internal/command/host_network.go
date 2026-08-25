@@ -43,11 +43,12 @@ func resolveHostPublication(
 	if err != nil {
 		return hostPublication{}, err
 	}
-	enrollListen, err := resolveEnrollListenFlag(flags.EnrollListen, dataListen)
+	dataChanged := flags.Listen.set || flags.ListenInterface.set || flags.Advertise.set
+	enrollListen, err := resolveEnrollListenFlag(flags.EnrollListen, dataListen, stored, dataChanged)
 	if err != nil {
 		return hostPublication{}, err
 	}
-	enrollDial, err := resolveEnrollDial(flags.EnrollAdvertise, dataDial)
+	enrollDial, err := resolveEnrollDial(flags.EnrollAdvertise, dataDial, stored, dataChanged)
 	if err != nil {
 		return hostPublication{}, err
 	}
@@ -100,27 +101,32 @@ func resolveDataDial(advertise onceStringFlag, dataListen server.BindEndpoint, s
 	return parsed, nil
 }
 
-func resolveEnrollListenFlag(flag onceStringFlag, dataListen server.BindEndpoint) (server.BindEndpoint, error) {
-	if !flag.set || flag.value == "" {
-		return server.BindEndpoint{Address: dataListen.Address, Port: enrollment.DefaultEnrollmentPort}, nil
+func resolveEnrollListenFlag(flag onceStringFlag, dataListen server.BindEndpoint, stored *server.Config, dataChanged bool) (server.BindEndpoint, error) {
+	if flag.set && flag.value != "" {
+		endpoint, err := parseEndpoint(flag.value)
+		if err != nil {
+			return server.BindEndpoint{}, fmt.Errorf("enroll-listen: %w", err)
+		}
+		return server.BindEndpoint{Address: endpoint.Addr(), Port: endpoint.Port()}, nil
 	}
-	endpoint, err := parseEndpoint(flag.value)
-	if err != nil {
-		return server.BindEndpoint{}, fmt.Errorf("enroll-listen: %w", err)
+	if stored != nil && !dataChanged && !flag.set {
+		return stored.Network.Enrollment.Listen, nil
 	}
-	return server.BindEndpoint{Address: endpoint.Addr(), Port: endpoint.Port()}, nil
+	return server.BindEndpoint{Address: dataListen.Address, Port: enrollment.DefaultEnrollmentPort}, nil
 }
 
-func resolveEnrollDial(flag onceStringFlag, dataDial server.DialEndpoint) (server.DialEndpoint, error) {
-	if !flag.set || flag.value == "" {
-		host := dataDial.Host
-		return server.DialEndpoint{Host: host, Port: enrollment.DefaultEnrollmentPort}, nil
+func resolveEnrollDial(flag onceStringFlag, dataDial server.DialEndpoint, stored *server.Config, dataChanged bool) (server.DialEndpoint, error) {
+	if flag.set && flag.value != "" {
+		parsed, err := parsePublishedEndpoint(flag.value)
+		if err != nil {
+			return server.DialEndpoint{}, fmt.Errorf("enroll-advertise: %w", err)
+		}
+		return parsed, nil
 	}
-	parsed, err := parsePublishedEndpoint(flag.value)
-	if err != nil {
-		return server.DialEndpoint{}, fmt.Errorf("enroll-advertise: %w", err)
+	if stored != nil && !dataChanged && !flag.set {
+		return stored.Network.Enrollment.Dial, nil
 	}
-	return parsed, nil
+	return server.DialEndpoint{Host: dataDial.Host, Port: enrollment.DefaultEnrollmentPort}, nil
 }
 
 func parsePublishedEndpoint(value string) (server.DialEndpoint, error) {

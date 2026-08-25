@@ -23,7 +23,7 @@ website must say `Homebrew package in release qualification`.
 3. SBOM and provenance attestations
 4. Linux package repository metadata
 5. Homebrew tap and reviewed cask
-6. Canonical v1 schemas and release notes
+6. Canonical public schemas (client-tunnels v2, server-gateway v2, invite v3, evidence v3), Profile v1 crypto contract, and release notes
 7. Website install experience (CTA on only after evidence)
 
 ## Gate document

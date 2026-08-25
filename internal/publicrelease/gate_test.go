@@ -112,6 +112,36 @@ func TestEnabledCTARequiresCompleteV3Index(t *testing.T) {
 	}
 }
 
+func TestEnabledCTAReportsIncompleteCell(t *testing.T) {
+	t.Parallel()
+
+	root := repositoryRoot(t)
+	checklist, err := releaseevidence.LoadChecklistV3(releaseevidence.DefaultChecklistV3Path(root))
+	if err != nil {
+		t.Fatalf("LoadChecklistV3: %v", err)
+	}
+	reports := completeV3IndexReports(checklist)
+	reports[0].Results[0].Status = "not_run"
+	pseudoRoot, evidenceRel := writeV3IndexTree(t, root, reports)
+	enabled := Gate{
+		Kind:                     Kind,
+		SchemaVersion:            SchemaVersion,
+		HomebrewCTAEnabled:       true,
+		HomebrewCommand:          DefaultHomebrewCommand,
+		NextCommand:              DefaultNextCommand,
+		QualificationMessage:     QualificationMessage,
+		RequiredEvidenceDocument: evidenceRel,
+		Links:                    map[string]string{"evidence_checklist": "packaging/evidence/checklist-v3.json"},
+	}
+	err = ValidateEnabledCTA(pseudoRoot, enabled)
+	if err == nil {
+		t.Fatal("enabled CTA accepted incomplete index")
+	}
+	if !strings.Contains(err.Error(), reports[0].ClientArtifactProfileID) {
+		t.Fatalf("incomplete error omitted cell: %v", err)
+	}
+}
+
 func TestEnabledCTARejectsV1Evidence(t *testing.T) {
 	t.Parallel()
 

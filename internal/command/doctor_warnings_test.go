@@ -40,7 +40,10 @@ func TestPublicationWarningsJSONOnlyAndExcludeLoopback(t *testing.T) {
 		}
 	}
 	if !codes["private_dial_equals_bind"] || !codes["cannot_create_inbound"] {
-		t.Fatalf("missing expected warnings: %+v", warnings)
+		t.Fatalf("missing expected data warnings: %+v", warnings)
+	}
+	if !codes["private_enrollment_dial_equals_bind"] || !codes["cannot_create_enrollment_inbound"] {
+		t.Fatalf("missing expected enrollment warnings: %+v", warnings)
 	}
 	inbound := warningByCode(warnings, "cannot_create_inbound")
 	if inbound == nil || !strings.Contains(inbound.Message, "outbound-only NAT is unsupported") {

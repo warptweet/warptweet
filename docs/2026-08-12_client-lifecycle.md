@@ -25,8 +25,8 @@ warptweet uninstall --preserve-identity
 5. Generate a 256-bit management capability locally and emit an enrollment
    request containing the public key, capability, and invite binding.
 6. Submit the request to the host enrollment endpoint
-   (`https://<server>:<enroll_port>/v1/enroll` from the invite’s `enroll_port`,
-   default **29722** when unset, via `warptweet server enroll-listen`), using
+   (`https://<enrollment.host>:<enrollment.port>/v1/enroll` from the invite’s
+   schema 3 `enrollment` locator, via `warptweet server enroll-listen`), using
    TLS 1.3, hybrid `X25519MLKEM768`, and the exact Ed25519 SPKI pin carried in
    the invite; or
    accept an offline proof with `--proof`. The proof binds invite id, nonce, host

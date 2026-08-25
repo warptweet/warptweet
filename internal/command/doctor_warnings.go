@@ -15,32 +15,54 @@ var cgnatPrefix = netip.MustParsePrefix("100.64.0.0/10")
 
 func publicationWarnings(manifest server.Config) []serverDoctorWarning {
 	var warnings []serverDoctorWarning
-	dataBind := canonicalDoctorAddr(manifest.Network.Data.Listen.Address)
-	dataDial := manifest.Network.Data.Dial
+	warnings = append(warnings, servicePublicationWarnings(
+		"data",
+		"private_dial_equals_bind",
+		"nonglobal_bind_raw_ip_dial",
+		"cannot_create_inbound",
+		manifest.Network.Data,
+	)...)
+	warnings = append(warnings, servicePublicationWarnings(
+		"enrollment",
+		"private_enrollment_dial_equals_bind",
+		"nonglobal_enrollment_bind_raw_ip_dial",
+		"cannot_create_enrollment_inbound",
+		manifest.Network.Enrollment,
+	)...)
+	return warnings
+}
+
+func servicePublicationWarnings(
+	label, privateCode, nonglobalCode, inboundCode string,
+	endpoints server.ServiceEndpoints,
+) []serverDoctorWarning {
+	var warnings []serverDoctorWarning
+	bind := canonicalDoctorAddr(endpoints.Listen.Address)
+	dial := endpoints.Dial
 	privateIPDial := false
-	if dataDial.Host.IP.IsValid() {
-		dialAddr := canonicalDoctorAddr(dataDial.Host.IP)
+	if dial.Host.IP.IsValid() {
+		dialAddr := canonicalDoctorAddr(dial.Host.IP)
 		privateIPDial = isPrivateOrCGNAT(dialAddr)
-		if privateIPDial && dialAddr == dataBind && !dataBind.IsLoopback() {
+		if privateIPDial && dialAddr == bind && !bind.IsLoopback() {
 			warnings = append(warnings, serverDoctorWarning{
-				Code:    "private_dial_equals_bind",
-				Message: "published data dial equals a private bind; this is a VPC-only locator, not a public published endpoint",
+				Code:    privateCode,
+				Message: "published " + label + " dial equals a private bind; this is a VPC-only locator, not a public published endpoint",
 			})
 		}
-		if !isPubliclyRoutable(dataBind) && !dataBind.IsLoopback() {
+		if !isPubliclyRoutable(bind) && !bind.IsLoopback() {
 			warnings = append(warnings, serverDoctorWarning{
-				Code:    "nonglobal_bind_raw_ip_dial",
-				Message: "data bind is not globally routable and data dial is a raw IP; clients must be able to reach that locator",
+				Code:    nonglobalCode,
+				Message: label + " bind is not globally routable and " + label + " dial is a raw IP; clients must be able to reach that locator",
 			})
 		}
 	}
-	if !isPubliclyRoutable(dataBind) && !dataBind.IsLoopback() {
+	if !isPubliclyRoutable(bind) && !bind.IsLoopback() {
 		message := "WarpTweet cannot create inbound mappings"
 		if privateIPDial {
 			message += "; outbound-only NAT is unsupported"
 		}
 		warnings = append(warnings, serverDoctorWarning{
-			Code:    "cannot_create_inbound",
+			Code:    inboundCode,
 			Message: message,
 		})
 	}

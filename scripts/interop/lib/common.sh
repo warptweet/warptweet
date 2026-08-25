@@ -117,10 +117,7 @@ else:
 interop_hostport_port() {
     python3 -c 'import sys
 v=sys.argv[1]
-if v.startswith("["):
-    print(v.rsplit(":",1)[-1])
-else:
-    print(v.rsplit(":",1)[-1])
+print(v.rsplit(":",1)[-1])
 ' "$1"
 }
 
@@ -137,6 +134,10 @@ interop_published_data_dial() {
 interop_published_enroll_dial() {
     if [ -n "${WARPTWEET_INTEROP_ENROLL_ADVERTISE:-}" ]; then
         printf '%s' "$WARPTWEET_INTEROP_ENROLL_ADVERTISE"
+        return 0
+    fi
+    if [ -n "${WARPTWEET_INTEROP_ENROLL_LISTEN:-}" ]; then
+        printf '%s' "$WARPTWEET_INTEROP_ENROLL_LISTEN"
         return 0
     fi
     _data=$(interop_published_data_dial)

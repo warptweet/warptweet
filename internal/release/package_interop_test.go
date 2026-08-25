@@ -246,7 +246,11 @@ func TestPublicationDNATClassifierIgnoresDockerPostgres(t *testing.T) {
 
 	root := repositoryRoot(t)
 	path := filepath.Join(root, "scripts", "interop", "lib", "publication_dnat.py")
-	cmd := exec.Command("python3", path, "--self-test")
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 is not available")
+	}
+	cmd := exec.Command(python, path, "--self-test")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("publication_dnat --self-test: %v\n%s", err, out)

@@ -115,8 +115,6 @@ def parse_iptables_rule(line):
 def parse_nft_rule(line):
     if not re.search(r"\b(dnat|redirect)\b", line, re.I):
         return None
-    if re.search(r"\b(snat|masquerade)\b", line, re.I) and not re.search(r"\b(dnat|redirect)\b", line, re.I):
-        return None
     dports = _ints(re.findall(r"\bdport\s+(\d+)", line))
     daddrs = _hosts(re.findall(r"\bdaddr\s+(\S+)", line))
     to_ports = set()

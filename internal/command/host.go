@@ -186,17 +186,23 @@ func runHost(ctx context.Context, arguments []string, stdout, stderr io.Writer) 
 		return err
 	}
 
-	dataDial, _ := applied.Publication.DataDial.Host.Canonical()
-	enrollDial, _ := applied.Publication.EnrollDial.Host.Canonical()
+	dataDial, err := joinPublishedDial(applied.Publication.DataDial)
+	if err != nil {
+		return fmt.Errorf("data dial: %w", err)
+	}
+	enrollDial, err := joinPublishedDial(applied.Publication.EnrollDial)
+	if err != nil {
+		return fmt.Errorf("enrollment dial: %w", err)
+	}
 	result := map[string]any{
 		"local_listener_ready":             true,
 		"published_endpoint_configured":    true,
 		"external_reachability_unverified": true,
 		"target":                           targetEndpoint.String(),
 		"listen":                           applied.Publication.DataListen.AddrPort().String(),
-		"data_dial":                        fmt.Sprintf("%s:%d", dataDial, applied.Publication.DataDial.Port),
+		"data_dial":                        dataDial,
 		"enrollment_listen":                applied.Publication.EnrollListen.AddrPort().String(),
-		"enrollment_dial":                  fmt.Sprintf("%s:%d", enrollDial, applied.Publication.EnrollDial.Port),
+		"enrollment_dial":                  enrollDial,
 		"published_endpoint_generation":    applied.Manifest.Network.PublishedEndpointGeneration,
 		"host_key_path":                    installlayout.ServerHostKeyPath,
 		"manifest_path":                    installlayout.ServerManifestPath,
@@ -328,7 +334,9 @@ func ensureEnrollListenStarted(endpoint netip.AddrPort, enrollmentPin string, re
 		return false, nil
 	}
 	if restart {
-		_ = stopEnrollListen(pidPath)
+		if err := stopEnrollListen(pidPath, endpoint); err != nil {
+			return false, err
+		}
 	}
 
 	// Prefer the packaged unit when present so confinement matches production.
@@ -386,23 +394,8 @@ func ensureEnrollListenStarted(endpoint netip.AddrPort, enrollmentPin string, re
 	return false, errors.New("enroll-listen remained alive but its pinned TLS endpoint did not become ready")
 }
 
-func stopEnrollListen(pidPath string) error {
-	if _, err := exec.LookPath("systemctl"); err == nil {
-		cmd := exec.Command("systemctl", "stop", "warptweet-enroll.service")
-		cmd.Env = []string{"LANG=C", "LC_ALL=C"}
-		_ = cmd.Run()
-	}
-	pid, err := readPIDFile(pidPath)
-	if err != nil {
-		return nil
-	}
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return nil
-	}
-	_ = proc.Signal(syscall.SIGTERM)
-	_ = os.Remove(pidPath)
-	return nil
+func stopEnrollListen(pidPath string, endpoint netip.AddrPort) error {
+	return stopOwnedListener(pidPath, endpoint, "warptweet-enroll.service")
 }
 
 func tryStartEnrollUnit(endpoint netip.AddrPort, enrollmentPin string, restart bool) (bool, error) {
@@ -833,7 +826,7 @@ func ensureDirectDataPlane(ctx context.Context, stateDir string, endpoint netip.
 		if !restart {
 			return "direct_ready", nil
 		}
-		if err := stopDirectDataPlane(pidPath); err != nil {
+		if err := stopDirectDataPlane(pidPath, endpoint); err != nil {
 			return "", err
 		}
 	} else if probeTCPListener(endpoint) {
@@ -879,9 +872,21 @@ func ensureDirectDataPlane(ctx context.Context, stateDir string, endpoint netip.
 	return "", errors.New("data plane did not begin listening before the readiness deadline")
 }
 
-func stopDirectDataPlane(pidPath string) error {
+func stopDirectDataPlane(pidPath string, endpoint netip.AddrPort) error {
+	return stopOwnedListener(pidPath, endpoint, "")
+}
+
+func stopOwnedListener(pidPath string, endpoint netip.AddrPort, systemdUnit string) error {
+	if systemdUnit != "" {
+		if _, err := exec.LookPath("systemctl"); err == nil {
+			cmd := exec.Command("systemctl", "stop", systemdUnit)
+			cmd.Env = []string{"LANG=C", "LC_ALL=C"}
+			_ = cmd.Run()
+		}
+	}
 	pid, err := readPIDFile(pidPath)
 	if err != nil {
+		_ = os.Remove(pidPath)
 		return nil
 	}
 	proc, err := os.FindProcess(pid)
@@ -890,8 +895,37 @@ func stopDirectDataPlane(pidPath string) error {
 		return nil
 	}
 	_ = proc.Signal(syscall.SIGTERM)
+	if err := waitListenerReleased(endpoint, 3*time.Second); err != nil {
+		_ = proc.Signal(syscall.SIGKILL)
+		if err := waitListenerReleased(endpoint, time.Second); err != nil {
+			_ = os.Remove(pidPath)
+			return err
+		}
+	}
 	_ = os.Remove(pidPath)
 	return nil
+}
+
+func waitListenerReleased(endpoint netip.AddrPort, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if !probeTCPListener(endpoint) {
+			return nil
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if probeTCPListener(endpoint) {
+		return fmt.Errorf("listener %s still occupied after stop", endpoint)
+	}
+	return nil
+}
+
+func joinPublishedDial(endpoint server.DialEndpoint) (string, error) {
+	host, err := endpoint.Host.Canonical()
+	if err != nil {
+		return "", err
+	}
+	return net.JoinHostPort(host, strconv.Itoa(int(endpoint.Port))), nil
 }
 
 func probeTCPListener(endpoint netip.AddrPort) bool {

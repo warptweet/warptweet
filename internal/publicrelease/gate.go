@@ -126,8 +126,8 @@ func ValidateEnabledCTA(repositoryRoot string, gate Gate) error {
 			return fmt.Errorf("evidence artifacts in report %d: %w", i, err)
 		}
 	}
-	if !releaseevidence.CompleteIndexV3(checklist, index.Reports) {
-		return fmt.Errorf("required evidence index is incomplete")
+	if err := releaseevidence.IndexCompletenessError(checklist, index.Reports); err != nil {
+		return fmt.Errorf("required evidence index is incomplete: %w", err)
 	}
 	return nil
 }

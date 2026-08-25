@@ -200,7 +200,7 @@ func applyHostConfiguration(ctx context.Context, env hostApplyEnv, input hostApp
 			return hostApplyResult{}, err
 		}
 	}
-	manifest, err := writeHostManifestNetwork(env, input.Target, network)
+	manifest, err := writeHostManifestNetwork(env, stored, input.Target, network)
 	if err != nil {
 		return hostApplyResult{}, err
 	}
@@ -215,7 +215,7 @@ func applyHostConfiguration(ctx context.Context, env hostApplyEnv, input hostApp
 		return hostApplyResult{}, err
 	}
 
-	applied, appliedOK, err := loadHostRevision(appliedReceiptPath(env.StateDir))
+	applied, appliedOK, err := loadHostRevision(appliedReceiptPath(env.StateDir), hostAppliedKind)
 	if err != nil {
 		return hostApplyResult{}, err
 	}
@@ -343,12 +343,11 @@ func loadManifestAt(path string) (*server.Config, error) {
 	return &manifest, nil
 }
 
-func writeHostManifestNetwork(env hostApplyEnv, targetEndpoint netip.AddrPort, network server.Network) (server.Config, error) {
+func writeHostManifestNetwork(env hostApplyEnv, stored *server.Config, targetEndpoint netip.AddrPort, network server.Network) (server.Config, error) {
 	sshdDigest, err := fileSHA256(installlayout.SSHDPath)
 	if err != nil {
-		if existing, loadErr := loadManifestAt(env.ManifestPath); loadErr == nil && existing != nil &&
-			existing.SSHDBinarySHA256 != "" && existing.SSHDBinarySHA256 != stringsRepeatZero() {
-			sshdDigest = existing.SSHDBinarySHA256
+		if stored != nil && stored.SSHDBinarySHA256 != "" && stored.SSHDBinarySHA256 != stringsRepeatZero() {
+			sshdDigest = stored.SSHDBinarySHA256
 		} else if env.AllowTestDigests {
 			sshdDigest = sha256OfString(env.ManifestPath + ":sshd")
 		} else {
@@ -357,9 +356,8 @@ func writeHostManifestNetwork(env hostApplyEnv, targetEndpoint netip.AddrPort, n
 	}
 	bundleDigest, err := fileSHA256(installlayout.OpenSSHBundleManifestPath)
 	if err != nil {
-		if existing, loadErr := loadManifestAt(env.ManifestPath); loadErr == nil && existing != nil &&
-			existing.OpenSSHBundleManifestSHA256 != "" && existing.OpenSSHBundleManifestSHA256 != stringsRepeatZero() {
-			bundleDigest = existing.OpenSSHBundleManifestSHA256
+		if stored != nil && stored.OpenSSHBundleManifestSHA256 != "" && stored.OpenSSHBundleManifestSHA256 != stringsRepeatZero() {
+			bundleDigest = stored.OpenSSHBundleManifestSHA256
 		} else if env.AllowTestDigests {
 			bundleDigest = sha256OfString(env.ManifestPath + ":bundle")
 		} else {
@@ -381,7 +379,7 @@ func writeHostManifestNetwork(env hostApplyEnv, targetEndpoint netip.AddrPort, n
 		HostKeyPath:        installlayout.ServerHostKeyPath,
 		AuthorizedKeysPath: installlayout.AuthorizedKeysDirectory + "/" + server.DefaultDedicatedUser,
 	}
-	if stored, loadErr := loadManifestAt(env.ManifestPath); loadErr == nil && stored != nil {
+	if stored != nil {
 		if stored.ProfileID != "" {
 			manifest.ProfileID = stored.ProfileID
 		}

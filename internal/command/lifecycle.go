@@ -230,6 +230,13 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		})
 	}
 
+	verifiedSet, err := invite.PublishedSet()
+	if err != nil {
+		return err
+	}
+	if !proof.PublishedEndpointSet.Equal(verifiedSet) {
+		return fmt.Errorf("%w: enrollment proof published set does not match invite", enrollment.ErrInvalidInvite)
+	}
 	if err := persistActivatedGeneration(
 		view.TunnelID,
 		generationID,
@@ -239,14 +246,6 @@ func runEnroll(ctx context.Context, arguments []string, stdout, stderr io.Writer
 		emptyTrust,
 	); err != nil {
 		return err
-	}
-
-	verifiedSet, err := invite.PublishedSet()
-	if err != nil {
-		return err
-	}
-	if !proof.PublishedEndpointSet.Equal(verifiedSet) {
-		return fmt.Errorf("%w: enrollment proof published set does not match invite", enrollment.ErrInvalidInvite)
 	}
 	receipt := enrollmentReceipt{
 		InviteID:                     invite.InviteID,
@@ -1382,10 +1381,10 @@ func routeStatusPayload(routeID string, state lifecycle.State) map[string]any {
 		payload["authorization_not_after"] = receipt.AuthorizationNotAfter
 		payload["authorization_duration_seconds"] = receipt.AuthorizationDurationSeconds
 		if dataHost, err := receipt.Data.Host.Canonical(); err == nil {
-			payload["data_dial"] = fmt.Sprintf("%s:%d", dataHost, receipt.Data.Port)
+			payload["data_dial"] = net.JoinHostPort(dataHost, strconv.Itoa(int(receipt.Data.Port)))
 		}
 		if enrollHost, err := receipt.Enrollment.Host.Canonical(); err == nil {
-			payload["enrollment_dial"] = fmt.Sprintf("%s:%d", enrollHost, receipt.Enrollment.Port)
+			payload["enrollment_dial"] = net.JoinHostPort(enrollHost, strconv.Itoa(int(receipt.Enrollment.Port)))
 		}
 		payload["published_endpoint_generation"] = receipt.PublishedEndpointSet.Generation
 		payload["target_endpoint"] = receipt.Target

@@ -182,6 +182,17 @@ func TestResolveListenFallsBackToLoopbackWhenDiscoveryIsEmpty(t *testing.T) {
 	}
 }
 
+func TestResolveListenPropagatesDiscoveryError(t *testing.T) {
+	t.Parallel()
+
+	want := errors.New("inspect-network: no route")
+	if _, err := resolveListen("", nil, func() (netip.Addr, error) {
+		return netip.Addr{}, want
+	}); !errors.Is(err, want) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestPublicationChangeBlockedByLiveInventory(t *testing.T) {
 	t.Parallel()
 

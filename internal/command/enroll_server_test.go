@@ -104,7 +104,9 @@ func TestEnrollmentAcceptDoesNotConsumeWhenHostLockHeld(t *testing.T) {
 	dir := t.TempDir()
 	held := make(chan struct{})
 	release := make(chan struct{})
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		_ = enrollment.WithExclusiveLock(dir, hostStateLockName, func() error {
 			close(held)
 			<-release
@@ -112,6 +114,10 @@ func TestEnrollmentAcceptDoesNotConsumeWhenHostLockHeld(t *testing.T) {
 		})
 	}()
 	<-held
+	defer func() {
+		close(release)
+		<-done
+	}()
 	consumed := false
 	request := httptest.NewRequest(http.MethodPost, "/v1/enroll", strings.NewReader(`{}`))
 	recorder := httptest.NewRecorder()
@@ -125,7 +131,6 @@ func TestEnrollmentAcceptDoesNotConsumeWhenHostLockHeld(t *testing.T) {
 		}
 		return nil, err
 	}, nil)
-	close(release)
 	if recorder.Code != http.StatusServiceUnavailable {
 		t.Fatalf("code=%d body=%s", recorder.Code, recorder.Body.String())
 	}

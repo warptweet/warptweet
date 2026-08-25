@@ -386,7 +386,7 @@ transaction with one stated authority.
 ### LEASE-001 Invite binding
 
 The invite schema MUST be versioned to bind the authorization duration granted
-by the host. The recommended v2 field is an integer
+by the host. Invite schema 3 carries integer
 `authorization_duration_seconds`.
 
 The duration MUST be bound on the invite and enrollment proof. Invites are

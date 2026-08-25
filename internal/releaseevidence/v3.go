@@ -381,7 +381,15 @@ func writeJSONAtomically(path string, document any) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, path)
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	dirFile, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer dirFile.Close()
+	return dirFile.Sync()
 }
 
 // ValidateReportV3 checks one v3 evidence report against the v3 checklist.
@@ -444,6 +452,9 @@ func ValidateReportV3(checklist ChecklistV3, report ReportV3) error {
 	}
 	if report.RouteCount < 0 {
 		return fmt.Errorf("route_count must be non-negative")
+	}
+	if len(report.RestartPolicies) == 0 {
+		return fmt.Errorf("restart_policies must be non-empty")
 	}
 	seenPolicies := map[string]struct{}{}
 	for _, policy := range report.RestartPolicies {
@@ -1041,23 +1052,28 @@ func ValidateIndexV3(checklist ChecklistV3, reports []ReportV3) error {
 	return nil
 }
 
-// CompleteIndexV3 reports whether every required matrix and networking cell passed.
-func CompleteIndexV3(checklist ChecklistV3, reports []ReportV3) bool {
+// IndexCompletenessError returns nil when every required matrix and networking cell passed.
+func IndexCompletenessError(checklist ChecklistV3, reports []ReportV3) error {
 	if len(reports) == 0 {
-		return false
+		return fmt.Errorf("index has no reports")
 	}
 	if err := ValidateIndexV3(checklist, reports); err != nil {
-		return false
+		return err
 	}
-	for _, report := range reports {
+	for i, report := range reports {
 		if reportHasCellClass(report, CellClassMatrix) && !CompleteV3(report) {
-			return false
+			return fmt.Errorf("report %d matrix cell %s/%s is incomplete", i, report.ClientArtifactProfileID, report.ServerArtifactProfileID)
 		}
 		if reportHasCellClass(report, CellClassNetworking) && !CompleteNetworking(report) {
-			return false
+			return fmt.Errorf("report %d networking cell %q is incomplete", i, report.Networking.CellID)
 		}
 	}
-	return true
+	return nil
+}
+
+// CompleteIndexV3 reports whether every required matrix and networking cell passed.
+func CompleteIndexV3(checklist ChecklistV3, reports []ReportV3) bool {
+	return IndexCompletenessError(checklist, reports) == nil
 }
 
 // BindArtifactDigestsV3 hashes the named package files and requires they match the report.

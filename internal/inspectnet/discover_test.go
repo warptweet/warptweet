@@ -1,6 +1,7 @@
 package inspectnet
 
 import (
+	"fmt"
 	"net"
 	"net/netip"
 	"strings"
@@ -83,13 +84,13 @@ func TestDiscoverLookupVsDumpResponse(t *testing.T) {
 
 	dump := RouteReply{
 		Messages: []RouteMessage{
-			{Type: rtmNewRoute, Family: FamilyIPv4, HasPrefSrc: true, PrefSrc: netip.MustParseAddr("10.168.0.2"), HasOutIf: true, OutIfIndex: 2},
-			{Type: rtmNewRoute, Family: FamilyIPv4, HasPrefSrc: true, PrefSrc: netip.MustParseAddr("172.17.0.1"), HasOutIf: true, OutIfIndex: 3},
+			{Type: rtmNewRoute, Family: FamilyIPv4, Table: uint32(rtTableMain), HasPrefSrc: true, PrefSrc: netip.MustParseAddr("10.168.0.2"), HasOutIf: true, OutIfIndex: 2},
+			{Type: rtmNewRoute, Family: FamilyIPv4, Table: uint32(rtTableMain), HasPrefSrc: true, PrefSrc: netip.MustParseAddr("172.17.0.1"), HasOutIf: true, OutIfIndex: 3},
 		},
 		Evidence: "2 RTM_NEWROUTE dump",
 	}
 	_, err = Discover(fixedLookup(dump, RouteReply{}), ifaces)
-	if err == nil || !strings.Contains(err.Error(), "--listen") || !strings.Contains(err.Error(), "2 RTM_NEWROUTE") {
+	if err == nil || !strings.Contains(err.Error(), "--listen") || !strings.Contains(err.Error(), "returned 2 RTM_NEWROUTE") {
 		t.Fatalf("dump-shaped reply error = %v", err)
 	}
 }
@@ -222,6 +223,19 @@ func TestDiscoverExtraTableFailsClosed(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "table 100") || !strings.Contains(err.Error(), "10.168.0.2") {
 		t.Fatalf("error missing kernel evidence: %v", err)
+	}
+}
+
+func TestAsNetlinkErrnoUnwrapsWrapped(t *testing.T) {
+	t.Parallel()
+
+	wrapped := fmt.Errorf("lookup: %w", netlinkErrno{Errno: errnoNetUnreach})
+	var nl netlinkErrno
+	if !asNetlinkErrno(wrapped, &nl) {
+		t.Fatal("did not unwrap wrapped netlinkErrno")
+	}
+	if nl.Errno != errnoNetUnreach || !nl.unreachable() {
+		t.Fatalf("nl=%+v", nl)
 	}
 }
 

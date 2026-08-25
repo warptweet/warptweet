@@ -5,8 +5,10 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
+	"warptweet.com/warptweet/internal/adoptionresult"
 	"warptweet.com/warptweet/internal/releaseevidence"
 )
 
@@ -40,6 +42,28 @@ func TestRunValidatesBeforeWrite(t *testing.T) {
 	if _, err := os.Stat(dupOut); !os.IsNotExist(err) {
 		t.Fatal("invalid draft was written")
 	}
+
+	index := completeIndex(t, checklist)
+	indexIn := filepath.Join(dir, "index.json")
+	indexOut := filepath.Join(dir, "index-out.json")
+	writeJSON(t, indexIn, index)
+	if err := run(root, "", indexIn, indexOut, true); err != nil {
+		t.Fatalf("valid index write: %v", err)
+	}
+	if _, err := os.Stat(indexOut); err != nil {
+		t.Fatal(err)
+	}
+
+	index.Reports = index.Reports[:1]
+	incompleteIn := filepath.Join(dir, "index-incomplete.json")
+	incompleteOut := filepath.Join(dir, "index-incomplete-out.json")
+	writeJSON(t, incompleteIn, index)
+	if err := run(root, "", incompleteIn, incompleteOut, true); err == nil {
+		t.Fatal("accepted incomplete index")
+	}
+	if _, err := os.Stat(incompleteOut); !os.IsNotExist(err) {
+		t.Fatal("incomplete index was written")
+	}
 }
 
 func validReport(t *testing.T, checklist releaseevidence.ChecklistV3) releaseevidence.ReportV3 {
@@ -66,7 +90,7 @@ func sampleFromChecklist(checklist releaseevidence.ChecklistV3) releaseevidence.
 	return releaseevidence.ReportV3{
 		Kind:                       releaseevidence.Kind,
 		SchemaVersion:              releaseevidence.SchemaVersionV3,
-		ContractID:                 "warptweet.adoption-release.v1",
+		ContractID:                 adoptionresult.ContractID,
 		ContractChecklistSHA256:    checklist.FileSHA256,
 		ReleaseVersion:             "0.1.0-rc.1",
 		SourceCommit:               "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
@@ -131,6 +155,95 @@ func sampleFromChecklist(checklist releaseevidence.ChecklistV3) releaseevidence.
 			CleanTree:                       true,
 		},
 	}
+}
+
+func completeIndex(t *testing.T, checklist releaseevidence.ChecklistV3) releaseevidence.IndexV3 {
+	t.Helper()
+	var reports []releaseevidence.ReportV3
+	for _, cell := range releaseevidence.RequiredMatrixCells(checklist.Checklist()) {
+		report := sampleFromChecklist(checklist)
+		report.ClientArtifactProfileID = cell.Client
+		report.ServerArtifactProfileID = cell.Server
+		report.ClientArchitecture = architectureFromProfile(cell.Client)
+		report.ServerArchitecture = architectureFromProfile(cell.Server)
+		report.CellClasses = []string{releaseevidence.CellClassMatrix}
+		reports = append(reports, report)
+	}
+	for _, cell := range releaseevidence.RequiredNetworkingCells(checklist) {
+		reports = append(reports, networkingReportFromChecklist(checklist, cell))
+	}
+	return releaseevidence.IndexV3{
+		Kind:                    releaseevidence.IndexKind,
+		SchemaVersion:           releaseevidence.SchemaVersionV3,
+		ContractID:              adoptionresult.ContractID,
+		ContractChecklistSHA256: checklist.FileSHA256,
+		Reports:                 reports,
+	}
+}
+
+func networkingReportFromChecklist(checklist releaseevidence.ChecklistV3, cell releaseevidence.NetworkingCell) releaseevidence.ReportV3 {
+	report := sampleFromChecklist(checklist)
+	report.CellClasses = []string{releaseevidence.CellClassNetworking}
+	if cell.ClientArtifactProfileID != "" {
+		report.ClientArtifactProfileID = cell.ClientArtifactProfileID
+		report.ClientArchitecture = architectureFromProfile(cell.ClientArtifactProfileID)
+	}
+	if cell.ServerArtifactProfileID != "" {
+		report.ServerArtifactProfileID = cell.ServerArtifactProfileID
+		report.ServerArchitecture = architectureFromProfile(cell.ServerArtifactProfileID)
+	}
+	net := report.Networking
+	net.CellID = cell.ID
+	net.PublicationModel = cell.PublicationModel
+	switch cell.PublicationModel {
+	case "one_to_one_nat", "passthrough_nlb":
+		net.Binds.Data.Address = "10.168.0.2"
+		net.Binds.Enrollment.Address = "10.168.0.2"
+		net.Dials.Data.Host = "34.20.174.226"
+		net.Dials.Enrollment.Host = "34.20.174.226"
+		net.ObservedListeners.Data = "10.168.0.2:2222"
+		net.ObservedListeners.Enrollment = "10.168.0.2:29722"
+		net.ClientDials[0].Host = "34.20.174.226"
+		net.ClientDials[1].Host = "34.20.174.226"
+		net.DataResolvedAddr = "34.20.174.226"
+		net.EnrollmentResolvedAddr = "34.20.174.226"
+	case "port_mapped":
+		net.Dials.Data.Port = 443
+		net.Dials.Enrollment.Host = "enroll.example.com"
+		net.Dials.Enrollment.Port = 443
+		net.ClientDials[0].Port = 443
+		net.ClientDials[1].Host = "enroll.example.com"
+		net.ClientDials[1].Port = 443
+	case "dns_dial":
+		net.Dials.Data.Host = "tunnel.example.com"
+		net.Dials.Enrollment.Host = "enroll.example.com"
+		net.ClientDials[0].Host = "tunnel.example.com"
+		net.ClientDials[1].Host = "enroll.example.com"
+		net.DataResolvedAddr = "34.20.174.226"
+		net.EnrollmentResolvedAddr = "34.20.174.227"
+	case "ipv6_bind_equals_dial":
+		net.Binds.Data.Address = "2001:db8::2"
+		net.Binds.Enrollment.Address = "2001:db8::2"
+		net.Dials.Data.Host = "2001:db8::2"
+		net.Dials.Enrollment.Host = "2001:db8::2"
+		net.ObservedListeners.Data = "[2001:db8::2]:2222"
+		net.ObservedListeners.Enrollment = "[2001:db8::2]:29722"
+		net.ClientDials[0].Host = "2001:db8::2"
+		net.ClientDials[1].Host = "2001:db8::2"
+		net.DataResolvedAddr = "2001:db8::2"
+		net.EnrollmentResolvedAddr = "2001:db8::2"
+	}
+	net.InviteDials = net.Dials
+	net.InviteDialsMatchPublished = true
+	report.Networking = net
+	return report
+}
+
+func architectureFromProfile(profile string) string {
+	if strings.Contains(profile, "amd64") {
+		return "amd64"
+	}
+	return "arm64"
 }
 
 func writeJSON(t *testing.T, path string, value any) {

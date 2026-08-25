@@ -1,6 +1,7 @@
 package inspectnet
 
 import (
+	"errors"
 	"fmt"
 	"net"
 	"net/netip"
@@ -174,13 +175,5 @@ func filterCandidate(iface Interface, addr netip.Addr, family int) (familyCandid
 }
 
 func asNetlinkErrno(err error, target *netlinkErrno) bool {
-	if err == nil {
-		return false
-	}
-	nl, ok := err.(netlinkErrno)
-	if !ok {
-		return false
-	}
-	*target = nl
-	return true
+	return errors.As(err, target)
 }

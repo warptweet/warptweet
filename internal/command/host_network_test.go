@@ -107,6 +107,42 @@ func TestResolveAdvertiseDNSAndIndependentEnrollment(t *testing.T) {
 	if enrollHost != "enroll.example.com" || pub.EnrollDial.Port != 8443 {
 		t.Fatalf("enroll dial=%+v", pub.EnrollDial)
 	}
+
+	stored := &server.Config{Network: server.Network{
+		PublishedEndpointGeneration: 1,
+		Data: server.ServiceEndpoints{
+			Listen: server.BindEndpoint{Address: netip.MustParseAddr("10.168.0.2"), Port: 2222},
+			Dial:   server.DialEndpoint{Host: server.IPDialHost(netip.MustParseAddr("10.168.0.2")), Port: 2222},
+		},
+		Enrollment: server.ServiceEndpoints{
+			Listen: server.BindEndpoint{Address: netip.MustParseAddr("10.168.0.2"), Port: 8443},
+			Dial:   pub.EnrollDial,
+		},
+	}}
+	restored, err := resolveHostPublication(hostPublicationFlags{}, stored, func() (netip.Addr, error) {
+		t.Fatal("discover called")
+		return netip.Addr{}, nil
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if restored.EnrollListen.Port != 8443 {
+		t.Fatalf("stored enroll listen lost: %+v", restored.EnrollListen)
+	}
+	restoredEnroll, _ := restored.EnrollDial.Host.Canonical()
+	if restoredEnroll != "enroll.example.com" || restored.EnrollDial.Port != 8443 {
+		t.Fatalf("stored enroll dial lost: %+v", restored.EnrollDial)
+	}
+
+	derived, err := resolveHostPublication(hostPublicationFlags{
+		Listen: onceStringFlag{name: "--listen", value: "10.168.0.2:2222", set: true},
+	}, stored, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if derived.EnrollListen.Port != enrollment.DefaultEnrollmentPort {
+		t.Fatalf("data listen change should derive enroll listen: %+v", derived.EnrollListen)
+	}
 }
 
 func TestResolveListenInterfacePersistsAddressNotName(t *testing.T) {

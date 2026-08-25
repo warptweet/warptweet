@@ -67,6 +67,7 @@ func TestValidateReportV3Rejections(t *testing.T) {
 		"missing result":           func(r *ReportV3) { r.Results = r.Results[1:] },
 		"duplicate result id":      func(r *ReportV3) { r.Results = append(r.Results, r.Results[0]) },
 		"no commands":              func(r *ReportV3) { r.Commands = nil },
+		"empty restart policies":   func(r *ReportV3) { r.RestartPolicies = nil },
 		"invalid restart policy":   func(r *ReportV3) { r.RestartPolicies = []string{"always"} },
 		"proxy load balancer":      func(r *ReportV3) { r.Networking.PublicationModel = publicationProxyLB },
 		"unspecified bind":         func(r *ReportV3) { r.Networking.Binds.Data.Address = "0.0.0.0" },
@@ -248,6 +249,13 @@ func TestValidateIndexV3RequiresMatrixAndNetworkingCells(t *testing.T) {
 	reports[0].Results[0].Status = "not_run"
 	if CompleteIndexV3(checklist, reports) {
 		t.Fatal("not_run completed the v3 index")
+	}
+	err = IndexCompletenessError(checklist, reports)
+	if err == nil {
+		t.Fatal("expected incomplete index error")
+	}
+	if !strings.Contains(err.Error(), reports[0].ClientArtifactProfileID+"/"+reports[0].ServerArtifactProfileID) {
+		t.Fatalf("incomplete error omitted matrix cell: %v", err)
 	}
 }
 

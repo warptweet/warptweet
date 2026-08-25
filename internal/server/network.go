@@ -141,10 +141,6 @@ func nextPublishedEndpointGeneration(current uint64) (uint64, error) {
 	return current + 1, nil
 }
 
-func sameDialEndpoint(left, right DialEndpoint) bool {
-	return left.Equal(right)
-}
-
 func bindLocatorKey(endpoint BindEndpoint) string {
 	return canonicalAddress(endpoint.Address).String() + "\x00" + fmt.Sprintf("%d", endpoint.Port)
 }

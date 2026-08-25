@@ -81,7 +81,7 @@ Example: `examples/client.example.wt`. Schema 1 is rejected.
 {
   "kind": "warptweet.client-tunnels",
   "schema_version": 2,
-  "profile_id": "warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519",
+  "profile_id": "warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519-chacha20",
   "ssh_binary_sha256": "<64 lowercase hex>",
   "server": { "host": "192.0.2.10", "port": 2222, "user": "warptweet" },
   "tunnels": [{
@@ -103,14 +103,24 @@ Example: `examples/server.example.wt`. Schema 1 is rejected.
 {
   "kind": "warptweet.server-gateway",
   "schema_version": 2,
-  "profile_id": "warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519",
+  "profile_id": "warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519-chacha20",
   "sshd_binary_sha256": "<64 hex>",
   "openssh_bundle_manifest_sha256": "<64 hex>",
-  "listen": { "address": "192.0.2.10", "port": 2222 },
+  "network": {
+    "published_endpoint_generation": 1,
+    "data": {
+      "listen": { "address": "192.0.2.10", "port": 2222 },
+      "dial": { "host": "192.0.2.10", "port": 2222 }
+    },
+    "enrollment": {
+      "listen": { "address": "192.0.2.10", "port": 29722 },
+      "dial": { "host": "192.0.2.10", "port": 29722 }
+    }
+  },
   "target": { "address": "198.51.100.20", "port": 5432 },
   "dedicated_user": "warptweet",
-  "host_key_path": "/opt/warptweet/etc/ssh_host_mldsa44_ed25519_key",
-  "authorized_keys_path": "/opt/warptweet/etc/authorized_keys/warptweet"
+  "host_key_path": "/var/lib/warptweet/ssh/ssh_host_mldsa44_ed25519_key",
+  "authorized_keys_path": "/var/lib/warptweet/authorized_keys/warptweet"
 }
 ```
 
@@ -303,7 +313,7 @@ warptweet version
 | --- | --- | --- | --- |
 | Product path | `host`, `connect` | Two-command UX | **Implemented** (2026-08-14) |
 | Operator path | `server *`, `enroll`, `up`/`down`/`status` | Bootstrap, mint, lifecycle | Implemented |
-| Enrollment accept | `server enroll-listen`, `warptweet-enroll.service`, `accept-enrollment` | Consume invite, install authorized_keys, return proof + management token | **Implemented**; HTTP on `enroll_port` (default 29722) |
+| Enrollment accept | `server enroll-listen`, `warptweet-enroll.service`, `accept-enrollment` | Consume invite, install authorized_keys, return proof + management token | **Implemented**; HTTPS on invite `enrollment.host`:`enrollment.port` |
 | Client manage | `rotate`, `revoke` | Server-acked key rotate / auth clear via management token | **Implemented** (2026-08-14) |
 | Diagnostics | `profile`, `validate`, `render-*`, `doctor*` | Policy without network | Implemented |
 | Low-level run | `run --config … --tunnel …` | Supervised OpenSSH | Implemented |
@@ -379,14 +389,12 @@ flowchart TB
     CTRL_S["warptweet controller"]
     ID_H["composite host key"]
     AK["authorized_keys"]
-    (no invite MAC; WT-SR-020)
     SSHD["pinned sshd"]
     TGT["authorized target"]
   end
 
   SI --> WT_S
   SI --> ID_H
-  SI --> MAC
   SI --> INV
   GW -.-> SI
   INV --> EN
@@ -416,7 +424,7 @@ flowchart TB
 - Loopback listener is a **host boundary**, not per-process authz for other local users/processes
 - Target service is outside tunnel confidentiality after SSH termination on the server host
 - `.wt` is untrusted until strict validation; never secret-bearing
-- Invite MAC authenticity is **server-side**; client trusts the operator transfer channel plus post-enroll proof binding
+- Invite authenticity is the operator transfer channel plus post-enroll proof binding; invites are unsigned bearers (WT-SR-020)
 - Supply chain: fixed root-owned paths, SHA-256 pins, static OpenSSL, exact version strings, re-attest every launch
 
 ### Client launch / readiness (high level)

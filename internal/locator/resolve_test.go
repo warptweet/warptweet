@@ -173,6 +173,34 @@ func TestSelectRecordsTCPConnectClass(t *testing.T) {
 	}
 }
 
+func TestSelectStopsOnCanceledContext(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	var attempts int
+	_, err := Select(ctx, ResolvedDialPlan{
+		Candidates: []netip.Addr{
+			netip.MustParseAddr("192.0.2.10"),
+			netip.MustParseAddr("192.0.2.11"),
+		},
+	}, 2222, ResolveOptions{
+		Dial: func(context.Context, netip.Addr, uint16, time.Duration) error {
+			attempts++
+			return errors.New("refused")
+		},
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v", err)
+	}
+	if ErrorClass(err) != ClassTCPConnect {
+		t.Fatalf("class=%q err=%v", ErrorClass(err), err)
+	}
+	if attempts != 0 {
+		t.Fatalf("attempts=%d", attempts)
+	}
+}
+
 func TestResolveEmptyAnswersAreDNSResolution(t *testing.T) {
 	t.Parallel()
 

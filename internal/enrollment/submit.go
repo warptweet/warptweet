@@ -3,7 +3,9 @@ package enrollment
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -196,6 +198,14 @@ func classifyEnrollmentTransport(err error) error {
 	}
 	if class := locator.ErrorClass(err); class != "" {
 		return err
+	}
+	var certErr *tls.CertificateVerificationError
+	if errors.As(err, &certErr) {
+		return locator.Classified(locator.ClassTLSNegotiate, "tls_negotiate", err)
+	}
+	var opErr *net.OpError
+	if errors.As(err, &opErr) && opErr.Op == "dial" {
+		return locator.Classified(locator.ClassTCPConnect, "tcp_connect", err)
 	}
 	message := err.Error()
 	switch {

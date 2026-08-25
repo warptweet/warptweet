@@ -433,3 +433,37 @@ func writeJSONResponse(writer http.ResponseWriter, value any) {
 	encoder.SetEscapeHTML(false)
 	_ = encoder.Encode(value)
 }
+
+type opaqueWrap struct {
+	err error
+	msg string
+}
+
+func (w opaqueWrap) Error() string { return w.msg }
+func (w opaqueWrap) Unwrap() error { return w.err }
+
+func TestClassifyEnrollmentTransportUsesDialOpError(t *testing.T) {
+	t.Parallel()
+
+	err := opaqueWrap{
+		err: &net.OpError{Op: "dial", Net: "tcp", Err: errors.New("ENOENT")},
+		msg: "peer unreachable",
+	}
+	got := classifyEnrollmentTransport(err)
+	if locator.ErrorClass(got) != locator.ClassTCPConnect {
+		t.Fatalf("class=%q err=%v", locator.ErrorClass(got), got)
+	}
+}
+
+func TestClassifyEnrollmentTransportUsesCertificateVerificationError(t *testing.T) {
+	t.Parallel()
+
+	err := opaqueWrap{
+		err: &tls.CertificateVerificationError{Err: errors.New("unknown authority")},
+		msg: "peer certificate rejected",
+	}
+	got := classifyEnrollmentTransport(err)
+	if locator.ErrorClass(got) != locator.ClassTLSNegotiate {
+		t.Fatalf("class=%q err=%v", locator.ErrorClass(got), got)
+	}
+}

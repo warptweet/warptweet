@@ -66,10 +66,7 @@ func (set PublishedEndpointSet) Canonical() (PublishedEndpointSet, error) {
 		Data:       DialEndpoint{Host: data, Port: set.Data.Port},
 		Enrollment: DialEndpoint{Host: enroll, Port: set.Enrollment.Port},
 	}
-	if SamePublishedLocators(canonical, PublishedEndpointSet{
-		Data:       canonical.Enrollment,
-		Enrollment: canonical.Data,
-	}) {
+	if canonical.Data.Equal(canonical.Enrollment) {
 		return PublishedEndpointSet{}, fmt.Errorf("data and enrollment locators must not share the same canonical host:port")
 	}
 	return canonical, nil
