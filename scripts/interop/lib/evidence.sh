@@ -440,10 +440,15 @@ REMOTE
         interop_log "guest DNAT probe did not print iptables and nft results"
         return 1
     fi
-    if [ "$_iptables" = "NO_DNAT" ] && [ "$_nft" = "NO_DNAT" ]; then
+    if [ "$_iptables" = "HAS_DNAT" ] || [ "$_nft" = "HAS_DNAT" ]; then
+        WARPTWEET_INTEROP_TEST_DNAT_ABSENT=false
+    elif [ "$_iptables" = "NO_DNAT" ] || [ "$_nft" = "NO_DNAT" ]; then
+        # One present table without publication DNAT is enough. The other may
+        # be MISSING when nft is not installed.
         WARPTWEET_INTEROP_TEST_DNAT_ABSENT=true
     else
-        WARPTWEET_INTEROP_TEST_DNAT_ABSENT=false
+        interop_log "guest DNAT probe could not observe iptables or nft"
+        return 1
     fi
     if ! printf '%s\n' "$_probe" | grep -q '^LO='; then
         interop_log "guest loopback addresses were not observed"

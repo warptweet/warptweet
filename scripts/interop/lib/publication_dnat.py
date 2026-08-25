@@ -171,6 +171,8 @@ def table_status(dump, spec, kind, present):
 
 
 def live_table_status(spec):
+    # sudo env probes often have a PATH without /usr/sbin.
+    os.environ["PATH"] = "/usr/sbin:/usr/bin:/sbin:/bin:" + os.environ.get("PATH", "")
     iptables_present = shutil.which("iptables") is not None
     nft_present = shutil.which("nft") is not None
     iptables_dump = run(["iptables", "-t", "nat", "-S"]) if iptables_present else None
