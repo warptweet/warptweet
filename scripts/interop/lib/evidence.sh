@@ -506,15 +506,18 @@ PY
     _alias_host=$(interop_hostport_host "$(interop_published_data_dial)")
     WARPTWEET_INTEROP_LOOPBACK_ALIAS_ABSENT=$(
         python3 - "$_lo" "$_alias_host" <<'PY'
-import ipaddress, sys
+import ipaddress, socket, sys
 raw, target = sys.argv[1], sys.argv[2]
 try:
     want = ipaddress.ip_address(target)
-    if getattr(want, "ipv4_mapped", None):
-        want = want.ipv4_mapped
 except Exception:
-    print("false")
-    raise SystemExit
+    try:
+        want = ipaddress.ip_address(socket.getaddrinfo(target, None)[0][4][0])
+    except Exception:
+        print("true")
+        raise SystemExit
+if getattr(want, "ipv4_mapped", None):
+    want = want.ipv4_mapped
 if want.is_loopback:
     print("true")
     raise SystemExit
