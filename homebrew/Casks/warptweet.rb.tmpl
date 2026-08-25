@@ -2,29 +2,19 @@
 
 cask "warptweet" do
   version "{{VERSION}}"
+  sha256 "{{SHA256_ARM64}}"
 
-  on_arm do
-    sha256 "{{SHA256_ARM64}}"
-
-    url "https://github.com/{{GITHUB_OWNER_REPO}}/releases/download/v#{version}/warptweet-#{version}-darwin-arm64.pkg",
-        verified: "github.com/{{GITHUB_OWNER_REPO}}/"
-
-    pkg "warptweet-#{version}-darwin-arm64.pkg"
-  end
-  on_intel do
-    sha256 "{{SHA256_AMD64}}"
-
-    url "https://github.com/{{GITHUB_OWNER_REPO}}/releases/download/v#{version}/warptweet-#{version}-darwin-amd64.pkg",
-        verified: "github.com/{{GITHUB_OWNER_REPO}}/"
-
-    pkg "warptweet-#{version}-darwin-amd64.pkg"
-  end
+  url "https://github.com/{{GITHUB_OWNER_REPO}}/releases/download/v#{version}/warptweet-#{version}-darwin-arm64.pkg",
+      verified: "github.com/{{GITHUB_OWNER_REPO}}/"
 
   name "WarpTweet"
   desc "Open-source managed-endpoint post-quantum TCP tunnelling"
   homepage "https://warptweet.com/"
 
   depends_on macos: ">= :ventura"
+  depends_on arch: :arm64
+
+  pkg "warptweet-#{version}-darwin-arm64.pkg"
 
   binary "/Library/Application Support/WarpTweet/bin/warptweet",
          target: "warptweet"

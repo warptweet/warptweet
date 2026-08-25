@@ -22,12 +22,17 @@ func TestLoadChecklistV3AndRejectIncomplete(t *testing.T) {
 	if checklist.SchemaVersion != SchemaVersionV3 {
 		t.Fatalf("schema=%d", checklist.SchemaVersion)
 	}
-	if checklist.FileSHA256 != "ca811ef2ffa43e3b96282aedb396b83c583d9e0c00dd4bd9c87a0037a4999b4d" {
+	if checklist.FileSHA256 != "fc0b77c83b84814abec97f0770f9f1a50a507e99211b9e2d048ac019141984a1" {
 		t.Fatalf("FileSHA256=%s", checklist.FileSHA256)
 	}
 	cells := RequiredMatrixCells(checklist.Checklist())
-	if len(cells) != 4 {
-		t.Fatalf("matrix cells=%d, want 4", len(cells))
+	if len(cells) != 2 {
+		t.Fatalf("matrix cells=%d, want 2", len(cells))
+	}
+	for _, cell := range cells {
+		if cell.Client != "darwin-arm64" {
+			t.Fatalf("first-edition matrix client=%s, want darwin-arm64", cell.Client)
+		}
 	}
 	requiredNet := RequiredNetworkingCells(checklist)
 	if len(requiredNet) != 4 {

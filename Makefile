@@ -44,7 +44,7 @@ interop-help:
 	@printf '  missing packages are built automatically (client local, server Docker)\n'
 	@printf '  unlock key: ssh-add $$WARPTWEET_INTEROP_SSH_IDENTITY\n'
 	@printf 'make lab-host — SSH-install Docker Engine + loopback Postgres on a fresh Ubuntu VPS\n'
-	@printf 'make interop-matrix — build darwin-amd64 and linux-arm64 packages\n\n'
+	@printf 'make interop-matrix — optional extra package builds (not CTA matrix)\n\n'
 	./scripts/interop/orchestrate.sh --help
 
 # Complete local+remote round trip from .env (no make arguments).
@@ -55,7 +55,7 @@ interop:
 lab-host:
 	./scripts/interop/provision-lab-host.sh
 
-# Build the remaining CTA matrix packages (darwin-amd64, linux-arm64).
+# Optional extra package builds. First-edition CTA does not require darwin-amd64.
 interop-matrix:
 	./scripts/interop/ensure-matrix-artifacts.sh
 

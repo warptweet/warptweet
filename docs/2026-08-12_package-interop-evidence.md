@@ -11,12 +11,12 @@ do not substitute for this gate.
 ## Canonical checklist
 
 `packaging/evidence/checklist-v3.json` enumerates every required positive and
-negative case from the Homebrew delivery contract. The public index still
-cartesian-products client artifact profiles `darwin-arm64` / `darwin-amd64`
-against server profiles `linux-amd64` / `linux-arm64`. A GCE arm64 networking
-cell is one additional cell, not that matrix. Missing runner pairs are
-`not_run`, never `pass`. `packaging/evidence/checklist-v2.json` and
-`schemas/release-evidence-v2.schema.json` remain historical; v2 cannot grow
+negative case from the Homebrew delivery contract. The first-edition public
+index is `darwin-arm64` against `linux-amd64` and `linux-arm64`. `darwin-amd64`
+remains a buildable artifact profile and is not a CTA matrix cell. A GCE arm64
+networking cell is one additional cell, not that matrix. Missing required
+runner pairs are `not_run`, never `pass`. `packaging/evidence/checklist-v2.json`
+and `schemas/release-evidence-v2.schema.json` remain historical; v2 cannot grow
 networking fields.
 
 ## Evidence document

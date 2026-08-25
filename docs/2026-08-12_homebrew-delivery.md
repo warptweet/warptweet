@@ -115,6 +115,10 @@ artifact profiles for:
 - `darwin-arm64`;
 - `darwin-amd64`.
 
+First-edition Homebrew CTA and the v3 public index require `darwin-arm64`
+against `linux-amd64` and `linux-arm64`. `darwin-amd64` stays a buildable
+artifact profile and is not a required index cell.
+
 One wire profile may reference multiple reviewed artifact profiles. Changing an
 engine version, wire name, encoding, policy rule, platform linkage rule, fixed
 path, signing authority, or artifact inventory creates a new immutable profile

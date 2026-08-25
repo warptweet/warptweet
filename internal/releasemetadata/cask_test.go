@@ -16,7 +16,6 @@ func TestRenderCaskPinsExactReleaseMetadata(t *testing.T) {
 	rendered, err := RenderCask(CaskInput{
 		Version:         "1.2.3",
 		SHA256ARM64:     strings.Repeat("a", 64),
-		SHA256AMD64:     strings.Repeat("b", 64),
 		GitHubOwnerRepo: "warptweet/warptweet",
 		TemplatePath:    templatePath,
 	})
@@ -26,9 +25,8 @@ func TestRenderCaskPinsExactReleaseMetadata(t *testing.T) {
 	for _, required := range []string{
 		`version "1.2.3"`,
 		`sha256 "` + strings.Repeat("a", 64) + `"`,
-		`sha256 "` + strings.Repeat("b", 64) + `"`,
 		`warptweet-#{version}-darwin-arm64.pkg`,
-		`warptweet-#{version}-darwin-amd64.pkg`,
+		`depends_on arch: :arm64`,
 		`pkgutil: "com.warptweet.client"`,
 		`binary "/Library/Application Support/WarpTweet/bin/warptweet"`,
 		`target: "warptweet"`,
@@ -39,7 +37,7 @@ func TestRenderCaskPinsExactReleaseMetadata(t *testing.T) {
 			t.Fatalf("rendered cask omits %q\n%s", required, rendered)
 		}
 	}
-	for _, forbidden := range []string{"version :latest", "http://", "{{"} {
+	for _, forbidden := range []string{"version :latest", "http://", "{{", "darwin-amd64.pkg", "on_intel"} {
 		if strings.Contains(rendered, forbidden) {
 			t.Fatalf("rendered cask contains forbidden %q", forbidden)
 		}
@@ -54,7 +52,6 @@ func TestRenderCaskRejectsLatestAndBadDigests(t *testing.T) {
 	base := CaskInput{
 		Version:         "1.0.0",
 		SHA256ARM64:     strings.Repeat("a", 64),
-		SHA256AMD64:     strings.Repeat("b", 64),
 		GitHubOwnerRepo: "warptweet/warptweet",
 		TemplatePath:    templatePath,
 	}
@@ -160,6 +157,9 @@ func TestHomebrewCaskTemplateForbidsFloatingVersions(t *testing.T) {
 		"version :latest",
 		":latest",
 		"http://",
+		"darwin-amd64.pkg",
+		"on_intel",
+		"{{SHA256_AMD64}}",
 	} {
 		if strings.Contains(contents, forbidden) {
 			t.Fatalf("cask template contains forbidden %q", forbidden)
@@ -173,9 +173,8 @@ func TestHomebrewCaskTemplateForbidsFloatingVersions(t *testing.T) {
 		`depends_on macos: ">= :ventura"`,
 		`{{VERSION}}`,
 		`{{SHA256_ARM64}}`,
-		`{{SHA256_AMD64}}`,
-		`on_arm do`,
-		`on_intel do`,
+		`depends_on arch: :arm64`,
+		`darwin-arm64.pkg`,
 	} {
 		if !strings.Contains(contents, required) {
 			t.Fatalf("cask template omits %q", required)

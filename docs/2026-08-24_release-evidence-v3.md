@@ -23,8 +23,10 @@ unknown JSON properties fail closed without creating the output file.
 
 ## Public index
 
-The required architecture matrix is unchanged: darwin-arm64/amd64 ×
-linux-amd64/arm64. That is four cells.
+The required architecture matrix is Apple Silicon client against both Linux
+hosts: darwin-arm64 × linux-amd64 and darwin-arm64 × linux-arm64. That is two
+cells. `darwin-amd64` is a buildable artifact profile and is not a first-edition
+CTA matrix cell.
 
 Additional networking cells:
 
@@ -38,7 +40,7 @@ Additional networking cells:
 
 Proxy load balancers, TLS termination, and PROXY protocol are not cells.
 
-A GCE arm64 run is one networking cell. It does not complete the four-cell
+A GCE arm64 run is one networking cell. It does not complete the two-cell
 matrix by itself.
 
 ## Networking fields

@@ -149,9 +149,9 @@
     "networking"
   ],
   "matrix": {
-    "client_artifact_profiles": ["darwin-arm64", "darwin-amd64"],
+    "client_artifact_profiles": ["darwin-arm64"],
     "server_artifact_profiles": ["linux-amd64", "linux-arm64"],
-    "note": "Public index still requires every client architecture against every server architecture. A GCE arm64 networking cell is one additional cell, not this matrix. Missing runner pairs are recorded as not_run, never as pass."
+    "note": "First-edition public index is Apple Silicon client against linux-amd64 and linux-arm64. darwin-amd64 remains a buildable artifact profile and is not a CTA matrix cell. A GCE arm64 networking cell is one additional cell, not this matrix."
   },
   "networking_cells": [
     {

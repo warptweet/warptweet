@@ -1,11 +1,11 @@
 #!/bin/sh
 # shellcheck shell=sh
-# Build the remaining CTA matrix packages:
+# Optional extra package builds:
 #   warptweet-client_${VERSION}_amd64.pkg   (darwin-amd64 via Rosetta)
 #   warptweet_${VERSION}_arm64.deb          (linux-arm64 via Docker)
 #
-# These cells are produced here. Live dual-host evidence still requires a
-# darwin-amd64 client runner and a linux-arm64 host; missing runners stay not_run.
+# First-edition CTA does not require darwin-amd64. linux-arm64 host packages
+# are still used by the required darwin-arm64 × linux-arm64 matrix cell.
 set -eu
 LC_ALL=C
 export LC_ALL

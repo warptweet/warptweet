@@ -70,13 +70,15 @@ for layout validation only.
 
 Template: `homebrew/Casks/warptweet.rb.tmpl`
 
-Render with `internal/releasemetadata.RenderCask` using exact version and both
-architecture SHA-256 digests. The rendered cask:
+Render with `internal/releasemetadata.RenderCask` using exact version and the
+darwin-arm64 SHA-256 digest. The rendered cask:
 
-- pins version and architecture-specific URLs/digests;
+- pins version and the Apple Silicon URL/digest;
+- depends on `arch: :arm64`;
 - installs the `.pkg`;
 - uninstalls through `pkgutil` and the package uninstall script;
-- never uses `version :latest` or plain HTTP.
+- never uses `version :latest` or plain HTTP;
+- does not ship an Intel Mac package.
 
 Primary tap path remains `warptweet/tap/warptweet`. A controller-only formula is
 not the website CTA.

@@ -15,6 +15,7 @@
   },
   "notes": [
     "Set homebrew_cta_enabled to true only after a complete v3 release-evidence index exists for the published artifacts.",
-    "required_evidence_document must be a repository-relative path to a validated warptweet.release-evidence-index JSON file when the CTA is enabled."
+    "required_evidence_document must be a repository-relative path to a validated warptweet.release-evidence-index JSON file when the CTA is enabled.",
+    "First-edition CTA is Apple Silicon client (darwin-arm64) against linux-amd64 and linux-arm64. darwin-amd64 is not a required index cell."
   ]
 }

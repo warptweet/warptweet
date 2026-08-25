@@ -13,7 +13,6 @@ import (
 type CaskInput struct {
 	Version         string
 	SHA256ARM64     string
-	SHA256AMD64     string
 	GitHubOwnerRepo string
 	TemplatePath    string
 }
@@ -32,7 +31,6 @@ func RenderCask(input CaskInput) (string, error) {
 	replacements := map[string]string{
 		"{{VERSION}}":           input.Version,
 		"{{SHA256_ARM64}}":      strings.ToLower(input.SHA256ARM64),
-		"{{SHA256_AMD64}}":      strings.ToLower(input.SHA256AMD64),
 		"{{GITHUB_OWNER_REPO}}": input.GitHubOwnerRepo,
 	}
 	for old, newValue := range replacements {
@@ -52,14 +50,16 @@ func RenderCask(input CaskInput) (string, error) {
 		}
 	}
 	if !strings.Contains(rendered, `sha256 "`+strings.ToLower(input.SHA256ARM64)+`"`) ||
-		!strings.Contains(rendered, `sha256 "`+strings.ToLower(input.SHA256AMD64)+`"`) ||
 		!strings.Contains(rendered, `pkgutil: "com.warptweet.client"`) ||
 		!strings.Contains(rendered, `binary "/Library/Application Support/WarpTweet/bin/warptweet"`) ||
 		!strings.Contains(rendered, `target: "warptweet"`) ||
 		!strings.Contains(rendered, `depends_on macos: ">= :ventura"`) ||
-		!strings.Contains(rendered, "darwin-arm64.pkg") ||
-		!strings.Contains(rendered, "darwin-amd64.pkg") {
+		!strings.Contains(rendered, `depends_on arch: :arm64`) ||
+		!strings.Contains(rendered, "darwin-arm64.pkg") {
 		return "", fmt.Errorf("rendered cask omitted required pinned fields")
+	}
+	if strings.Contains(rendered, "darwin-amd64.pkg") || strings.Contains(rendered, "on_intel") {
+		return "", fmt.Errorf("rendered cask must not ship an Intel Mac package")
 	}
 	if strings.Contains(rendered, `launchctl: "com.warptweet.client"`) {
 		return "", fmt.Errorf("rendered cask references the obsolete static client service")
@@ -74,8 +74,8 @@ func validateCaskInput(input CaskInput) error {
 	if strings.ContainsAny(input.Version, "\"'\n\r\\") {
 		return fmt.Errorf("cask version contains forbidden characters")
 	}
-	if !isLowerHexSHA256(input.SHA256ARM64) || !isLowerHexSHA256(input.SHA256AMD64) {
-		return fmt.Errorf("cask digests must be 64 lowercase hex characters")
+	if !isLowerHexSHA256(input.SHA256ARM64) {
+		return fmt.Errorf("cask digest must be 64 lowercase hex characters")
 	}
 	if err := validateGitHubOwnerRepo(input.GitHubOwnerRepo); err != nil {
 		return err

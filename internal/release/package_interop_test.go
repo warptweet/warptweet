@@ -168,8 +168,14 @@ func TestReleaseEvidenceChecklistMatchesHomebrewDelivery(t *testing.T) {
 	if strings.Contains(v2, `"test_dnat_absent"`) {
 		t.Error("v2 schema must not grow networking fields")
 	}
-	if len(releaseevidence.RequiredMatrixCells(checklist.Checklist())) != 4 {
-		t.Fatal("v3 public index must keep the four-cell architecture matrix")
+	cells := releaseevidence.RequiredMatrixCells(checklist.Checklist())
+	if len(cells) != 2 {
+		t.Fatalf("v3 public index must require two matrix cells, got %d", len(cells))
+	}
+	for _, cell := range cells {
+		if cell.Client != "darwin-arm64" {
+			t.Fatalf("first-edition matrix client must be darwin-arm64, got %s", cell.Client)
+		}
 	}
 }
 
