@@ -56,7 +56,9 @@ interop_emit_evidence() {
     case "$_route_count" in
         ''|*[!0-9]*) _route_count=0 ;;
     esac
-    _restart_policies='[]'
+    # connect defaults to unless-stopped. Record manual only when the reboot
+    # case actually exercised a stopped route.
+    _restart_policies='["unless-stopped"]'
     if [ -s "$WARPTWEET_INTEROP_RESULTS_FILE" ] &&
         grep -q '"id":"reboot-unless-stopped-manual-down"' "$WARPTWEET_INTEROP_RESULTS_FILE" &&
         ! grep '"id":"reboot-unless-stopped-manual-down"' "$WARPTWEET_INTEROP_RESULTS_FILE" | grep -q '"status":"not_run"'; then
