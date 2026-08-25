@@ -462,9 +462,9 @@ fi
 # Controller + provisioner + package assembly must run as non-root (build-linux-packages refuses root).
 go build -trimpath -o "$REMOTE_ROOT/warptweet" ./cmd/warptweet
 go build -trimpath -o "$REMOTE_ROOT/warptweet-provisioner" ./cmd/warptweet-provisioner
-chown warptweet-build:warptweet-build "$REMOTE_ROOT/warptweet" "$REMOTE_ROOT/warptweet-provisioner"
-chown -R warptweet-build:warptweet-build "$WT_BUILD_HOME/warptweet-openssh-stage"
-install -d -o warptweet-build -g warptweet-build -m 0755 "$REMOTE_ROOT/out"
+sudo chown warptweet-build:warptweet-build "$REMOTE_ROOT/warptweet" "$REMOTE_ROOT/warptweet-provisioner"
+sudo chown -R warptweet-build:warptweet-build "$WT_BUILD_HOME/warptweet-openssh-stage"
+sudo install -d -o warptweet-build -g warptweet-build -m 0755 "$REMOTE_ROOT/out"
 rm -rf "$REMOTE_ROOT/out/pkg"
 sudo -u warptweet-build -H env HOME="$WT_BUILD_HOME" WARPTWEET_VERSION="${WARPTWEET_VERSION:-0.1.0-dev}" \
   ./scripts/build-linux-packages.sh \
@@ -475,7 +475,14 @@ DEB=$(ls -1 "$REMOTE_ROOT/out/pkg"/*.deb | head -1)
 cp -a "$DEB" "$REMOTE_ROOT/server.deb"
 REMOTE
 
-    _out_deb=warptweet_${WARPTWEET_RELEASE_VERSION}_amd64.deb
+    # shellcheck disable=SC2086
+    _remote_uname=$(ssh $_ssh_base "$_target" uname -m)
+    case "$_remote_uname" in
+        aarch64 | arm64) _deb_arch=arm64 ;;
+        x86_64 | amd64) _deb_arch=amd64 ;;
+        *) ensure_die "unsupported remote arch: $_remote_uname" ;;
+    esac
+    _out_deb=warptweet_${WARPTWEET_RELEASE_VERSION}_${_deb_arch}.deb
     # shellcheck disable=SC2086
     scp $_scp_base "$_target:$_remote_root/server.deb" "$WARPTWEET_INTEROP_ARTIFACTS/$_out_deb"
     if [ -n "${WARPTWEET_LINUX_GPG_KEY:-}" ] && [ -x "$WT_REPO_ROOT/scripts/sign-linux-deb.sh" ]; then
