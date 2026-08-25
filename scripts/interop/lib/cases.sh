@@ -504,19 +504,222 @@ interop_phase_availability() {
     fi
 }
 
+interop_reboot_state_path() {
+    printf '%s' "${WARPTWEET_INTEROP_WORK:?}/reboot-resume.json"
+}
+
+interop_route_status_json() {
+    _route_id=$1
+    _out=${2:-/tmp/wt-interop-route-status.json}
+    INTEROP_CLIENT_OUT=$_out INTEROP_CLIENT_ERR=/tmp/wt-interop-route-status.err \
+        interop_client_cmd status --json "$_route_id" >/dev/null 2>&1 || true
+}
+
+interop_route_field() {
+    python3 - "$1" "$2" <<'PY'
+import json, sys
+path, key = sys.argv[1], sys.argv[2]
+try:
+    data = json.load(open(path, encoding="utf-8"))
+except Exception:
+    print("")
+    raise SystemExit
+if isinstance(data, dict) and "tunnels" in data:
+    tunnels = data.get("tunnels") or []
+    data = tunnels[0] if tunnels else {}
+if not isinstance(data, dict):
+    print("")
+    raise SystemExit
+value = data.get(key)
+if value is None:
+    print("")
+else:
+    print(value)
+PY
+}
+
+interop_darwin_boot_id() {
+    /usr/sbin/sysctl -n kern.boottime 2>/dev/null | tr -d '\n'
+}
+
+interop_wait_client_provisioner() {
+    _i=0
+    while [ "$_i" -lt 90 ]; do
+        if [ -S /var/run/warptweet/provisioner.sock ] || [ -S /var/run/warptweet/provisioner.socket ]; then
+            if INTEROP_CLIENT_OUT=/tmp/wt-interop-prov.json INTEROP_CLIENT_ERR=/tmp/wt-interop-prov.err \
+                interop_client_cmd status --json >/dev/null 2>&1; then
+                return 0
+            fi
+        fi
+        _i=$((_i + 1))
+        sleep 1
+    done
+    return 1
+}
+
+interop_write_reboot_resume() {
+    python3 - "$1" <<'PY'
+import json, os, sys
+path = sys.argv[1]
+keys = sorted(
+    k for k in os.environ
+    if k.startswith("WARPTWEET_") or k in ("WT_REPO_ROOT", "WARPTWEET_INTEROP_ROOT")
+)
+env = {k: os.environ[k] for k in keys}
+payload = {
+    "boot_id": os.environ.get("WARPTWEET_INTEROP_REBOOT_BOOT_ID", ""),
+    "unless_id": os.environ.get("WARPTWEET_INTEROP_REBOOT_UNLESS_ID", ""),
+    "manual_id": os.environ.get("WARPTWEET_INTEROP_REBOOT_MANUAL_ID", ""),
+    "down_id": os.environ.get("WARPTWEET_INTEROP_REBOOT_DOWN_ID", ""),
+    "unless_listen": os.environ.get("WARPTWEET_INTEROP_OPEN_ENDPOINT", ""),
+    "env": env,
+}
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump(payload, handle, indent=2)
+    handle.write("\n")
+PY
+}
+
+interop_mint_named_invite() {
+    _name=$1
+    _local=$2
+    _remote="/tmp/${_name}.wtinvite"
+    _target=${WARPTWEET_INTEROP_TARGET_PORT:-5432}
+    if ! interop_ssh "sudo rm -f '$_remote' && sudo '$WARPTWEET_INTEROP_SERVER_CTRL' host --to 127.0.0.1:${_target} $(interop_host_publication_args) --name '$_name' --out '$_remote'" >/tmp/wt-interop-host-reboot.out 2>/tmp/wt-interop-host-reboot.err; then
+        return 1
+    fi
+    if ! interop_ssh "sudo cat '$_remote'" >"$_local"; then
+        return 1
+    fi
+    chmod 0600 "$_local"
+    [ -s "$_local" ]
+}
+
 interop_phase_reboot_policies() {
-    _plist="/Library/LaunchDaemons/com.warptweet.tunnel.${WARPTWEET_INTEROP_CLIENT_NAME}.plist"
-    if [ ! -f "$_plist" ]; then
-        interop_record_result reboot-unless-stopped-manual-down positive not_run "client host reboot not executed; plist missing"
+    if [ "${WARPTWEET_INTEROP_ALLOW_REBOOT:-0}" != "1" ]; then
+        interop_record_result reboot-unless-stopped-manual-down positive not_run "set WARPTWEET_INTEROP_ALLOW_REBOOT=1 to reboot this workstation"
         return 0
     fi
-    if grep -q '<key>RunAtLoad</key>' "$_plist" && grep -q '<true/>' "$_plist"; then
-        WARPTWEET_RESTART_POLICIES_HINT=1
-        export WARPTWEET_RESTART_POLICIES_HINT
-        interop_record_result reboot-unless-stopped-manual-down positive not_run "RunAtLoad is set for unless-stopped; client workstation reboot skipped"
-    else
-        interop_record_result reboot-unless-stopped-manual-down positive not_run "client workstation reboot skipped"
+    _unless=${WARPTWEET_INTEROP_CLIENT_NAME:?}
+    _down=${_unless}-b
+    _manual=${_unless}-manual
+    _plist="/Library/LaunchDaemons/com.warptweet.tunnel.${_unless}.plist"
+    if [ ! -f "$_plist" ]; then
+        interop_record_result reboot-unless-stopped-manual-down positive fail "unless-stopped LaunchDaemon missing before reboot"
+        return 0
     fi
+    if [ -z "${WARPTWEET_INTEROP_OPEN_ENDPOINT:-}" ] || ! interop_payload_current "$WARPTWEET_INTEROP_OPEN_ENDPOINT" >/dev/null 2>&1; then
+        interop_record_result reboot-unless-stopped-manual-down positive fail "unless-stopped payload was down before reboot"
+        return 0
+    fi
+    INTEROP_CLIENT_OUT=/tmp/wt-interop-reboot-down.out INTEROP_CLIENT_ERR=/tmp/wt-interop-reboot-down.err \
+        interop_client_cmd down "$_down" >/dev/null 2>&1 || true
+    interop_route_status_json "$_down" /tmp/wt-interop-down-pre.json
+    _down_phase=$(interop_route_field /tmp/wt-interop-down-pre.json phase)
+    if [ "$_down_phase" = "Ready" ]; then
+        interop_record_result reboot-unless-stopped-manual-down positive fail "explicit down remained Ready before reboot"
+        return 0
+    fi
+    _manual_invite=$WARPTWEET_INTEROP_WORK/${_manual}.wtinvite
+    if ! interop_mint_named_invite "$_manual" "$_manual_invite"; then
+        interop_record_result reboot-unless-stopped-manual-down positive fail "manual invite failed: $(tr '\n' ' ' </tmp/wt-interop-host-reboot.err | cut -c1-160)"
+        return 0
+    fi
+    _manual_port=$((25000 + $(date -u +%s) % 4000))
+    if ! INTEROP_CLIENT_OUT=/tmp/wt-interop-reboot-manual.out INTEROP_CLIENT_ERR=/tmp/wt-interop-reboot-manual.err \
+        interop_client_cmd connect --yes --listen-port "$_manual_port" --restart manual "$_manual_invite" >/dev/null; then
+        interop_record_result reboot-unless-stopped-manual-down positive fail "manual connect failed: $(tr '\n' ' ' </tmp/wt-interop-reboot-manual.err | cut -c1-160)"
+        return 0
+    fi
+    interop_route_status_json "$_manual" /tmp/wt-interop-manual-pre.json
+    _manual_phase=$(interop_route_field /tmp/wt-interop-manual-pre.json phase)
+    _manual_policy=$(interop_route_field /tmp/wt-interop-manual-pre.json restart_policy)
+    if [ "$_manual_phase" != "Ready" ] || [ "$_manual_policy" != "manual" ]; then
+        interop_record_result reboot-unless-stopped-manual-down positive fail "manual route was not Ready before reboot (phase=$_manual_phase policy=$_manual_policy)"
+        return 0
+    fi
+    WARPTWEET_INTEROP_REBOOT_BOOT_ID=$(interop_darwin_boot_id)
+    WARPTWEET_INTEROP_REBOOT_UNLESS_ID=$_unless
+    WARPTWEET_INTEROP_REBOOT_MANUAL_ID=$_manual
+    WARPTWEET_INTEROP_REBOOT_DOWN_ID=$_down
+    export WARPTWEET_INTEROP_REBOOT_BOOT_ID WARPTWEET_INTEROP_REBOOT_UNLESS_ID
+    export WARPTWEET_INTEROP_REBOOT_MANUAL_ID WARPTWEET_INTEROP_REBOOT_DOWN_ID
+    _state=$(interop_reboot_state_path)
+    interop_write_reboot_resume "$_state"
+    interop_log "reboot evidence armed at $_state; this Mac will restart after admin approval"
+    interop_log "after login run: make interop"
+    if command -v osascript >/dev/null 2>&1; then
+        if ! osascript -e 'display dialog "WarpTweet interop will restart this Mac to prove unless-stopped restores, and manual/down stay down. Authenticate the next prompt." buttons {"Cancel","Continue"} default button "Continue" with title "WarpTweet reboot evidence"' >/dev/null 2>&1; then
+            rm -f "$_state"
+            interop_record_result reboot-unless-stopped-manual-down positive fail "operator cancelled the reboot confirmation"
+            return 0
+        fi
+    fi
+    if ! interop_admin_sh '/sbin/shutdown -r now'; then
+        rm -f "$_state"
+        interop_record_result reboot-unless-stopped-manual-down positive fail "administrator reboot was declined or failed"
+        return 0
+    fi
+    sleep 30
+    rm -f "$_state"
+    interop_record_result reboot-unless-stopped-manual-down positive fail "shutdown -r returned without restarting"
+}
+
+interop_phase_reboot_verify() {
+    _state=$(interop_reboot_state_path)
+    [ -s "$_state" ] || interop_die "reboot resume file missing: $_state"
+    _saved_boot=${WARPTWEET_INTEROP_REBOOT_BOOT_ID:-}
+    _unless=${WARPTWEET_INTEROP_REBOOT_UNLESS_ID:-$WARPTWEET_INTEROP_CLIENT_NAME}
+    _manual=${WARPTWEET_INTEROP_REBOOT_MANUAL_ID:-${_unless}-manual}
+    _down=${WARPTWEET_INTEROP_REBOOT_DOWN_ID:-${_unless}-b}
+    _now=$(interop_darwin_boot_id)
+    if [ -z "$_saved_boot" ] || [ "$_now" = "$_saved_boot" ]; then
+        interop_record_result reboot-unless-stopped-manual-down positive fail "reboot did not occur (boot identity unchanged)"
+        return 0
+    fi
+    if ! interop_wait_client_provisioner; then
+        interop_record_result reboot-unless-stopped-manual-down positive fail "provisioner did not return after reboot"
+        return 0
+    fi
+    _i=0
+    _unless_ok=0
+    while [ "$_i" -lt 60 ]; do
+        if [ -n "${WARPTWEET_INTEROP_OPEN_ENDPOINT:-}" ] &&
+            interop_payload_current "$WARPTWEET_INTEROP_OPEN_ENDPOINT" >/dev/null 2>&1; then
+            _unless_ok=1
+            break
+        fi
+        _i=$((_i + 1))
+        sleep 1
+    done
+    interop_route_status_json "$_unless" /tmp/wt-interop-unless-post.json
+    interop_route_status_json "$_manual" /tmp/wt-interop-manual-post.json
+    interop_route_status_json "$_down" /tmp/wt-interop-down-post.json
+    _unless_phase=$(interop_route_field /tmp/wt-interop-unless-post.json phase)
+    _unless_desired=$(interop_route_field /tmp/wt-interop-unless-post.json desired_state)
+    _unless_policy=$(interop_route_field /tmp/wt-interop-unless-post.json restart_policy)
+    _manual_phase=$(interop_route_field /tmp/wt-interop-manual-post.json phase)
+    _manual_desired=$(interop_route_field /tmp/wt-interop-manual-post.json desired_state)
+    _manual_policy=$(interop_route_field /tmp/wt-interop-manual-post.json restart_policy)
+    _down_phase=$(interop_route_field /tmp/wt-interop-down-post.json phase)
+    _down_desired=$(interop_route_field /tmp/wt-interop-down-post.json desired_state)
+    _detail="unless=$_unless_phase/$_unless_desired/$_unless_policy manual=$_manual_phase/$_manual_desired/$_manual_policy down=$_down_phase/$_down_desired payload=$_unless_ok"
+    if [ "$_unless_ok" -ne 1 ] || [ "$_unless_phase" != "Ready" ] || [ "$_unless_desired" != "running" ]; then
+        interop_record_result reboot-unless-stopped-manual-down positive fail "unless-stopped did not restore after reboot ($_detail)"
+        return 0
+    fi
+    if [ "$_down_phase" = "Ready" ] || [ "$_down_desired" != "stopped" ]; then
+        interop_record_result reboot-unless-stopped-manual-down positive fail "explicit down restored after reboot ($_detail)"
+        return 0
+    fi
+    if [ "$_manual_phase" = "Ready" ] || [ "$_manual_policy" != "manual" ] || [ "$_manual_desired" != "running" ]; then
+        interop_record_result reboot-unless-stopped-manual-down positive fail "manual started merely because of reboot ($_detail)"
+        return 0
+    fi
+    WARPTWEET_RESTART_POLICIES_HINT=1
+    export WARPTWEET_RESTART_POLICIES_HINT
+    rm -f "$_state"
+    interop_record_result reboot-unless-stopped-manual-down positive pass "unless-stopped restored after real reboot; manual and down stayed down"
 }
 
 interop_host_clock_mask_units() {
@@ -754,27 +957,40 @@ interop_phase_clock_rollback() {
 interop_phase_pid_reuse() {
     INTEROP_CLIENT_OUT=/tmp/wt-interop-pid.json INTEROP_CLIENT_ERR=/tmp/wt-interop-pid.err \
         interop_client_cmd status --json "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null || true
-    _pid=$(python3 -c 'import json,sys; d=json.load(open("/tmp/wt-interop-pid.json")); print(d.get("pid") or 0)' 2>/dev/null || echo 0)
+    _pid=$(python3 -c 'import json; d=json.load(open("/tmp/wt-interop-pid.json")); print(d.get("pid") or 0)' 2>/dev/null || echo 0)
+    case "$_pid" in
+        '' | *[!0-9]*) _pid=0 ;;
+    esac
     if [ "${_pid:-0}" -le 1 ]; then
         interop_record_result pid-reuse-and-stop-failure negative not_run "no live tunnel pid to signal"
         return 0
     fi
-    if kill -9 "$_pid" 2>/dev/null; then
-        sleep 1
-        INTEROP_CLIENT_OUT=/tmp/wt-interop-pid2.json INTEROP_CLIENT_ERR=/tmp/wt-interop-pid2.err \
-            interop_client_cmd status --json "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null || true
-        _phase=$(python3 -c 'import json; d=json.load(open("/tmp/wt-interop-pid2.json")); print(d.get("phase") or "")' 2>/dev/null || true)
-        _pid2=$(python3 -c 'import json; d=json.load(open("/tmp/wt-interop-pid2.json")); print(d.get("pid") or 0)' 2>/dev/null || echo 0)
-        if [ "$_phase" = "Ready" ] && [ "$_pid2" = "$_pid" ]; then
-            interop_record_result pid-reuse-and-stop-failure negative fail "status still Ready for a killed pid"
-        else
-            interop_record_result pid-reuse-and-stop-failure negative pass "killed pid is not reported Ready"
+    if ! kill -9 "$_pid" 2>/dev/null; then
+        if ! interop_admin_sh "kill -9 $_pid"; then
+            interop_record_result pid-reuse-and-stop-failure negative not_run "cannot signal _warptweet pid $_pid"
+            return 0
         fi
-        INTEROP_CLIENT_OUT=/tmp/wt-interop-pid-up.out INTEROP_CLIENT_ERR=/tmp/wt-interop-pid-up.err \
-            interop_client_cmd up "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null 2>&1 || true
-    else
-        interop_record_result pid-reuse-and-stop-failure negative not_run "cannot signal _warptweet pid from the operator uid"
     fi
+    sleep 1
+    INTEROP_CLIENT_OUT=/tmp/wt-interop-pid2.json INTEROP_CLIENT_ERR=/tmp/wt-interop-pid2.err \
+        interop_client_cmd status --json "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null || true
+    _phase=$(python3 -c 'import json; d=json.load(open("/tmp/wt-interop-pid2.json")); print(d.get("phase") or "")' 2>/dev/null || true)
+    _pid2=$(python3 -c 'import json; d=json.load(open("/tmp/wt-interop-pid2.json")); print(d.get("pid") or 0)' 2>/dev/null || echo 0)
+    _stop_ok=1
+    INTEROP_CLIENT_OUT=/tmp/wt-interop-pid-down.out INTEROP_CLIENT_ERR=/tmp/wt-interop-pid-down.err \
+        interop_client_cmd down "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null 2>&1 || _stop_ok=0
+    INTEROP_CLIENT_OUT=/tmp/wt-interop-pid3.json INTEROP_CLIENT_ERR=/tmp/wt-interop-pid3.err \
+        interop_client_cmd status --json "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null || true
+    _phase3=$(python3 -c 'import json; d=json.load(open("/tmp/wt-interop-pid3.json")); print(d.get("phase") or "")' 2>/dev/null || true)
+    if [ "$_phase" = "Ready" ] && [ "$_pid2" = "$_pid" ]; then
+        interop_record_result pid-reuse-and-stop-failure negative fail "status still Ready for a killed pid"
+    elif [ "$_stop_ok" -eq 1 ] && [ "$_phase3" = "Ready" ]; then
+        interop_record_result pid-reuse-and-stop-failure negative fail "down reported success while status remained Ready"
+    else
+        interop_record_result pid-reuse-and-stop-failure negative pass "killed pid is not reported Ready; down is not terminal while the process is gone"
+    fi
+    INTEROP_CLIENT_OUT=/tmp/wt-interop-pid-up.out INTEROP_CLIENT_ERR=/tmp/wt-interop-pid-up.err \
+        interop_client_cmd up "$WARPTWEET_INTEROP_CLIENT_NAME" >/dev/null 2>&1 || true
 }
 
 interop_phase_silent_renewal() {

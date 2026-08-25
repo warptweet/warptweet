@@ -74,6 +74,19 @@ interop_client_cmd() {
     cat "$_out"
 }
 
+# Run a short POSIX script as root. Prefer passwordless sudo; otherwise the
+# same administrator-privileges prompt the .pkg installer uses.
+interop_admin_sh() {
+    _script=$1
+    [ -n "$_script" ] || return 1
+    if sudo -n sh -c "$_script" >/dev/null 2>&1; then
+        return 0
+    fi
+    command -v osascript >/dev/null 2>&1 || return 1
+    _quoted=$(printf '%s' "$_script" | python3 -c 'import json,sys; sys.stdout.write(json.dumps(sys.stdin.read()))')
+    osascript -e "do shell script $_quoted with administrator privileges" >/dev/null
+}
+
 interop_record_result() {
     # id class status detail
     _id=$1
@@ -235,14 +248,18 @@ interop_load_config() {
     if [ -z "${WARPTWEET_INTEROP_EVIDENCE_OUTPUT:-}" ]; then
         WARPTWEET_INTEROP_EVIDENCE_OUTPUT="$WARPTWEET_INTEROP_WORK/evidence.json"
     fi
-    if [ -e "$WARPTWEET_INTEROP_EVIDENCE_OUTPUT" ] || [ -L "$WARPTWEET_INTEROP_EVIDENCE_OUTPUT" ]; then
-        interop_die "evidence output must not already exist: $WARPTWEET_INTEROP_EVIDENCE_OUTPUT"
-    fi
-
     WARPTWEET_INTEROP_RESULTS_FILE="$WARPTWEET_INTEROP_WORK/results.ndjson"
-    : >"$WARPTWEET_INTEROP_RESULTS_FILE"
     WARPTWEET_INTEROP_INVITE="$WARPTWEET_INTEROP_WORK/${WARPTWEET_INTEROP_CLIENT_NAME}.wtinvite"
-    WARPTWEET_INTEROP_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    if [ "${WARPTWEET_INTEROP_REBOOT_RESUME:-0}" = "1" ]; then
+        [ -s "$WARPTWEET_INTEROP_RESULTS_FILE" ] || interop_die "reboot resume is missing results.ndjson"
+        : "${WARPTWEET_INTEROP_STARTED_AT:=$(date -u +"%Y-%m-%dT%H:%M:%SZ")}"
+    else
+        if [ -e "$WARPTWEET_INTEROP_EVIDENCE_OUTPUT" ] || [ -L "$WARPTWEET_INTEROP_EVIDENCE_OUTPUT" ]; then
+            interop_die "evidence output must not already exist: $WARPTWEET_INTEROP_EVIDENCE_OUTPUT"
+        fi
+        : >"$WARPTWEET_INTEROP_RESULTS_FILE"
+        WARPTWEET_INTEROP_STARTED_AT=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+    fi
 
     export WARPTWEET_INTEROP_WORK WARPTWEET_INTEROP_RESULTS_FILE WARPTWEET_INTEROP_INVITE
     export WARPTWEET_INTEROP_EVIDENCE_OUTPUT WARPTWEET_INTEROP_STARTED_AT

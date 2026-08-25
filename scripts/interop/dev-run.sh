@@ -227,13 +227,41 @@ fi
 export WARPTWEET_INTEROP_SERVER_CTRL WARPTWEET_INTEROP_CLIENT_CTRL
 export WARPTWEET_INTEROP_ECHO_PORT WARPTWEET_INTEROP_CLIENT_NAME
 export WARPTWEET_INTEROP_CLIENT_LISTEN_PORT WARPTWEET_INTEROP_RUN_LIFECYCLE
-interop_dev_log "client_name=$WARPTWEET_INTEROP_CLIENT_NAME listen_port=$WARPTWEET_INTEROP_CLIENT_LISTEN_PORT lifecycle=$WARPTWEET_INTEROP_RUN_LIFECYCLE"
 
 : "${WARPTWEET_INTEROP_WORK:=$WT_REPO_ROOT/scripts/interop/work}"
 mkdir -p "$WARPTWEET_INTEROP_WORK"
-# Fresh evidence path each run under work/
-WARPTWEET_INTEROP_EVIDENCE_OUTPUT=$WARPTWEET_INTEROP_WORK/evidence-$(date -u +%Y%m%dT%H%M%SZ).json
+if [ -s "$WARPTWEET_INTEROP_WORK/reboot-resume.json" ]; then
+    interop_dev_log "loading reboot resume $WARPTWEET_INTEROP_WORK/reboot-resume.json"
+    # shellcheck disable=SC2046
+    eval "$(python3 - "$WARPTWEET_INTEROP_WORK/reboot-resume.json" <<'PY'
+import json, shlex, sys
+data = json.load(open(sys.argv[1], encoding="utf-8"))
+env = data.get("env") or {}
+for key, value in env.items():
+    if not key.replace("_", "").isalnum():
+        continue
+    print("export %s=%s" % (key, shlex.quote(str(value))))
+for key, field in (
+    ("WARPTWEET_INTEROP_REBOOT_BOOT_ID", "boot_id"),
+    ("WARPTWEET_INTEROP_REBOOT_UNLESS_ID", "unless_id"),
+    ("WARPTWEET_INTEROP_REBOOT_MANUAL_ID", "manual_id"),
+    ("WARPTWEET_INTEROP_REBOOT_DOWN_ID", "down_id"),
+):
+    print("export %s=%s" % (key, shlex.quote(str(data.get(field) or ""))))
+listen = data.get("unless_listen") or ""
+if listen:
+    print("export WARPTWEET_INTEROP_OPEN_ENDPOINT=%s" % shlex.quote(str(listen)))
+print("export WARPTWEET_INTEROP_REBOOT_RESUME=1")
+print("export WARPTWEET_INTEROP_FORCE_CLIENT_REINSTALL=0")
+print("export WARPTWEET_INTEROP_FORCE_SERVER_REINSTALL=0")
+PY
+)"
+fi
+if [ -z "${WARPTWEET_INTEROP_EVIDENCE_OUTPUT:-}" ]; then
+    WARPTWEET_INTEROP_EVIDENCE_OUTPUT=$WARPTWEET_INTEROP_WORK/evidence-$(date -u +%Y%m%dT%H%M%SZ).json
+fi
 export WARPTWEET_INTEROP_WORK WARPTWEET_INTEROP_EVIDENCE_OUTPUT
+interop_dev_log "client_name=$WARPTWEET_INTEROP_CLIENT_NAME listen_port=$WARPTWEET_INTEROP_CLIENT_LISTEN_PORT lifecycle=$WARPTWEET_INTEROP_RUN_LIFECYCLE"
 
 interop_dev_log "server=$WARPTWEET_INTEROP_SERVER_HOST listen=$WARPTWEET_INTEROP_SERVER_LISTEN advertise=${WARPTWEET_INTEROP_SERVER_ADVERTISE:-}"
 interop_dev_log "artifacts=$WARPTWEET_INTEROP_ARTIFACTS"

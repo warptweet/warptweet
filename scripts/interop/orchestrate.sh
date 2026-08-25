@@ -73,6 +73,11 @@ interop_require_cmd python3
 interop_require_cmd sudo
 
 interop_log "work dir $WARPTWEET_INTEROP_WORK"
+if [ "${WARPTWEET_INTEROP_REBOOT_RESUME:-0}" = "1" ]; then
+    interop_log "resuming after client workstation reboot"
+    interop_ssh_check
+    interop_phase_reboot_verify
+else
 interop_ssh_check
 # Leftover clock-rollback from a prior run must not fail-close this one.
 # On a fresh VPS the package is not installed yet; pin NTP now and recover
@@ -275,6 +280,7 @@ interop_phase_bounded_floods
 interop_phase_availability
 interop_phase_silent_renewal
 interop_phase_reboot_policies
+fi
 interop_phase_pid_reuse
 interop_phase_live_expiry
 
@@ -376,7 +382,7 @@ fi
 _ev=0
 interop_emit_evidence || _ev=$?
 if [ "$_ev" -eq 0 ]; then
-    interop_log "Phase A complete: full checklist pass (unexpected for Phase A)"
+    interop_log "Phase A complete: full checklist pass"
     exit 0
 fi
 if [ "$_ev" -eq 2 ]; then
