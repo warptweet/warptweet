@@ -12,6 +12,8 @@
 /scripts/interop/work/
 /.cache/
 /artifacts/
+__pycache__/
+*.pyc
 docs/reviews
 *.wtinvite
 *.pem
