@@ -365,6 +365,13 @@ if [ "${WARPTWEET_INTEROP_RUN_LIFECYCLE}" = "1" ]; then
 fi
 interop_phase_clock_rollback
 
+# Clock rollback fail-closes enrollment. Reconcile so bind observations see
+# both listeners. This is the same operator recovery as after restoring the
+# wall clock: run host again, do not mint a new invite.
+if ! interop_ssh "sudo '$WARPTWEET_INTEROP_SERVER_CTRL' host --to 127.0.0.1:${WARPTWEET_INTEROP_TARGET_PORT} $(interop_host_publication_args) --no-invite" >/tmp/wt-interop-host-recover.out 2>/tmp/wt-interop-host-recover.err; then
+    interop_log "warning: host reconcile after clock-rollback failed: $(tr '\n' ' ' </tmp/wt-interop-host-recover.err | cut -c1-160)"
+fi
+
 # interop_emit_evidence: 0=all pass, 1=pass+not_run only, 2=fail present
 _ev=0
 interop_emit_evidence || _ev=$?
