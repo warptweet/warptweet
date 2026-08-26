@@ -255,9 +255,13 @@ func TestAcceptRejectsNonceMismatch(t *testing.T) {
 	if err := Store(directory, record); err != nil {
 		t.Fatalf("Store: %v", err)
 	}
+	noncePrefix := "00"
+	if invite.Nonce[:2] == noncePrefix {
+		noncePrefix = "ff"
+	}
 	request := EnrollmentRequest{
 		InviteID:        invite.InviteID,
-		Nonce:           "00" + invite.Nonce[2:],
+		Nonce:           noncePrefix + invite.Nonce[2:],
 		ClientName:      invite.ClientName,
 		PublicKey:       testCompositePublicKey(),
 		ProfileID:       profile.CurrentID,

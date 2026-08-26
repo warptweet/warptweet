@@ -1,15 +1,32 @@
 # syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+FROM golang:1.26.5-alpine3.23@sha256:622e56dbc11a8cfe87cafa2331e9a201877271cbff918af53d3be315f3da88cc AS release-verifier
+WORKDIR /source
+COPY go.mod go.sum ./
+RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
+    go mod download && \
+    go mod verify
+COPY cmd/verify-public-release ./cmd/verify-public-release
+COPY internal/adoptionresult ./internal/adoptionresult
+COPY internal/locator ./internal/locator
+COPY internal/publicrelease ./internal/publicrelease
+COPY internal/releaseevidence ./internal/releaseevidence
+COPY internal/strictjson ./internal/strictjson
+RUN CGO_ENABLED=0 go build -trimpath -buildvcs=false -ldflags="-s -w -buildid=" \
+    -o /out/verify-public-release ./cmd/verify-public-release
+
 FROM node:24.19.0-alpine3.23@sha256:244cc2b53f46f9e876304391d17682b0ddae9ac33491f4857e25e35a36ba7995 AS build
 ENV ASTRO_TELEMETRY_DISABLED=1 \
-    COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+    COREPACK_ENABLE_DOWNLOAD_PROMPT=0 \
+    WARPTWEET_PUBLIC_RELEASE_VERIFIER=/usr/local/bin/verify-public-release
 WORKDIR /site
+COPY --from=release-verifier /out/verify-public-release /usr/local/bin/verify-public-release
 COPY package.json pnpm-lock.yaml .npmrc ./
 RUN --mount=type=cache,target=/root/.local/share/pnpm/store,sharing=locked \
     corepack enable && \
     corepack prepare pnpm@10.15.1 --activate && \
     test "$(pnpm --version)" = 10.15.1 && \
     pnpm install --frozen-lockfile --ignore-scripts
-COPY astro.config.mjs tsconfig.json ./
+COPY astro.config.mjs tsconfig.json Caddyfile ./
 COPY packaging/evidence ./packaging/evidence
 COPY public ./public
 COPY schemas ./schemas

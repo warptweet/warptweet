@@ -1,11 +1,14 @@
 {
   "kind": "warptweet.public-release-gate",
-  "schema_version": 1,
-  "homebrew_cta_enabled": true,
+  "schema_version": 2,
+  "qualification_complete": true,
+  "public_distribution_ready": false,
   "homebrew_command": "brew install --cask warptweet/tap/warptweet",
   "next_command": "warptweet connect <invite-file>",
-  "qualification_message": "Homebrew package in release qualification",
+  "qualification_message": "First-edition package matrix complete",
+  "distribution_message": "Public packages are being prepared",
   "required_evidence_document": "packaging/evidence/release-evidence-index-v3.json",
+  "required_distribution_evidence_document": "",
   "links": {
     "cask_template": "homebrew/Casks/warptweet.rb.tmpl",
     "evidence_checklist": "packaging/evidence/checklist-v3.json",
@@ -14,8 +17,9 @@
     "package_interop": "docs/2026-08-12_package-interop-evidence.md"
   },
   "notes": [
-    "Set homebrew_cta_enabled to true only after a complete v3 release-evidence index exists for the published artifacts.",
-    "required_evidence_document must be a repository-relative path to a validated warptweet.release-evidence-index JSON file when the CTA is enabled.",
+    "qualification_complete records the complete v3 package and networking matrix.",
+    "Set public_distribution_ready only after non-development artifacts, the public tap, and a clean supported-Mac install are bound by a distribution evidence document.",
+    "The website renders the Homebrew command only when public_distribution_ready is true.",
     "First-edition CTA is Apple Silicon client (darwin-arm64) against linux-amd64 and linux-arm64. darwin-amd64 is not a required index cell."
   ]
 }

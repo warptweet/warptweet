@@ -1,82 +1,107 @@
 ---
 import {
+  distributionMessage,
   enrollCommand,
   homebrewCommand,
-  homebrewCtaEnabled,
+  publicDistributionReady,
+  qualificationComplete,
   qualificationMessage
 } from "../lib/install";
+
+const connectCommand = enrollCommand
+  .replace("warptweet connect ", "warptweet connect --listen-port 15432 ")
+  .replace("<invite-file>", "staging-db.wtinvite");
 ---
 
-<div class="install-panel">
-  <div class="install-panel__copy">
-    <p class="section-kicker">Install</p>
-    <h2 id="install-title">
-      {homebrewCtaEnabled ? "Get WarpTweet onto the machine." : "Install stays gated until evidence passes."}
-    </h2>
-    <p>
-      {
-        homebrewCtaEnabled
-          ? "The primary install path is a signed Homebrew cask that places the package-owned client layout. A controller-only formula is never the website primary path."
-          : "The public path is a signed Homebrew cask that places the package-owned client layout. A controller-only formula is never the website primary path, and the cask command is not shown here until package-to-package evidence passes."
-      }
-    </p>
+<div class="start-panel">
+  <div class="start-panel__heading">
+    <div>
+      <p class="section-kicker">First-edition setup</p>
+      <h2 id="start-title">Two machines. Two commands. One private route.</h2>
+    </div>
+    <div class="release-state" role="status">
+      <span class:list={{ "release-state__dot": true, "release-state__dot--complete": qualificationComplete }}></span>
+      <div>
+        <strong>{qualificationComplete ? qualificationMessage : "Package qualification in progress"}</strong>
+        <p>{publicDistributionReady ? "Public installation is available." : distributionMessage}</p>
+      </div>
+    </div>
   </div>
 
-  {
-    homebrewCtaEnabled ? (
-      <div class="install-panel__active">
-        <div class="install-command" data-install-command>
-          <pre tabindex="0" aria-label="Homebrew install command"><code>{homebrewCommand}</code></pre>
-          <button type="button" class="button button--paper install-copy" data-copy-command={homebrewCommand}>
-            Copy
-          </button>
+  <div class="machine-setup-grid">
+    <article class="setup-card setup-card--host">
+      <header>
+        <span>01</span>
+        <div>
+          <p>Machine with the service</p>
+          <h3>Linux host</h3>
         </div>
-        <p class="install-next">
-          Next:
-          <code>{enrollCommand}</code>
-        </p>
-        <ul class="install-links">
-          <li><a href="https://github.com/warptweet/warptweet/releases">Signed release artifacts</a></li>
-          <li><a href="https://github.com/warptweet/warptweet/blob/main/docs/2026-08-12_package-interop-evidence.md">Release evidence</a></li>
-          <li><a href="https://github.com/warptweet/warptweet/blob/main/SECURITY.md">Security policy</a></li>
-        </ul>
-      </div>
-    ) : (
-      <div class="install-panel__gated" role="status">
-        <p class="install-qualification">{qualificationMessage}</p>
-        <p class="install-qualification-detail">
-          The reviewed Homebrew cask command is published here only after package-to-package
-          release evidence passes for the published artifacts. Until then, no install command is
-          offered that resolves to a missing or controller-only package.
-        </p>
-        <p class="install-next-muted">
-          Planned next action after install:
-          <code>{enrollCommand}</code>
-        </p>
-        <ul class="install-links">
-          <li><a href="https://github.com/warptweet/warptweet">Source</a></li>
-          <li><a href="https://github.com/warptweet/warptweet/blob/main/docs/2026-08-16_product-quickstart.md">Quickstart</a></li>
-          <li><a href="https://github.com/warptweet/warptweet/blob/main/SECURITY.md">Security</a></li>
-          <li><a href="https://github.com/warptweet/warptweet/blob/main/docs/2026-08-16_adoption-and-release-strategy.md">Release status</a></li>
-          <li><a href="https://github.com/warptweet/warptweet/blob/main/packaging/evidence/public-release.json">Evidence gate</a></li>
-        </ul>
-      </div>
-    )
-  }
+        <small>AMD64 · ARM64</small>
+      </header>
+      {
+        publicDistributionReady ? (
+          <p class="setup-card__install">
+            Install the signed <code>.deb</code> for this machine from the release page.
+          </p>
+        ) : (
+          <p class="setup-card__install">Signed Linux release packages are being prepared.</p>
+        )
+      }
+      <p class="setup-card__label">Then authorize one local service:</p>
+      <pre tabindex="0" aria-label="WarpTweet Linux host command"><code>warptweet host --to 127.0.0.1:5432 --name staging-db</code></pre>
+      <p class="setup-card__result">Creates <code>staging-db.wtinvite</code>, a confidential single-use invite.</p>
+    </article>
+
+    <article class="setup-card setup-card--client">
+      <header>
+        <span>02</span>
+        <div>
+          <p>Your workstation</p>
+          <h3>Apple Silicon Mac</h3>
+        </div>
+        <small>macOS 13+</small>
+      </header>
+      {
+        publicDistributionReady ? (
+          <div class="install-command" data-install-command>
+            <pre tabindex="0" aria-label="Homebrew install command"><code>{homebrewCommand}</code></pre>
+            <button type="button" class="button button--paper install-copy" data-copy-command={homebrewCommand}>
+              Copy
+            </button>
+          </div>
+        ) : (
+          <p class="setup-card__install">The Homebrew command appears here after clean-install proof passes.</p>
+        )
+      }
+      <p class="setup-card__label">Connect with the invite:</p>
+      <pre tabindex="0" aria-label="WarpTweet Mac connect command"><code>{connectCommand}</code></pre>
+      <p class="setup-card__result">Your application connects to <code>127.0.0.1:15432</code>.</p>
+    </article>
+  </div>
+
+  <div class="start-panel__next">
+    <p><strong>Use it normally.</strong> Try <code>psql "host=127.0.0.1 port=15432 dbname=app"</code>.</p>
+    <a href="https://github.com/warptweet/warptweet/blob/main/docs/2026-08-16_product-quickstart.md">Read the complete quickstart</a>
+  </div>
 </div>
 
+<p class="visually-hidden" aria-live="polite" data-copy-status></p>
+
 {
-  homebrewCtaEnabled && (
+  publicDistributionReady && (
     <script>
-      const buttons = document.querySelectorAll("[data-copy-command]");
-      for (const button of buttons) {
+      const status = document.querySelector("[data-copy-status]");
+      for (const button of document.querySelectorAll("[data-copy-command]")) {
         button.addEventListener("click", async () => {
           const value = button.getAttribute("data-copy-command");
-          if (!value || !navigator.clipboard) {
-            return;
+          if (!value) return;
+          try {
+            await navigator.clipboard.writeText(value);
+            button.textContent = "Copied";
+            if (status) status.textContent = "Install command copied.";
+          } catch {
+            if (status) status.textContent = "Copy failed. Select the command and copy it manually.";
           }
-          await navigator.clipboard.writeText(value);
-          button.textContent = "Copied";
           window.setTimeout(() => {
             button.textContent = "Copy";
           }, 1600);

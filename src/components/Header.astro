@@ -2,9 +2,9 @@
 import BrandMark from "./BrandMark.astro";
 
 const navigation = [
-  { label: "How it works", href: "#how-it-works" },
+  { label: "Start", href: "#start" },
   { label: "Use cases", href: "#use-cases" },
-  { label: "Install", href: "#install" },
+  { label: "Security", href: "#security" },
   { label: "Protocol", href: "#protocol" }
 ];
 ---
@@ -20,6 +20,6 @@ const navigation = [
         {navigation.map((item) => <li><a href={item.href}>{item.label}</a></li>)}
       </ul>
     </nav>
-    <a class="header-action" href="#how-it-works">See how it works</a>
+    <a class="header-action" href="#start">Get started</a>
   </div>
 </header>

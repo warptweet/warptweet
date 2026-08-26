@@ -1,0 +1,38 @@
+---
+const support = [
+  ["Client", "Apple Silicon Mac", "macOS 13 or newer", "Qualified"],
+  ["Host", "Ubuntu Linux", "AMD64 and ARM64 signed .deb", "Qualified"],
+  ["Direct", "Public IPv4 or IPv6", "Bind and dial the same endpoint", "Qualified"],
+  ["Cloud NAT", "One-to-one NAT", "Private guest bind, public client dial", "Qualified"],
+  ["Mapped ports", "Independent public ports", "Data and enrollment may publish separately", "Qualified"],
+  ["DNS", "A-label hostnames", "Resolve once, then pin the observed route", "Qualified"]
+];
+
+const later = [
+  "Windows client",
+  "Intel Mac as a supported client",
+  "Outbound-only NAT without inbound publication",
+  "TLS-terminating or PROXY-protocol load balancers"
+];
+---
+
+<div class="compatibility-layout">
+  <div class="support-table-wrap" tabindex="0" aria-label="First-edition platform and networking support">
+    <table class="support-table">
+      <thead>
+        <tr><th>Surface</th><th>First edition</th><th>Contract</th><th>Status</th></tr>
+      </thead>
+      <tbody>
+        {support.map(([surface, edition, contract, status]) => (
+          <tr><th scope="row">{surface}</th><td>{edition}</td><td>{contract}</td><td><span>{status}</span></td></tr>
+        ))}
+      </tbody>
+    </table>
+  </div>
+  <aside class="later-card" aria-labelledby="later-title">
+    <p class="section-kicker">Not in the first edition</p>
+    <h3 id="later-title">Clear edges, no implied parity.</h3>
+    <ul>{later.map((item) => <li>{item}</li>)}</ul>
+    <a href="https://github.com/warptweet/warptweet/blob/main/docs/2026-08-24_host-bind-and-advertise.md">Read the networking contract</a>
+  </aside>
+</div>

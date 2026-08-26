@@ -12,7 +12,8 @@
     "dev": "astro dev --host 127.0.0.1 --port 4321",
     "check": "astro check",
     "build": "astro build",
-    "verify": "pnpm run check && pnpm run build && node src/scripts/verify-site-output.mjs"
+    "verify:contrast": "node src/scripts/verify-contrast.mjs",
+    "verify": "pnpm run check && pnpm run build && pnpm run verify:contrast && node src/scripts/verify-site-output.mjs"
   },
   "devDependencies": {
     "@astrojs/check": "0.9.6",

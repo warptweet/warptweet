@@ -1,26 +1,25 @@
 ---
 import BaseLayout from "../layouts/BaseLayout.astro";
-import CLIShowcase from "../components/CLIShowcase.astro";
+import Compatibility from "../components/Compatibility.astro";
 import CryptoProfile from "../components/CryptoProfile.astro";
 import FeatureGrid from "../components/FeatureGrid.astro";
 import Footer from "../components/Footer.astro";
 import Header from "../components/Header.astro";
 import InstallPanel from "../components/InstallPanel.astro";
-import ManifestPanel from "../components/ManifestPanel.astro";
 import ProductRoute from "../components/ProductRoute.astro";
-import ProtocolStack from "../components/ProtocolStack.astro";
+import SecurityModel from "../components/SecurityModel.astro";
 import UseCases from "../components/UseCases.astro";
-import Workflow from "../components/Workflow.astro";
+import { publicDistributionReady } from "../lib/install";
 
-const title = "WarpTweet | One remote service on localhost";
+const title = "WarpTweet | One private service on localhost";
 const description =
-  "Reach Postgres, a private API, or another TCP service on a remote machine through localhost. No exposed target-service port, VPN mesh, or general-purpose SSH access for the ongoing client.";
+  "Hybrid post-quantum TCP tunneling from an Apple Silicon Mac to one exact service on a Linux machine you control. No VPN mesh, hosted relay, or shell access.";
 
 const productFacts = [
-  "Open source",
-  "No account",
-  "No subscription",
-  "No shell, one destination"
+  "Apple Silicon client",
+  "Linux AMD64 + ARM64 host",
+  "One exact destination",
+  "No account or hosted relay"
 ];
 ---
 
@@ -31,155 +30,138 @@ const productFacts = [
   <main id="main-content">
     <section class="product-hero frame" aria-labelledby="hero-title">
       <div class="product-hero__copy">
-        <p class="section-kicker">One service. One local port.</p>
-        <h1 id="hero-title">One remote service. On <em>localhost.</em></h1>
+        <p class="section-kicker">Hybrid post-quantum TCP tunneling</p>
+        <h1 id="hero-title">One private service. On <em>localhost.</em></h1>
         <p class="product-hero__deck">
-          Reach Postgres, a private API, or another TCP service on a remote machine through
-          localhost. No exposed target-service port, VPN mesh, or general-purpose SSH access for
-          the ongoing client.
+          WarpTweet gives your Mac a local port to one service on a Linux machine you control.
+          No VPN mesh, hosted relay, or shell access.
         </p>
         <p class="product-hero__concrete">
           Query Postgres in remote Docker Compose at <code>localhost:15432</code>.
         </p>
         <div class="hero__actions">
-          <a class="button button--primary" href="#how-it-works">See how it works</a>
+          <a class="button button--primary" href="#start">
+            {publicDistributionReady ? "Install WarpTweet" : "See the two-machine setup"}
+          </a>
           <a class="button button--text" href="https://github.com/warptweet/warptweet">View source</a>
         </div>
       </div>
       <ProductRoute />
-      <ul class="product-facts" aria-label="WarpTweet highlights">
+      <ul class="product-facts" aria-label="First-edition support highlights">
         {productFacts.map((fact) => <li>{fact}</li>)}
       </ul>
     </section>
 
-    <section class="section frame" id="how-it-works" aria-labelledby="how-it-works-title">
-      <div id="cli"></div>
-      <div class="section-heading section-heading--split">
-        <div>
-          <p class="section-kicker">How it works</p>
-          <h2 id="how-it-works-title">Host, invite, connect, localhost.</h2>
-        </div>
-        <p>
-          The host grants one exact numeric target. The client connects once and keeps a durable
-          route until that grant expires.
-        </p>
-      </div>
-      <Workflow />
-      <CLIShowcase />
-      <div class="cli-flow" aria-label="WarpTweet command lifecycle">
-        <span>host</span><i aria-hidden="true">→</i>
-        <span>invite</span><i aria-hidden="true">→</i>
-        <span>connect</span><i aria-hidden="true">→</i>
-        <span>localhost</span>
-      </div>
+    <section class="section frame start-section" id="start" aria-labelledby="start-title">
+      <InstallPanel />
     </section>
 
     <section class="section frame" id="use-cases" aria-labelledby="use-cases-title">
       <div class="section-heading section-heading--split">
         <div>
           <p class="section-kicker">Use cases</p>
-          <h2 id="use-cases-title">The first jobs WarpTweet is for.</h2>
+          <h2 id="use-cases-title">Give the application a socket. Not the machine.</h2>
         </div>
         <p>
-          WarpTweet narrows host and network authority. The database credential still controls
-          what a client can do, and any retained root or SSH access remains outside this boundary.
+          WarpTweet carries TCP to one host-approved destination. The target service still owns
+          its database password, API token, and application permissions.
         </p>
       </div>
       <UseCases />
     </section>
 
-    <section class="section frame install-section" id="install" aria-labelledby="install-title">
-      <InstallPanel />
-    </section>
-
     <section class="section frame" id="features" aria-labelledby="features-title">
       <div class="section-heading section-heading--split">
         <div>
-          <p class="section-kicker">Features</p>
-          <h2 id="features-title">A local port for software you already run.</h2>
+          <p class="section-kicker">What it does</p>
+          <h2 id="features-title">A deliberately narrow tunnel with a complete lifecycle.</h2>
         </div>
         <p>
-          WarpTweet brings a service on another machine to a named local port while it manages the
-          route, machine identities, cryptographic profile, and connection lifecycle.
+          The CLI owns enrollment, identity, route policy, readiness, restart behavior, rotation,
+          revocation, and expiry. Your application sees only localhost.
         </p>
       </div>
       <FeatureGrid />
+    </section>
+
+    <section class="section security-section" id="security" aria-labelledby="security-title">
+      <div class="frame">
+        <div class="section-heading section-heading--split">
+          <div>
+            <p class="section-kicker">Security boundaries</p>
+            <h2 id="security-title">Less authority by construction.</h2>
+          </div>
+          <p>
+            WarpTweet does not issue a shell, accept arbitrary destinations, trust a first-seen
+            host, or fall back to classical-only SSH.
+          </p>
+        </div>
+        <SecurityModel />
+      </div>
+    </section>
+
+    <section class="section frame" id="compatibility" aria-labelledby="compatibility-title">
+      <div class="section-heading section-heading--split">
+        <div>
+          <p class="section-kicker">Compatibility</p>
+          <h2 id="compatibility-title">The first edition has explicit edges.</h2>
+        </div>
+        <p>
+          Qualification covers signed packages on both Linux architectures and the network shapes
+          commonly encountered on direct hosts and larger clouds.
+        </p>
+      </div>
+      <Compatibility />
     </section>
 
     <section class="section protocol-section" id="protocol" aria-labelledby="protocol-title">
       <div class="frame">
         <div class="protocol-intro">
           <div>
-            <p class="section-kicker section-kicker--light">WarpTweet protocol</p>
-            <h2 id="protocol-title">A complete contract for the route.</h2>
+            <p class="section-kicker section-kicker--light">Profile v1</p>
+            <h2 id="protocol-title">Hybrid at connection and identity.</h2>
           </div>
           <p>
-            WarpTweet binds who the machines are, where the connection goes, which cryptography
-            protects it, and how the tunnel behaves throughout its lifecycle.
-          </p>
-        </div>
-        <ProtocolStack />
-        <p class="implementation-note">
-          <strong>Profile v1 implementation.</strong> WarpTweet currently carries its protocol over
-          a pinned OpenSSH 10.4p1 and OpenSSL 3.5.7 transport engine. The WarpTweet CLI owns the
-          profile, manifests, identity lifecycle, route policy, readiness, and supervision.
-        </p>
-      </div>
-    </section>
-
-    <section class="section format-section" id="format" aria-labelledby="format-title">
-      <div class="frame">
-        <div class="section-heading section-heading--split">
-          <div>
-            <p class="section-kicker">The .wt format</p>
-            <h2 id="format-title">The route is a file.</h2>
-          </div>
-          <p>
-            A <code>.wt</code> manifest declares its cryptographic profile, machine endpoint, named
-            tunnels, local listeners, destination services, and supervision policy.
-            Composite identities live separately in protected endpoint storage.
-          </p>
-        </div>
-        <ManifestPanel />
-      </div>
-    </section>
-
-    <section class="section crypto-section" id="cryptography" aria-labelledby="crypto-title">
-      <div class="frame">
-        <div class="crypto-heading">
-          <p class="section-kicker section-kicker--light">Profile v1</p>
-          <h2 id="crypto-title">Hybrid at connection and identity.</h2>
-          <p>
-            Profile v1 pins the whole combination. The post-quantum and classical components work
-            together for every connection.
+            Post-quantum and classical components work together for every connection. A missing
+            algorithm or profile mismatch is a hard failure.
           </p>
         </div>
         <CryptoProfile />
-        <p class="standards-line">
-          ML-KEM and ML-DSA are NIST standards. Profile v1 currently uses OpenSSH's
-          vendor-qualified composite authentication binding.
+        <dl class="profile-contract">
+          <div><dt>Engine</dt><dd>OpenSSH 10.4p1 · OpenSSL 3.5.7</dd></div>
+          <div><dt>KEX</dt><dd><code>mlkem768x25519-sha256</code></dd></div>
+          <div><dt>Identity</dt><dd><code>ssh-mldsa44-ed25519@openssh.com</code></dd></div>
+          <div><dt>Cipher</dt><dd><code>chacha20-poly1305@openssh.com</code></dd></div>
+        </dl>
+        <p class="implementation-note">
+          <strong>Exact claim boundary.</strong> ML-KEM and ML-DSA are NIST standards. Profile v1
+          uses OpenSSH's vendor-qualified composite authentication binding. WarpTweet does not
+          represent that binding as an IETF standard, FIPS validation, or a quantum-proof system.
         </p>
+        <nav class="protocol-links" aria-label="Protocol resources">
+          <a href="/schemas/client-tunnels-v2.schema.json">Client schema</a>
+          <a href="/schemas/server-gateway-v2.schema.json">Host schema</a>
+          <a href="https://github.com/warptweet/warptweet/blob/main/packaging/evidence/release-evidence-index-v3.json">Qualification evidence</a>
+          <a href="https://github.com/warptweet/warptweet/blob/main/SECURITY.md">Security policy</a>
+        </nav>
       </div>
     </section>
 
     <section class="open-source-section" id="open-source" aria-labelledby="open-source-title">
       <div class="frame open-source-section__inner">
         <div>
-          <p class="section-kicker section-kicker--light">Open source</p>
-          <h2 id="open-source-title">The protocol belongs in public.</h2>
+          <p class="section-kicker section-kicker--light">Open source · Apache 2.0</p>
+          <h2 id="open-source-title">Built in public. Run on your machines.</h2>
         </div>
         <div>
           <p>
-            WarpTweet is Apache-2.0 licensed. Its controller, <code>.wt</code> schemas,
-            cryptographic profile, package recipes, and system design are open for inspection and
-            contribution.
+            The Go controller, versioned schemas, cryptographic profile, package recipes, threat
+            model, and release evidence are available for inspection and contribution.
           </p>
-          <dl class="open-source-stats">
-            <div><dt>License</dt><dd>Apache 2.0</dd></div>
-            <div><dt>Protocol</dt><dd>Profile v1</dd></div>
-            <div><dt>Source</dt><dd>Go + public schemas</dd></div>
-          </dl>
-          <a class="button button--paper" href="https://github.com/warptweet/warptweet">View source</a>
+          <div class="open-source-actions">
+            <a class="button button--paper" href="https://github.com/warptweet/warptweet">Explore the repository</a>
+            <a href="https://github.com/warptweet/warptweet/blob/main/CONTRIBUTING.md">Contributing guide</a>
+          </div>
         </div>
       </div>
     </section>

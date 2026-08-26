@@ -282,7 +282,6 @@ run_case_not_run engine-and-package-tamper negative "requires dual-host tamper h
 run_case_not_run bounded-floods negative "requires dual-host flood harness"
 run_case_not_run availability-faults negative "requires dual-host fault harness"
 
-WT_SCHEMA=3
 if [ -n "${WARPTWEET_EVIDENCE_SCHEMA_VERSION:-}" ] && [ "$WARPTWEET_EVIDENCE_SCHEMA_VERSION" != "3" ]; then
     fail "only evidence schema 3 is supported"
 fi

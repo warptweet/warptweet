@@ -1,6 +1,8 @@
 # WarpTweet product quickstart
 
-This is the five-minute product path. It is not package-to-package release evidence.
+This is the shortest product path after the signed client and host packages are
+installed. Package qualification is complete. Public packages are not yet
+published, so the website does not currently expose an install command.
 
 ## What you get
 
@@ -8,7 +10,7 @@ One loopback local port to one exact numeric remote TCP service. No shell, VPN m
 
 ## Host
 
-On the Linux machine that can reach the service:
+On a qualified Linux AMD64 or ARM64 machine that can reach the service:
 
 ```sh
 warptweet host --to 127.0.0.1:5432 --name staging-db --access-for 30d
@@ -26,10 +28,10 @@ services:
 
 ## Client
 
-On the macOS workstation:
+On an Apple Silicon Mac running macOS 13 or newer:
 
 ```sh
-warptweet connect staging-db.wtinvite --listen-port 15432 --restart unless-stopped
+warptweet connect --listen-port 15432 --restart unless-stopped staging-db.wtinvite
 psql "host=127.0.0.1 port=15432 dbname=app"
 ```
 
@@ -49,6 +51,9 @@ Invite lifetime is 15 minutes and single-use. Authorization is a separate 30-day
 
 ## Limits
 
-WarpTweet narrows host and network authority. Database credentials remain independent. Retained root or unrestricted SSH remains outside this boundary. Public install stays dark until v2 package evidence passes.
+WarpTweet narrows host and network authority. Database credentials remain
+independent. Retained root or unrestricted SSH remains outside this boundary.
+Public install remains dark until separate distribution evidence proves the
+Homebrew command against a non-development release.
 
 Current contract: `docs/2026-08-16_adoption-and-release-strategy.md`.

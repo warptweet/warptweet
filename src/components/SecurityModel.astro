@@ -1,0 +1,55 @@
+---
+const boundaries = [
+  {
+    label: "Destination",
+    title: "One service, fixed by the host",
+    body: "The client cannot turn a database grant into another port, another address, or general host access."
+  },
+  {
+    label: "Local access",
+    title: "Loopback-only listener",
+    body: "Applications connect through 127.0.0.1. WarpTweet never opens the client route to the LAN."
+  },
+  {
+    label: "Enrollment",
+    title: "Pinned and single-use",
+    body: "The invite pins the enrollment identity and host key. It expires quickly and cannot be enrolled twice."
+  },
+  {
+    label: "Identity",
+    title: "Keys stay on each endpoint",
+    body: "Host and client identities are generated where they are used. Private keys are not carried inside .wt or .wtinvite files."
+  }
+];
+
+const lifecycle = [
+  ["status", "Observe the named route and its real process-bound readiness."],
+  ["down / up", "Persist the intended stopped or running state across restarts."],
+  ["rotate", "Replace the client identity with host acknowledgment."],
+  ["revoke", "Remove host authorization and terminate the active grant."],
+  ["expiry", "Let the host stop authorizing the route at its declared deadline."]
+];
+---
+
+<div class="security-boundaries">
+  {boundaries.map((boundary) => (
+    <article>
+      <span>{boundary.label}</span>
+      <h3>{boundary.title}</h3>
+      <p>{boundary.body}</p>
+    </article>
+  ))}
+</div>
+
+<div class="lifecycle-strip" aria-labelledby="lifecycle-title">
+  <div>
+    <p class="section-kicker">Lifecycle</p>
+    <h3 id="lifecycle-title">Access has an end.</h3>
+    <p>Routes remain inspectable and recoverable without silently renewing host authority.</p>
+  </div>
+  <dl>
+    {lifecycle.map(([command, description]) => (
+      <div><dt><code>{command}</code></dt><dd>{description}</dd></div>
+    ))}
+  </dl>
+</div>

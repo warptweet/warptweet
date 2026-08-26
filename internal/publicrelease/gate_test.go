@@ -15,7 +15,7 @@ import (
 	"warptweet.com/warptweet/internal/releaseevidence"
 )
 
-func TestRepositoryGateEnablesHomebrewCTAWithCompleteIndex(t *testing.T) {
+func TestRepositoryGateRecordsQualificationWithoutPublishing(t *testing.T) {
 	t.Parallel()
 
 	root := repositoryRoot(t)
@@ -23,22 +23,26 @@ func TestRepositoryGateEnablesHomebrewCTAWithCompleteIndex(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadGate: %v", err)
 	}
-	if !gate.HomebrewCTAEnabled {
-		t.Fatal("homebrew CTA must be enabled once the complete v3 index is bound")
+	if !gate.QualificationComplete {
+		t.Fatal("package qualification must be complete once the v3 index is bound")
+	}
+	if gate.PublicDistributionReady {
+		t.Fatal("public distribution must remain dark without public install evidence")
 	}
 	if gate.RequiredEvidenceDocument != "packaging/evidence/release-evidence-index-v3.json" {
 		t.Fatalf("required evidence = %q", gate.RequiredEvidenceDocument)
 	}
 	if gate.HomebrewCommand != DefaultHomebrewCommand ||
 		gate.NextCommand != DefaultNextCommand ||
-		gate.QualificationMessage != QualificationMessage {
+		gate.QualificationMessage != QualificationMessage ||
+		gate.DistributionMessage != DistributionMessage {
 		t.Fatalf("unexpected gate constants: %+v", gate)
 	}
 	if gate.Links["evidence_checklist"] != "packaging/evidence/checklist-v3.json" {
 		t.Fatalf("evidence checklist = %q", gate.Links["evidence_checklist"])
 	}
-	if err := ValidateEnabledCTA(root, gate); err != nil {
-		t.Fatalf("ValidateEnabledCTA: %v", err)
+	if err := ValidateQualification(root, gate); err != nil {
+		t.Fatalf("ValidateQualification: %v", err)
 	}
 	if err := VerifyRepository(root); err != nil {
 		t.Fatalf("VerifyRepository: %v", err)
@@ -53,7 +57,7 @@ func TestVerifyRepositoryRejectsMissingGate(t *testing.T) {
 	}
 }
 
-func TestEnabledCTARequiresCompleteV3Index(t *testing.T) {
+func TestQualificationRequiresCompleteV3Index(t *testing.T) {
 	t.Parallel()
 
 	root := repositoryRoot(t)
@@ -65,15 +69,16 @@ func TestEnabledCTARequiresCompleteV3Index(t *testing.T) {
 	missing := Gate{
 		Kind:                     Kind,
 		SchemaVersion:            SchemaVersion,
-		HomebrewCTAEnabled:       true,
+		QualificationComplete:    true,
 		HomebrewCommand:          DefaultHomebrewCommand,
 		NextCommand:              DefaultNextCommand,
 		QualificationMessage:     QualificationMessage,
+		DistributionMessage:      DistributionMessage,
 		RequiredEvidenceDocument: "packaging/evidence/does-not-exist.json",
 		Links:                    map[string]string{"evidence_checklist": "packaging/evidence/checklist-v3.json"},
 	}
-	if err := ValidateEnabledCTA(root, missing); err == nil {
-		t.Fatal("enabled CTA accepted missing evidence document")
+	if err := ValidateQualification(root, missing); err == nil {
+		t.Fatal("qualification accepted missing evidence document")
 	}
 
 	reports := completeV3IndexReports(checklist)
@@ -103,19 +108,20 @@ func TestEnabledCTARequiresCompleteV3Index(t *testing.T) {
 	enabled := Gate{
 		Kind:                     Kind,
 		SchemaVersion:            SchemaVersion,
-		HomebrewCTAEnabled:       true,
+		QualificationComplete:    true,
 		HomebrewCommand:          DefaultHomebrewCommand,
 		NextCommand:              DefaultNextCommand,
 		QualificationMessage:     QualificationMessage,
+		DistributionMessage:      DistributionMessage,
 		RequiredEvidenceDocument: evidenceRel,
 		Links:                    map[string]string{"evidence_checklist": "packaging/evidence/checklist-v3.json"},
 	}
-	if err := ValidateEnabledCTA(pseudoRoot, enabled); err != nil {
-		t.Fatalf("ValidateEnabledCTA complete v3 index: %v", err)
+	if err := ValidateQualification(pseudoRoot, enabled); err != nil {
+		t.Fatalf("ValidateQualification complete v3 index: %v", err)
 	}
 }
 
-func TestEnabledCTAReportsIncompleteCell(t *testing.T) {
+func TestQualificationReportsIncompleteCell(t *testing.T) {
 	t.Parallel()
 
 	root := repositoryRoot(t)
@@ -129,23 +135,24 @@ func TestEnabledCTAReportsIncompleteCell(t *testing.T) {
 	enabled := Gate{
 		Kind:                     Kind,
 		SchemaVersion:            SchemaVersion,
-		HomebrewCTAEnabled:       true,
+		QualificationComplete:    true,
 		HomebrewCommand:          DefaultHomebrewCommand,
 		NextCommand:              DefaultNextCommand,
 		QualificationMessage:     QualificationMessage,
+		DistributionMessage:      DistributionMessage,
 		RequiredEvidenceDocument: evidenceRel,
 		Links:                    map[string]string{"evidence_checklist": "packaging/evidence/checklist-v3.json"},
 	}
-	err = ValidateEnabledCTA(pseudoRoot, enabled)
+	err = ValidateQualification(pseudoRoot, enabled)
 	if err == nil {
-		t.Fatal("enabled CTA accepted incomplete index")
+		t.Fatal("qualification accepted incomplete index")
 	}
 	if !strings.Contains(err.Error(), reports[0].ClientArtifactProfileID) {
 		t.Fatalf("incomplete error omitted cell: %v", err)
 	}
 }
 
-func TestEnabledCTARejectsV1Evidence(t *testing.T) {
+func TestQualificationRejectsV1Evidence(t *testing.T) {
 	t.Parallel()
 
 	root := repositoryRoot(t)
@@ -187,15 +194,16 @@ func TestEnabledCTARejectsV1Evidence(t *testing.T) {
 	enabled := Gate{
 		Kind:                     Kind,
 		SchemaVersion:            SchemaVersion,
-		HomebrewCTAEnabled:       true,
+		QualificationComplete:    true,
 		HomebrewCommand:          DefaultHomebrewCommand,
 		NextCommand:              DefaultNextCommand,
 		QualificationMessage:     QualificationMessage,
+		DistributionMessage:      DistributionMessage,
 		RequiredEvidenceDocument: evidenceRel,
 		Links:                    map[string]string{"evidence_checklist": "packaging/evidence/checklist-v3.json"},
 	}
-	if err := ValidateEnabledCTA(pseudoRoot, enabled); err == nil {
-		t.Fatal("enabled CTA accepted complete v1 evidence")
+	if err := ValidateQualification(pseudoRoot, enabled); err == nil {
+		t.Fatal("qualification accepted complete v1 evidence")
 	}
 }
 
@@ -220,6 +228,146 @@ func TestLoadGateRejectsTrailingJSON(t *testing.T) {
 		if _, err := LoadGate(path); err == nil {
 			t.Fatalf("LoadGate accepted trailing %q", name.suffix)
 		}
+	}
+}
+
+func TestPublicDistributionRequiresSeparateEvidence(t *testing.T) {
+	t.Parallel()
+
+	gate := Gate{
+		Kind:                     Kind,
+		SchemaVersion:            SchemaVersion,
+		QualificationComplete:    true,
+		PublicDistributionReady:  true,
+		HomebrewCommand:          DefaultHomebrewCommand,
+		NextCommand:              DefaultNextCommand,
+		QualificationMessage:     QualificationMessage,
+		DistributionMessage:      DistributionMessage,
+		RequiredEvidenceDocument: "packaging/evidence/release-evidence-index-v3.json",
+		Links:                    map[string]string{"evidence_checklist": "packaging/evidence/checklist-v3.json"},
+	}
+	if err := ValidateGate(gate); err == nil {
+		t.Fatal("public distribution accepted without distribution evidence")
+	}
+}
+
+func TestGateRejectsRepositoryEscapePath(t *testing.T) {
+	t.Parallel()
+
+	gate := Gate{
+		Kind:                     Kind,
+		SchemaVersion:            SchemaVersion,
+		QualificationComplete:    true,
+		HomebrewCommand:          DefaultHomebrewCommand,
+		NextCommand:              DefaultNextCommand,
+		QualificationMessage:     QualificationMessage,
+		DistributionMessage:      DistributionMessage,
+		RequiredEvidenceDocument: "..",
+		Links:                    map[string]string{"evidence_checklist": "packaging/evidence/checklist-v3.json"},
+	}
+	if err := ValidateGate(gate); err == nil {
+		t.Fatal("gate accepted a repository escape path")
+	}
+}
+
+func TestGateRejectsPrematureQualificationEvidence(t *testing.T) {
+	t.Parallel()
+
+	gate := Gate{
+		Kind:                     Kind,
+		SchemaVersion:            SchemaVersion,
+		HomebrewCommand:          DefaultHomebrewCommand,
+		NextCommand:              DefaultNextCommand,
+		QualificationMessage:     QualificationMessage,
+		DistributionMessage:      DistributionMessage,
+		RequiredEvidenceDocument: "packaging/evidence/release-evidence-index-v3.json",
+		Links:                    map[string]string{"evidence_checklist": "packaging/evidence/checklist-v3.json"},
+	}
+	if err := ValidateGate(gate); err == nil {
+		t.Fatal("gate accepted evidence while qualification was incomplete")
+	}
+}
+
+func TestPublicDistributionBindsCleanInstallToQualifiedArtifacts(t *testing.T) {
+	t.Parallel()
+
+	root := repositoryRoot(t)
+	checklist, err := releaseevidence.LoadChecklistV3(releaseevidence.DefaultChecklistV3Path(root))
+	if err != nil {
+		t.Fatal(err)
+	}
+	reports := completeV3IndexReports(checklist)
+	pseudoRoot, evidenceRel := writeV3IndexTree(t, root, reports)
+	distributionRel := "packaging/evidence/sample-public-distribution.json"
+	distribution := DistributionEvidence{
+		Kind:                DistributionKind,
+		SchemaVersion:       DistributionSchemaVersion,
+		ReleaseVersion:      reports[0].ReleaseVersion,
+		SourceCommit:        reports[0].SourceCommit,
+		GitHubReleaseURL:    "https://github.com/warptweet/warptweet/releases/tag/v0.1.0-rc.1",
+		HomebrewTapURL:      "https://github.com/warptweet/homebrew-tap",
+		HomebrewTapCommit:   strings.Repeat("d", 40),
+		HomebrewCaskPath:    "Casks/warptweet.rb",
+		HomebrewCaskSHA256:  strings.Repeat("e", 64),
+		ClientPackageSHA256: reports[0].ClientPackageSHA256,
+		CleanInstall: CleanInstallEvidence{
+			Status:                      "pass",
+			Platform:                    "darwin",
+			Architecture:                "arm64",
+			Command:                     DefaultHomebrewCommand,
+			HomebrewVersion:             "6.0.0",
+			InstalledVersion:            reports[0].ReleaseVersion,
+			ObservedClientPackageSHA256: reports[0].ClientPackageSHA256,
+			PerformedAt:                 "2026-08-26T12:00:00Z",
+		},
+	}
+	encoded, err := json.Marshal(distribution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pseudoRoot, distributionRel), encoded, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gate := Gate{
+		Kind:                                 Kind,
+		SchemaVersion:                        SchemaVersion,
+		QualificationComplete:                true,
+		PublicDistributionReady:              true,
+		HomebrewCommand:                      DefaultHomebrewCommand,
+		NextCommand:                          DefaultNextCommand,
+		QualificationMessage:                 QualificationMessage,
+		DistributionMessage:                  DistributionMessage,
+		RequiredEvidenceDocument:             evidenceRel,
+		RequiredDistributionEvidenceDocument: distributionRel,
+		Links:                                map[string]string{"evidence_checklist": "packaging/evidence/checklist-v3.json"},
+	}
+	if err := ValidatePublicDistribution(pseudoRoot, gate); err != nil {
+		t.Fatalf("ValidatePublicDistribution: %v", err)
+	}
+
+	distribution.GitHubReleaseURL = "https://example.com/warptweet/warptweet/releases/tag/v0.1.0-rc.1"
+	encoded, err = json.Marshal(distribution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pseudoRoot, distributionRel), encoded, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidatePublicDistribution(pseudoRoot, gate); err == nil {
+		t.Fatal("public distribution accepted a third-party release URL")
+	}
+	distribution.GitHubReleaseURL = "https://github.com/warptweet/warptweet/releases/tag/v0.1.0-rc.1"
+
+	distribution.CleanInstall.ObservedClientPackageSHA256 = strings.Repeat("f", 64)
+	encoded, err = json.Marshal(distribution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(pseudoRoot, distributionRel), encoded, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidatePublicDistribution(pseudoRoot, gate); err == nil {
+		t.Fatal("public distribution accepted a clean-install digest mismatch")
 	}
 }
 
