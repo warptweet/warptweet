@@ -80,7 +80,11 @@ if (!releaseGate.homebrew_cta_enabled) {
   if (!indexHtml.includes(releaseGate.homebrew_command)) {
     throw new Error("enabled Homebrew CTA must render the reviewed install command");
   }
-  if (!indexHtml.includes(releaseGate.next_command)) {
+  const nextCommandHtml = releaseGate.next_command
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;");
+  if (!indexHtml.includes(releaseGate.next_command) && !indexHtml.includes(nextCommandHtml)) {
     throw new Error("enabled Homebrew CTA must render the enroll next action");
   }
   if (indexHtml.includes("/docs/package-interop")) {

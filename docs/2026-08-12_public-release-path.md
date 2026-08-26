@@ -13,8 +13,9 @@ Yes for **activating** the Homebrew command.
 
 WP8 delivered the checklist and harness. Hosted dual-host runners must still
 produce a complete v3 `warptweet.release-evidence-index` covering the
-architecture matrix and required networking cells. Until that exists, the
-website must say `Homebrew package in release qualification`.
+architecture matrix and required networking cells. The first-edition Apple Silicon index is
+`packaging/evidence/release-evidence-index-v3.json`. The website CTA is enabled
+against that document.
 
 ## Release order
 

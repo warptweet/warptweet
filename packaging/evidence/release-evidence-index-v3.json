@@ -1,0 +1,1391 @@
+{
+  "kind": "warptweet.release-evidence-index",
+  "schema_version": 3,
+  "contract_id": "warptweet.adoption-release.v1",
+  "contract_checklist_sha256": "fc0b77c83b84814abec97f0770f9f1a50a507e99211b9e2d048ac019141984a1",
+  "reports": [
+    {
+      "kind": "warptweet.release-evidence",
+      "schema_version": 3,
+      "contract_id": "warptweet.adoption-release.v1",
+      "contract_checklist_sha256": "fc0b77c83b84814abec97f0770f9f1a50a507e99211b9e2d048ac019141984a1",
+      "release_version": "0.1.0-dev",
+      "source_commit": "ef12b34072808cfc1712de8b5ad23192eccb802a",
+      "clean_tree_proof": "clean",
+      "client_package_sha256": "9ac81eb1d624bb0e53ddba322f7922d65ff978e9e35f9de681980ef562f5c774",
+      "server_package_sha256": "3752505cae2317a17e2758018c8ffe1aac815f725e58ff0f4c7e4a8d2feb38cb",
+      "client_artifact_profile_id": "darwin-arm64",
+      "server_artifact_profile_id": "linux-amd64",
+      "client_engine_manifest_sha256": "c7fd2677e9cd2cd5fa22fb4af4f8af1ba18e58546346af9fb95eac94995d7c68",
+      "server_engine_manifest_sha256": "df8f135b716d1b52060d9faf42ebe210b95193b534744b53aa17947c422d1ba8",
+      "client_platform": "Darwin",
+      "server_platform": "linux",
+      "client_architecture": "arm64",
+      "server_architecture": "amd64",
+      "host_target": "127.0.0.1:5432",
+      "authorization_policy": "30d-default-365d-max",
+      "route_count": 2,
+      "restart_policies": [
+        "unless-stopped",
+        "manual"
+      ],
+      "test_identity": "interop-phase-a-mac-client",
+      "commands": [
+        "./scripts/interop/orchestrate.sh"
+      ],
+      "started_at": "2026-08-26T00:36:55Z",
+      "finished_at": "2026-08-26T00:44:39Z",
+      "package_to_package": true,
+      "source_tree_substitution": false,
+      "cell_classes": [
+        "matrix"
+      ],
+      "results": [
+        {
+          "id": "pkg-signature-and-manifest",
+          "class": "positive",
+          "status": "pass",
+          "detail": "pinned artifacts installed, manifests match, signatures verified (gpg warptweet_0.1.0-dev_amd64.deb.asc; pkgutil notarized)"
+        },
+        {
+          "id": "target-change-denial",
+          "class": "positive",
+          "status": "pass",
+          "detail": "host refused target change while invite or grant exists"
+        },
+        {
+          "id": "engine-identity-trust-preflight",
+          "class": "positive",
+          "status": "pass",
+          "detail": "doctor-server after host"
+        },
+        {
+          "id": "invite-enroll-single-use",
+          "class": "positive",
+          "status": "pass",
+          "detail": "connect ok; invite reuse rejected"
+        },
+        {
+          "id": "pid-bound-readiness",
+          "class": "positive",
+          "status": "pass",
+          "detail": "status reports Ready"
+        },
+        {
+          "id": "deterministic-target-payload",
+          "class": "positive",
+          "status": "pass",
+          "detail": "postgres startup reached through loopback"
+        },
+        {
+          "id": "compose-loopback-postgres",
+          "class": "positive",
+          "status": "pass",
+          "detail": "remote Postgres bound to 127.0.0.1:5432; query path through WarpTweet"
+        },
+        {
+          "id": "exact-kex-aead",
+          "class": "positive",
+          "status": "pass",
+          "detail": "live NEWKEYS logged mlkem768x25519-sha256 and chacha20-poly1305@openssh.com"
+        },
+        {
+          "id": "composite-auth",
+          "class": "positive",
+          "status": "pass",
+          "detail": "profile and live authorized_keys use ssh-mldsa44-ed25519@openssh.com"
+        },
+        {
+          "id": "agent-skill-delivery",
+          "class": "positive",
+          "status": "pass",
+          "detail": "canonical skill warptweet-service-access sha256=aeeb2d0fbdd14d6093b6f6b0d10b5a30ff000b6967eaf72cdaf45cc6c5f40a83"
+        },
+        {
+          "id": "invite-fail-closed",
+          "class": "negative",
+          "status": "pass",
+          "detail": "tampered invite rejected; reuse already rejected"
+        },
+        {
+          "id": "second-client-grant",
+          "class": "positive",
+          "status": "pass",
+          "detail": "independent grant; server client records=12"
+        },
+        {
+          "id": "two-independent-routes",
+          "class": "positive",
+          "status": "pass",
+          "detail": "two Ready routes on 127.0.0.1:19648 and 127.0.0.1:22684"
+        },
+        {
+          "id": "forwarding-surface-rejected",
+          "class": "negative",
+          "status": "pass",
+          "detail": "session/exec refused (no shell on data plane)"
+        },
+        {
+          "id": "rekey-same-profile",
+          "class": "positive",
+          "status": "pass",
+          "detail": "journal recorded 37 dataplane_kex events under the pinned profile"
+        },
+        {
+          "id": "classical-only-kex-host-client",
+          "class": "negative",
+          "status": "pass",
+          "detail": "classical-only KEX and host key refused"
+        },
+        {
+          "id": "wrong-host-pin",
+          "class": "negative",
+          "status": "pass",
+          "detail": "replaced host pin rejected at enroll"
+        },
+        {
+          "id": "malformed-keys-messages",
+          "class": "negative",
+          "status": "pass",
+          "detail": "truncated invite rejected; garbage identification did not take the data plane down"
+        },
+        {
+          "id": "local-state-mutation",
+          "class": "negative",
+          "status": "pass",
+          "detail": "listen-port collision or consumed invite failed closed"
+        },
+        {
+          "id": "engine-and-package-tamper",
+          "class": "negative",
+          "status": "pass",
+          "detail": "detached GPG and package bytes fail closed on a flipped artifact"
+        },
+        {
+          "id": "bounded-floods",
+          "class": "negative",
+          "status": "pass",
+          "detail": "bounded connect flood left the payload path serving"
+        },
+        {
+          "id": "availability-faults",
+          "class": "negative",
+          "status": "pass",
+          "detail": "data-plane restart recovered; target refusal failed closed; postgres return restored transit"
+        },
+        {
+          "id": "silent-renewal-and-port-reassignment",
+          "class": "negative",
+          "status": "pass",
+          "detail": "existing grant not_after unchanged; local port reassignment is not a public up flag"
+        },
+        {
+          "id": "reboot-unless-stopped-manual-down",
+          "class": "positive",
+          "status": "pass",
+          "detail": "unless-stopped restored after real reboot; manual and down stayed down"
+        },
+        {
+          "id": "pid-reuse-and-stop-failure",
+          "class": "negative",
+          "status": "pass",
+          "detail": "killed pid is not reported Ready; down is not terminal while the process is gone"
+        },
+        {
+          "id": "live-expiry-and-revocation",
+          "class": "positive",
+          "status": "pass",
+          "detail": "short grant died after not_after; payload no longer reachable"
+        },
+        {
+          "id": "stop-restart-rotate-revoke-upgrade",
+          "class": "positive",
+          "status": "pass",
+          "detail": "down, up, rotate, up-after-rotate, revoke (upgrade not in this pass)"
+        },
+        {
+          "id": "clock-rollback-fail-closed",
+          "class": "positive",
+          "status": "pass",
+          "detail": "material clock rollback blocked the host; wall clock restored"
+        }
+      ],
+      "networking": {
+        "cell_id": "",
+        "publication_model": "one_to_one_nat",
+        "published_endpoint_generation": 2,
+        "invite_schema_version": 3,
+        "invite_dials_match_published": true,
+        "invite_dials": {
+          "data": {
+            "host": "34.102.114.176",
+            "port": 2222
+          },
+          "enrollment": {
+            "host": "34.102.114.176",
+            "port": 29722
+          }
+        },
+        "binds": {
+          "data": {
+            "address": "10.168.0.4",
+            "port": 2222
+          },
+          "enrollment": {
+            "address": "10.168.0.4",
+            "port": 29722
+          }
+        },
+        "dials": {
+          "data": {
+            "host": "34.102.114.176",
+            "port": 2222
+          },
+          "enrollment": {
+            "host": "34.102.114.176",
+            "port": 29722
+          }
+        },
+        "observed_listeners": {
+          "data": "10.168.0.4:2222",
+          "enrollment": "10.168.0.4:29722",
+          "match_binds": true
+        },
+        "test_dnat_absent": true,
+        "loopback_alias_absent": true,
+        "client_dials": [
+          {
+            "leg": "data",
+            "host": "34.102.114.176",
+            "port": 2222,
+            "status": "pass"
+          },
+          {
+            "leg": "enrollment",
+            "host": "34.102.114.176",
+            "port": 29722,
+            "status": "pass"
+          }
+        ],
+        "spki_result": {
+          "status": "pass"
+        },
+        "host_key_result": {
+          "status": "pass"
+        },
+        "enrollment_resolved_addr": "34.102.114.176",
+        "data_resolved_addr": "34.102.114.176",
+        "operator_firewall_assumptions": "operator-stated: inbound 2222/tcp and 29722/tcp from 45.51.138.47/32; no guest DNAT helper",
+        "operator_load_balancer_assumptions": "none; not a proxy load balancer",
+        "package_only": true,
+        "clean_tree": true
+      }
+    },
+    {
+      "kind": "warptweet.release-evidence",
+      "schema_version": 3,
+      "contract_id": "warptweet.adoption-release.v1",
+      "contract_checklist_sha256": "fc0b77c83b84814abec97f0770f9f1a50a507e99211b9e2d048ac019141984a1",
+      "release_version": "0.1.0-dev",
+      "source_commit": "ef12b34072808cfc1712de8b5ad23192eccb802a",
+      "clean_tree_proof": "clean",
+      "client_package_sha256": "9ac81eb1d624bb0e53ddba322f7922d65ff978e9e35f9de681980ef562f5c774",
+      "server_package_sha256": "0492cd8c0455c99fe58ae1f315e2ef3e44e042ee24695aac6e900284fcb1a56a",
+      "client_artifact_profile_id": "darwin-arm64",
+      "server_artifact_profile_id": "linux-arm64",
+      "client_engine_manifest_sha256": "c7fd2677e9cd2cd5fa22fb4af4f8af1ba18e58546346af9fb95eac94995d7c68",
+      "server_engine_manifest_sha256": "73fbb03dee78f6b89ab08011490ec17d00234e3734c0d7a600f0a2aa8a276396",
+      "client_platform": "Darwin",
+      "server_platform": "linux",
+      "client_architecture": "arm64",
+      "server_architecture": "arm64",
+      "host_target": "127.0.0.1:5432",
+      "authorization_policy": "30d-default-365d-max",
+      "route_count": 2,
+      "restart_policies": [
+        "unless-stopped",
+        "manual"
+      ],
+      "test_identity": "interop-phase-a-mac-client",
+      "commands": [
+        "./scripts/interop/orchestrate.sh"
+      ],
+      "started_at": "2026-08-26T00:19:29Z",
+      "finished_at": "2026-08-26T00:26:07Z",
+      "package_to_package": true,
+      "source_tree_substitution": false,
+      "cell_classes": [
+        "matrix",
+        "networking"
+      ],
+      "results": [
+        {
+          "id": "pkg-signature-and-manifest",
+          "class": "positive",
+          "status": "pass",
+          "detail": "pinned artifacts installed, manifests match, signatures verified (gpg warptweet_0.1.0-dev_arm64.deb.asc; pkgutil notarized)"
+        },
+        {
+          "id": "target-change-denial",
+          "class": "positive",
+          "status": "pass",
+          "detail": "host refused target change while invite or grant exists"
+        },
+        {
+          "id": "engine-identity-trust-preflight",
+          "class": "positive",
+          "status": "pass",
+          "detail": "doctor-server after host"
+        },
+        {
+          "id": "invite-enroll-single-use",
+          "class": "positive",
+          "status": "pass",
+          "detail": "connect ok; invite reuse rejected"
+        },
+        {
+          "id": "pid-bound-readiness",
+          "class": "positive",
+          "status": "pass",
+          "detail": "status reports Ready"
+        },
+        {
+          "id": "deterministic-target-payload",
+          "class": "positive",
+          "status": "pass",
+          "detail": "postgres startup reached through loopback"
+        },
+        {
+          "id": "compose-loopback-postgres",
+          "class": "positive",
+          "status": "pass",
+          "detail": "remote Postgres bound to 127.0.0.1:5432; query path through WarpTweet"
+        },
+        {
+          "id": "exact-kex-aead",
+          "class": "positive",
+          "status": "pass",
+          "detail": "live NEWKEYS logged mlkem768x25519-sha256 and chacha20-poly1305@openssh.com"
+        },
+        {
+          "id": "composite-auth",
+          "class": "positive",
+          "status": "pass",
+          "detail": "profile and live authorized_keys use ssh-mldsa44-ed25519@openssh.com"
+        },
+        {
+          "id": "agent-skill-delivery",
+          "class": "positive",
+          "status": "pass",
+          "detail": "canonical skill warptweet-service-access sha256=aeeb2d0fbdd14d6093b6f6b0d10b5a30ff000b6967eaf72cdaf45cc6c5f40a83"
+        },
+        {
+          "id": "invite-fail-closed",
+          "class": "negative",
+          "status": "pass",
+          "detail": "tampered invite rejected; reuse already rejected"
+        },
+        {
+          "id": "second-client-grant",
+          "class": "positive",
+          "status": "pass",
+          "detail": "independent grant; server client records=39"
+        },
+        {
+          "id": "two-independent-routes",
+          "class": "positive",
+          "status": "pass",
+          "detail": "two Ready routes on 127.0.0.1:18602 and 127.0.0.1:25621"
+        },
+        {
+          "id": "forwarding-surface-rejected",
+          "class": "negative",
+          "status": "pass",
+          "detail": "session/exec refused (no shell on data plane)"
+        },
+        {
+          "id": "rekey-same-profile",
+          "class": "positive",
+          "status": "pass",
+          "detail": "journal recorded 36 dataplane_kex events under the pinned profile"
+        },
+        {
+          "id": "classical-only-kex-host-client",
+          "class": "negative",
+          "status": "pass",
+          "detail": "classical-only KEX and host key refused"
+        },
+        {
+          "id": "wrong-host-pin",
+          "class": "negative",
+          "status": "pass",
+          "detail": "replaced host pin rejected at enroll"
+        },
+        {
+          "id": "malformed-keys-messages",
+          "class": "negative",
+          "status": "pass",
+          "detail": "truncated invite rejected; garbage identification did not take the data plane down"
+        },
+        {
+          "id": "local-state-mutation",
+          "class": "negative",
+          "status": "pass",
+          "detail": "listen-port collision or consumed invite failed closed"
+        },
+        {
+          "id": "engine-and-package-tamper",
+          "class": "negative",
+          "status": "pass",
+          "detail": "detached GPG and package bytes fail closed on a flipped artifact"
+        },
+        {
+          "id": "bounded-floods",
+          "class": "negative",
+          "status": "pass",
+          "detail": "bounded connect flood left the payload path serving"
+        },
+        {
+          "id": "availability-faults",
+          "class": "negative",
+          "status": "pass",
+          "detail": "data-plane restart recovered; target refusal failed closed; postgres return restored transit"
+        },
+        {
+          "id": "silent-renewal-and-port-reassignment",
+          "class": "negative",
+          "status": "pass",
+          "detail": "existing grant not_after unchanged; local port reassignment is not a public up flag"
+        },
+        {
+          "id": "reboot-unless-stopped-manual-down",
+          "class": "positive",
+          "status": "pass",
+          "detail": "unless-stopped restored after real reboot; manual and down stayed down"
+        },
+        {
+          "id": "pid-reuse-and-stop-failure",
+          "class": "negative",
+          "status": "pass",
+          "detail": "killed pid is not reported Ready; down is not terminal while the process is gone"
+        },
+        {
+          "id": "live-expiry-and-revocation",
+          "class": "positive",
+          "status": "pass",
+          "detail": "short grant died after not_after; payload no longer reachable"
+        },
+        {
+          "id": "stop-restart-rotate-revoke-upgrade",
+          "class": "positive",
+          "status": "pass",
+          "detail": "down, up, rotate, up-after-rotate, revoke (upgrade not in this pass)"
+        },
+        {
+          "id": "clock-rollback-fail-closed",
+          "class": "positive",
+          "status": "pass",
+          "detail": "material clock rollback blocked the host; wall clock restored"
+        }
+      ],
+      "networking": {
+        "cell_id": "gce-one-to-one-nat",
+        "publication_model": "one_to_one_nat",
+        "published_endpoint_generation": 6,
+        "invite_schema_version": 3,
+        "invite_dials_match_published": true,
+        "invite_dials": {
+          "data": {
+            "host": "34.20.136.161",
+            "port": 2222
+          },
+          "enrollment": {
+            "host": "34.20.136.161",
+            "port": 29722
+          }
+        },
+        "binds": {
+          "data": {
+            "address": "10.168.0.2",
+            "port": 2222
+          },
+          "enrollment": {
+            "address": "10.168.0.2",
+            "port": 29722
+          }
+        },
+        "dials": {
+          "data": {
+            "host": "34.20.136.161",
+            "port": 2222
+          },
+          "enrollment": {
+            "host": "34.20.136.161",
+            "port": 29722
+          }
+        },
+        "observed_listeners": {
+          "data": "10.168.0.2:2222",
+          "enrollment": "10.168.0.2:29722",
+          "match_binds": true
+        },
+        "test_dnat_absent": true,
+        "loopback_alias_absent": true,
+        "client_dials": [
+          {
+            "leg": "data",
+            "host": "34.20.136.161",
+            "port": 2222,
+            "status": "pass"
+          },
+          {
+            "leg": "enrollment",
+            "host": "34.20.136.161",
+            "port": 29722,
+            "status": "pass"
+          }
+        ],
+        "spki_result": {
+          "status": "pass"
+        },
+        "host_key_result": {
+          "status": "pass"
+        },
+        "enrollment_resolved_addr": "34.20.136.161",
+        "data_resolved_addr": "34.20.136.161",
+        "operator_firewall_assumptions": "operator-stated: inbound 2222/tcp and 29722/tcp from 45.51.138.47/32; no guest DNAT helper",
+        "operator_load_balancer_assumptions": "none; not a proxy load balancer",
+        "package_only": true,
+        "clean_tree": true
+      }
+    },
+    {
+      "kind": "warptweet.release-evidence",
+      "schema_version": 3,
+      "contract_id": "warptweet.adoption-release.v1",
+      "contract_checklist_sha256": "fc0b77c83b84814abec97f0770f9f1a50a507e99211b9e2d048ac019141984a1",
+      "release_version": "0.1.0-dev",
+      "source_commit": "ef12b34072808cfc1712de8b5ad23192eccb802a",
+      "clean_tree_proof": "clean",
+      "client_package_sha256": "9ac81eb1d624bb0e53ddba322f7922d65ff978e9e35f9de681980ef562f5c774",
+      "server_package_sha256": "0492cd8c0455c99fe58ae1f315e2ef3e44e042ee24695aac6e900284fcb1a56a",
+      "client_artifact_profile_id": "darwin-arm64",
+      "server_artifact_profile_id": "linux-arm64",
+      "client_engine_manifest_sha256": "c7fd2677e9cd2cd5fa22fb4af4f8af1ba18e58546346af9fb95eac94995d7c68",
+      "server_engine_manifest_sha256": "73fbb03dee78f6b89ab08011490ec17d00234e3734c0d7a600f0a2aa8a276396",
+      "client_platform": "Darwin",
+      "server_platform": "linux",
+      "client_architecture": "arm64",
+      "server_architecture": "arm64",
+      "host_target": "127.0.0.1:5432",
+      "authorization_policy": "30d-default-365d-max",
+      "route_count": 2,
+      "restart_policies": [
+        "unless-stopped"
+      ],
+      "test_identity": "interop-phase-a-mac-client",
+      "commands": [
+        "./scripts/interop/orchestrate.sh"
+      ],
+      "started_at": "2026-08-26T00:33:32Z",
+      "finished_at": "2026-08-26T00:36:28Z",
+      "package_to_package": true,
+      "source_tree_substitution": false,
+      "cell_classes": [
+        "networking"
+      ],
+      "results": [
+        {
+          "id": "pkg-signature-and-manifest",
+          "class": "positive",
+          "status": "pass",
+          "detail": "pinned artifacts installed, manifests match, signatures verified (gpg warptweet_0.1.0-dev_arm64.deb.asc; pkgutil notarized)"
+        },
+        {
+          "id": "target-change-denial",
+          "class": "positive",
+          "status": "pass",
+          "detail": "host refused target change while invite or grant exists"
+        },
+        {
+          "id": "engine-identity-trust-preflight",
+          "class": "positive",
+          "status": "pass",
+          "detail": "doctor-server after host"
+        },
+        {
+          "id": "invite-enroll-single-use",
+          "class": "positive",
+          "status": "pass",
+          "detail": "connect ok; invite reuse rejected"
+        },
+        {
+          "id": "pid-bound-readiness",
+          "class": "positive",
+          "status": "pass",
+          "detail": "status reports Ready"
+        },
+        {
+          "id": "deterministic-target-payload",
+          "class": "positive",
+          "status": "pass",
+          "detail": "postgres startup reached through loopback"
+        },
+        {
+          "id": "compose-loopback-postgres",
+          "class": "positive",
+          "status": "pass",
+          "detail": "remote Postgres bound to 127.0.0.1:5432; query path through WarpTweet"
+        },
+        {
+          "id": "exact-kex-aead",
+          "class": "positive",
+          "status": "pass",
+          "detail": "live NEWKEYS logged mlkem768x25519-sha256 and chacha20-poly1305@openssh.com"
+        },
+        {
+          "id": "composite-auth",
+          "class": "positive",
+          "status": "pass",
+          "detail": "profile and live authorized_keys use ssh-mldsa44-ed25519@openssh.com"
+        },
+        {
+          "id": "agent-skill-delivery",
+          "class": "positive",
+          "status": "pass",
+          "detail": "canonical skill warptweet-service-access sha256=aeeb2d0fbdd14d6093b6f6b0d10b5a30ff000b6967eaf72cdaf45cc6c5f40a83"
+        },
+        {
+          "id": "invite-fail-closed",
+          "class": "negative",
+          "status": "pass",
+          "detail": "tampered invite rejected; reuse already rejected"
+        },
+        {
+          "id": "second-client-grant",
+          "class": "positive",
+          "status": "pass",
+          "detail": "independent grant; server client records=49"
+        },
+        {
+          "id": "two-independent-routes",
+          "class": "positive",
+          "status": "pass",
+          "detail": "two Ready routes on 127.0.0.1:19445 and 127.0.0.1:22493"
+        },
+        {
+          "id": "forwarding-surface-rejected",
+          "class": "negative",
+          "status": "pass",
+          "detail": "session/exec refused (no shell on data plane)"
+        },
+        {
+          "id": "rekey-same-profile",
+          "class": "positive",
+          "status": "pass",
+          "detail": "journal recorded 39 dataplane_kex events under the pinned profile"
+        },
+        {
+          "id": "classical-only-kex-host-client",
+          "class": "negative",
+          "status": "pass",
+          "detail": "classical-only KEX and host key refused"
+        },
+        {
+          "id": "wrong-host-pin",
+          "class": "negative",
+          "status": "pass",
+          "detail": "replaced host pin rejected at enroll"
+        },
+        {
+          "id": "malformed-keys-messages",
+          "class": "negative",
+          "status": "pass",
+          "detail": "truncated invite rejected; garbage identification did not take the data plane down"
+        },
+        {
+          "id": "local-state-mutation",
+          "class": "negative",
+          "status": "pass",
+          "detail": "listen-port collision or consumed invite failed closed"
+        },
+        {
+          "id": "engine-and-package-tamper",
+          "class": "negative",
+          "status": "pass",
+          "detail": "detached GPG and package bytes fail closed on a flipped artifact"
+        },
+        {
+          "id": "bounded-floods",
+          "class": "negative",
+          "status": "pass",
+          "detail": "bounded connect flood left the payload path serving"
+        },
+        {
+          "id": "availability-faults",
+          "class": "negative",
+          "status": "pass",
+          "detail": "data-plane restart recovered; target refusal failed closed; postgres return restored transit"
+        },
+        {
+          "id": "silent-renewal-and-port-reassignment",
+          "class": "negative",
+          "status": "pass",
+          "detail": "existing grant not_after unchanged; local port reassignment is not a public up flag"
+        },
+        {
+          "id": "reboot-unless-stopped-manual-down",
+          "class": "positive",
+          "status": "not_run",
+          "detail": "set WARPTWEET_INTEROP_ALLOW_REBOOT=1 to reboot this workstation"
+        },
+        {
+          "id": "pid-reuse-and-stop-failure",
+          "class": "negative",
+          "status": "pass",
+          "detail": "killed pid is not reported Ready; down is not terminal while the process is gone"
+        },
+        {
+          "id": "live-expiry-and-revocation",
+          "class": "positive",
+          "status": "pass",
+          "detail": "short grant died after not_after; payload no longer reachable"
+        },
+        {
+          "id": "stop-restart-rotate-revoke-upgrade",
+          "class": "positive",
+          "status": "pass",
+          "detail": "down, up, rotate, up-after-rotate, revoke (upgrade not in this pass)"
+        },
+        {
+          "id": "clock-rollback-fail-closed",
+          "class": "positive",
+          "status": "pass",
+          "detail": "material clock rollback blocked the host; wall clock restored"
+        }
+      ],
+      "networking": {
+        "cell_id": "port-mapped",
+        "publication_model": "port_mapped",
+        "published_endpoint_generation": 9,
+        "invite_schema_version": 3,
+        "invite_dials_match_published": true,
+        "invite_dials": {
+          "data": {
+            "host": "data.34.102.114.176.nip.io",
+            "port": 443
+          },
+          "enrollment": {
+            "host": "enroll.34.20.136.161.nip.io",
+            "port": 443
+          }
+        },
+        "binds": {
+          "data": {
+            "address": "10.168.0.2",
+            "port": 2222
+          },
+          "enrollment": {
+            "address": "10.168.0.2",
+            "port": 29722
+          }
+        },
+        "dials": {
+          "data": {
+            "host": "data.34.102.114.176.nip.io",
+            "port": 443
+          },
+          "enrollment": {
+            "host": "enroll.34.20.136.161.nip.io",
+            "port": 443
+          }
+        },
+        "observed_listeners": {
+          "data": "10.168.0.2:2222",
+          "enrollment": "10.168.0.2:29722",
+          "match_binds": true
+        },
+        "test_dnat_absent": true,
+        "loopback_alias_absent": true,
+        "client_dials": [
+          {
+            "leg": "data",
+            "host": "data.34.102.114.176.nip.io",
+            "port": 443,
+            "status": "pass"
+          },
+          {
+            "leg": "enrollment",
+            "host": "enroll.34.20.136.161.nip.io",
+            "port": 443,
+            "status": "pass"
+          }
+        ],
+        "spki_result": {
+          "status": "pass"
+        },
+        "host_key_result": {
+          "status": "pass"
+        },
+        "enrollment_resolved_addr": "enroll.34.20.136.161.nip.io",
+        "data_resolved_addr": "data.34.102.114.176.nip.io",
+        "operator_firewall_assumptions": "operator-stated: inbound 443/tcp from 45.51.138.47/32 via socat on a second VM; guest binds 2222/29722; no guest DNAT helper",
+        "operator_load_balancer_assumptions": "none; not a proxy load balancer",
+        "package_only": true,
+        "clean_tree": true
+      }
+    },
+    {
+      "kind": "warptweet.release-evidence",
+      "schema_version": 3,
+      "contract_id": "warptweet.adoption-release.v1",
+      "contract_checklist_sha256": "fc0b77c83b84814abec97f0770f9f1a50a507e99211b9e2d048ac019141984a1",
+      "release_version": "0.1.0-dev",
+      "source_commit": "ef12b34072808cfc1712de8b5ad23192eccb802a",
+      "clean_tree_proof": "clean",
+      "client_package_sha256": "9ac81eb1d624bb0e53ddba322f7922d65ff978e9e35f9de681980ef562f5c774",
+      "server_package_sha256": "0492cd8c0455c99fe58ae1f315e2ef3e44e042ee24695aac6e900284fcb1a56a",
+      "client_artifact_profile_id": "darwin-arm64",
+      "server_artifact_profile_id": "linux-arm64",
+      "client_engine_manifest_sha256": "c7fd2677e9cd2cd5fa22fb4af4f8af1ba18e58546346af9fb95eac94995d7c68",
+      "server_engine_manifest_sha256": "73fbb03dee78f6b89ab08011490ec17d00234e3734c0d7a600f0a2aa8a276396",
+      "client_platform": "Darwin",
+      "server_platform": "linux",
+      "client_architecture": "arm64",
+      "server_architecture": "arm64",
+      "host_target": "127.0.0.1:5432",
+      "authorization_policy": "30d-default-365d-max",
+      "route_count": 2,
+      "restart_policies": [
+        "unless-stopped"
+      ],
+      "test_identity": "interop-phase-a-mac-client",
+      "commands": [
+        "./scripts/interop/orchestrate.sh"
+      ],
+      "started_at": "2026-08-26T00:30:21Z",
+      "finished_at": "2026-08-26T00:32:57Z",
+      "package_to_package": true,
+      "source_tree_substitution": false,
+      "cell_classes": [
+        "networking"
+      ],
+      "results": [
+        {
+          "id": "pkg-signature-and-manifest",
+          "class": "positive",
+          "status": "pass",
+          "detail": "pinned artifacts installed, manifests match, signatures verified (gpg warptweet_0.1.0-dev_arm64.deb.asc; pkgutil notarized)"
+        },
+        {
+          "id": "target-change-denial",
+          "class": "positive",
+          "status": "pass",
+          "detail": "host refused target change while invite or grant exists"
+        },
+        {
+          "id": "engine-identity-trust-preflight",
+          "class": "positive",
+          "status": "pass",
+          "detail": "doctor-server after host"
+        },
+        {
+          "id": "invite-enroll-single-use",
+          "class": "positive",
+          "status": "pass",
+          "detail": "connect ok; invite reuse rejected"
+        },
+        {
+          "id": "pid-bound-readiness",
+          "class": "positive",
+          "status": "pass",
+          "detail": "status reports Ready"
+        },
+        {
+          "id": "deterministic-target-payload",
+          "class": "positive",
+          "status": "pass",
+          "detail": "postgres startup reached through loopback"
+        },
+        {
+          "id": "compose-loopback-postgres",
+          "class": "positive",
+          "status": "pass",
+          "detail": "remote Postgres bound to 127.0.0.1:5432; query path through WarpTweet"
+        },
+        {
+          "id": "exact-kex-aead",
+          "class": "positive",
+          "status": "pass",
+          "detail": "live NEWKEYS logged mlkem768x25519-sha256 and chacha20-poly1305@openssh.com"
+        },
+        {
+          "id": "composite-auth",
+          "class": "positive",
+          "status": "pass",
+          "detail": "profile and live authorized_keys use ssh-mldsa44-ed25519@openssh.com"
+        },
+        {
+          "id": "agent-skill-delivery",
+          "class": "positive",
+          "status": "pass",
+          "detail": "canonical skill warptweet-service-access sha256=aeeb2d0fbdd14d6093b6f6b0d10b5a30ff000b6967eaf72cdaf45cc6c5f40a83"
+        },
+        {
+          "id": "invite-fail-closed",
+          "class": "negative",
+          "status": "pass",
+          "detail": "tampered invite rejected; reuse already rejected"
+        },
+        {
+          "id": "second-client-grant",
+          "class": "positive",
+          "status": "pass",
+          "detail": "independent grant; server client records=46"
+        },
+        {
+          "id": "two-independent-routes",
+          "class": "positive",
+          "status": "pass",
+          "detail": "two Ready routes on 127.0.0.1:19254 and 127.0.0.1:22283"
+        },
+        {
+          "id": "forwarding-surface-rejected",
+          "class": "negative",
+          "status": "pass",
+          "detail": "session/exec refused (no shell on data plane)"
+        },
+        {
+          "id": "rekey-same-profile",
+          "class": "positive",
+          "status": "pass",
+          "detail": "journal recorded 38 dataplane_kex events under the pinned profile"
+        },
+        {
+          "id": "classical-only-kex-host-client",
+          "class": "negative",
+          "status": "pass",
+          "detail": "classical-only KEX and host key refused"
+        },
+        {
+          "id": "wrong-host-pin",
+          "class": "negative",
+          "status": "pass",
+          "detail": "replaced host pin rejected at enroll"
+        },
+        {
+          "id": "malformed-keys-messages",
+          "class": "negative",
+          "status": "pass",
+          "detail": "truncated invite rejected; garbage identification did not take the data plane down"
+        },
+        {
+          "id": "local-state-mutation",
+          "class": "negative",
+          "status": "pass",
+          "detail": "listen-port collision or consumed invite failed closed"
+        },
+        {
+          "id": "engine-and-package-tamper",
+          "class": "negative",
+          "status": "pass",
+          "detail": "detached GPG and package bytes fail closed on a flipped artifact"
+        },
+        {
+          "id": "bounded-floods",
+          "class": "negative",
+          "status": "pass",
+          "detail": "bounded connect flood left the payload path serving"
+        },
+        {
+          "id": "availability-faults",
+          "class": "negative",
+          "status": "pass",
+          "detail": "data-plane restart recovered; target refusal failed closed; postgres return restored transit"
+        },
+        {
+          "id": "silent-renewal-and-port-reassignment",
+          "class": "negative",
+          "status": "pass",
+          "detail": "existing grant not_after unchanged; local port reassignment is not a public up flag"
+        },
+        {
+          "id": "reboot-unless-stopped-manual-down",
+          "class": "positive",
+          "status": "not_run",
+          "detail": "set WARPTWEET_INTEROP_ALLOW_REBOOT=1 to reboot this workstation"
+        },
+        {
+          "id": "pid-reuse-and-stop-failure",
+          "class": "negative",
+          "status": "pass",
+          "detail": "killed pid is not reported Ready; down is not terminal while the process is gone"
+        },
+        {
+          "id": "live-expiry-and-revocation",
+          "class": "positive",
+          "status": "pass",
+          "detail": "short grant died after not_after; payload no longer reachable"
+        },
+        {
+          "id": "stop-restart-rotate-revoke-upgrade",
+          "class": "positive",
+          "status": "pass",
+          "detail": "down, up, rotate, up-after-rotate, revoke (upgrade not in this pass)"
+        },
+        {
+          "id": "clock-rollback-fail-closed",
+          "class": "positive",
+          "status": "pass",
+          "detail": "material clock rollback blocked the host; wall clock restored"
+        }
+      ],
+      "networking": {
+        "cell_id": "dns-dial",
+        "publication_model": "dns_dial",
+        "published_endpoint_generation": 8,
+        "invite_schema_version": 3,
+        "invite_dials_match_published": true,
+        "invite_dials": {
+          "data": {
+            "host": "data.34.20.136.161.nip.io",
+            "port": 2222
+          },
+          "enrollment": {
+            "host": "enroll.34.20.136.161.nip.io",
+            "port": 29722
+          }
+        },
+        "binds": {
+          "data": {
+            "address": "10.168.0.2",
+            "port": 2222
+          },
+          "enrollment": {
+            "address": "10.168.0.2",
+            "port": 29722
+          }
+        },
+        "dials": {
+          "data": {
+            "host": "data.34.20.136.161.nip.io",
+            "port": 2222
+          },
+          "enrollment": {
+            "host": "enroll.34.20.136.161.nip.io",
+            "port": 29722
+          }
+        },
+        "observed_listeners": {
+          "data": "10.168.0.2:2222",
+          "enrollment": "10.168.0.2:29722",
+          "match_binds": true
+        },
+        "test_dnat_absent": true,
+        "loopback_alias_absent": true,
+        "client_dials": [
+          {
+            "leg": "data",
+            "host": "data.34.20.136.161.nip.io",
+            "port": 2222,
+            "status": "pass"
+          },
+          {
+            "leg": "enrollment",
+            "host": "enroll.34.20.136.161.nip.io",
+            "port": 29722,
+            "status": "pass"
+          }
+        ],
+        "spki_result": {
+          "status": "pass"
+        },
+        "host_key_result": {
+          "status": "pass"
+        },
+        "enrollment_resolved_addr": "enroll.34.20.136.161.nip.io",
+        "data_resolved_addr": "data.34.20.136.161.nip.io",
+        "operator_firewall_assumptions": "operator-stated: inbound 2222/tcp and 29722/tcp from 45.51.138.47/32; no guest DNAT helper",
+        "operator_load_balancer_assumptions": "none; not a proxy load balancer",
+        "package_only": true,
+        "clean_tree": true
+      }
+    },
+    {
+      "kind": "warptweet.release-evidence",
+      "schema_version": 3,
+      "contract_id": "warptweet.adoption-release.v1",
+      "contract_checklist_sha256": "fc0b77c83b84814abec97f0770f9f1a50a507e99211b9e2d048ac019141984a1",
+      "release_version": "0.1.0-dev",
+      "source_commit": "ef12b34072808cfc1712de8b5ad23192eccb802a",
+      "clean_tree_proof": "clean",
+      "client_package_sha256": "9ac81eb1d624bb0e53ddba322f7922d65ff978e9e35f9de681980ef562f5c774",
+      "server_package_sha256": "0492cd8c0455c99fe58ae1f315e2ef3e44e042ee24695aac6e900284fcb1a56a",
+      "client_artifact_profile_id": "darwin-arm64",
+      "server_artifact_profile_id": "linux-arm64",
+      "client_engine_manifest_sha256": "c7fd2677e9cd2cd5fa22fb4af4f8af1ba18e58546346af9fb95eac94995d7c68",
+      "server_engine_manifest_sha256": "73fbb03dee78f6b89ab08011490ec17d00234e3734c0d7a600f0a2aa8a276396",
+      "client_platform": "Darwin",
+      "server_platform": "linux",
+      "client_architecture": "arm64",
+      "server_architecture": "arm64",
+      "host_target": "127.0.0.1:5432",
+      "authorization_policy": "30d-default-365d-max",
+      "route_count": 2,
+      "restart_policies": [
+        "unless-stopped"
+      ],
+      "test_identity": "interop-phase-a-mac-client",
+      "commands": [
+        "./scripts/interop/orchestrate.sh"
+      ],
+      "started_at": "2026-08-26T00:27:10Z",
+      "finished_at": "2026-08-26T00:29:55Z",
+      "package_to_package": true,
+      "source_tree_substitution": false,
+      "cell_classes": [
+        "networking"
+      ],
+      "results": [
+        {
+          "id": "pkg-signature-and-manifest",
+          "class": "positive",
+          "status": "pass",
+          "detail": "pinned artifacts installed, manifests match, signatures verified (gpg warptweet_0.1.0-dev_arm64.deb.asc; pkgutil notarized)"
+        },
+        {
+          "id": "target-change-denial",
+          "class": "positive",
+          "status": "pass",
+          "detail": "host refused target change while invite or grant exists"
+        },
+        {
+          "id": "engine-identity-trust-preflight",
+          "class": "positive",
+          "status": "pass",
+          "detail": "doctor-server after host"
+        },
+        {
+          "id": "invite-enroll-single-use",
+          "class": "positive",
+          "status": "pass",
+          "detail": "connect ok; invite reuse rejected"
+        },
+        {
+          "id": "pid-bound-readiness",
+          "class": "positive",
+          "status": "pass",
+          "detail": "status reports Ready"
+        },
+        {
+          "id": "deterministic-target-payload",
+          "class": "positive",
+          "status": "pass",
+          "detail": "postgres startup reached through loopback"
+        },
+        {
+          "id": "compose-loopback-postgres",
+          "class": "positive",
+          "status": "pass",
+          "detail": "remote Postgres bound to 127.0.0.1:5432; query path through WarpTweet"
+        },
+        {
+          "id": "exact-kex-aead",
+          "class": "positive",
+          "status": "pass",
+          "detail": "live NEWKEYS logged mlkem768x25519-sha256 and chacha20-poly1305@openssh.com"
+        },
+        {
+          "id": "composite-auth",
+          "class": "positive",
+          "status": "pass",
+          "detail": "profile and live authorized_keys use ssh-mldsa44-ed25519@openssh.com"
+        },
+        {
+          "id": "agent-skill-delivery",
+          "class": "positive",
+          "status": "pass",
+          "detail": "canonical skill warptweet-service-access sha256=aeeb2d0fbdd14d6093b6f6b0d10b5a30ff000b6967eaf72cdaf45cc6c5f40a83"
+        },
+        {
+          "id": "invite-fail-closed",
+          "class": "negative",
+          "status": "pass",
+          "detail": "tampered invite rejected; reuse already rejected"
+        },
+        {
+          "id": "second-client-grant",
+          "class": "positive",
+          "status": "pass",
+          "detail": "independent grant; server client records=43"
+        },
+        {
+          "id": "two-independent-routes",
+          "class": "positive",
+          "status": "pass",
+          "detail": "two Ready routes on 127.0.0.1:19063 and 127.0.0.1:22097"
+        },
+        {
+          "id": "forwarding-surface-rejected",
+          "class": "negative",
+          "status": "pass",
+          "detail": "session/exec refused (no shell on data plane)"
+        },
+        {
+          "id": "rekey-same-profile",
+          "class": "positive",
+          "status": "pass",
+          "detail": "journal recorded 37 dataplane_kex events under the pinned profile"
+        },
+        {
+          "id": "classical-only-kex-host-client",
+          "class": "negative",
+          "status": "pass",
+          "detail": "classical-only KEX and host key refused"
+        },
+        {
+          "id": "wrong-host-pin",
+          "class": "negative",
+          "status": "pass",
+          "detail": "replaced host pin rejected at enroll"
+        },
+        {
+          "id": "malformed-keys-messages",
+          "class": "negative",
+          "status": "pass",
+          "detail": "truncated invite rejected; garbage identification did not take the data plane down"
+        },
+        {
+          "id": "local-state-mutation",
+          "class": "negative",
+          "status": "pass",
+          "detail": "listen-port collision or consumed invite failed closed"
+        },
+        {
+          "id": "engine-and-package-tamper",
+          "class": "negative",
+          "status": "pass",
+          "detail": "detached GPG and package bytes fail closed on a flipped artifact"
+        },
+        {
+          "id": "bounded-floods",
+          "class": "negative",
+          "status": "pass",
+          "detail": "bounded connect flood left the payload path serving"
+        },
+        {
+          "id": "availability-faults",
+          "class": "negative",
+          "status": "pass",
+          "detail": "data-plane restart recovered; target refusal failed closed; postgres return restored transit"
+        },
+        {
+          "id": "silent-renewal-and-port-reassignment",
+          "class": "negative",
+          "status": "pass",
+          "detail": "existing grant not_after unchanged; local port reassignment is not a public up flag"
+        },
+        {
+          "id": "reboot-unless-stopped-manual-down",
+          "class": "positive",
+          "status": "not_run",
+          "detail": "set WARPTWEET_INTEROP_ALLOW_REBOOT=1 to reboot this workstation"
+        },
+        {
+          "id": "pid-reuse-and-stop-failure",
+          "class": "negative",
+          "status": "pass",
+          "detail": "killed pid is not reported Ready; down is not terminal while the process is gone"
+        },
+        {
+          "id": "live-expiry-and-revocation",
+          "class": "positive",
+          "status": "pass",
+          "detail": "short grant died after not_after; payload no longer reachable"
+        },
+        {
+          "id": "stop-restart-rotate-revoke-upgrade",
+          "class": "positive",
+          "status": "pass",
+          "detail": "down, up, rotate, up-after-rotate, revoke (upgrade not in this pass)"
+        },
+        {
+          "id": "clock-rollback-fail-closed",
+          "class": "positive",
+          "status": "pass",
+          "detail": "material clock rollback blocked the host; wall clock restored"
+        }
+      ],
+      "networking": {
+        "cell_id": "ipv6-bind-equals-dial",
+        "publication_model": "ipv6_bind_equals_dial",
+        "published_endpoint_generation": 7,
+        "invite_schema_version": 3,
+        "invite_dials_match_published": true,
+        "invite_dials": {
+          "data": {
+            "host": "2600:1900:4120:6e0f::",
+            "port": 2222
+          },
+          "enrollment": {
+            "host": "2600:1900:4120:6e0f::",
+            "port": 29722
+          }
+        },
+        "binds": {
+          "data": {
+            "address": "2600:1900:4120:6e0f::",
+            "port": 2222
+          },
+          "enrollment": {
+            "address": "2600:1900:4120:6e0f::",
+            "port": 29722
+          }
+        },
+        "dials": {
+          "data": {
+            "host": "2600:1900:4120:6e0f::",
+            "port": 2222
+          },
+          "enrollment": {
+            "host": "2600:1900:4120:6e0f::",
+            "port": 29722
+          }
+        },
+        "observed_listeners": {
+          "data": "[2600:1900:4120:6e0f::]:2222",
+          "enrollment": "[2600:1900:4120:6e0f::]:29722",
+          "match_binds": true
+        },
+        "test_dnat_absent": true,
+        "loopback_alias_absent": true,
+        "client_dials": [
+          {
+            "leg": "data",
+            "host": "2600:1900:4120:6e0f::",
+            "port": 2222,
+            "status": "pass"
+          },
+          {
+            "leg": "enrollment",
+            "host": "2600:1900:4120:6e0f::",
+            "port": 29722,
+            "status": "pass"
+          }
+        ],
+        "spki_result": {
+          "status": "pass"
+        },
+        "host_key_result": {
+          "status": "pass"
+        },
+        "enrollment_resolved_addr": "2600:1900:4120:6e0f::",
+        "data_resolved_addr": "2600:1900:4120:6e0f::",
+        "operator_firewall_assumptions": "operator-stated: inbound 2222/tcp and 29722/tcp from 2603:8001:ac00:3500::/64; ICMPv6 from ::/0; no guest DNAT helper",
+        "operator_load_balancer_assumptions": "none; not a proxy load balancer",
+        "package_only": true,
+        "clean_tree": true
+      }
+    }
+  ]
+}

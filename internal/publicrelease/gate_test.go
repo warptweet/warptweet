@@ -15,7 +15,7 @@ import (
 	"warptweet.com/warptweet/internal/releaseevidence"
 )
 
-func TestRepositoryGateKeepsHomebrewCTADark(t *testing.T) {
+func TestRepositoryGateEnablesHomebrewCTAWithCompleteIndex(t *testing.T) {
 	t.Parallel()
 
 	root := repositoryRoot(t)
@@ -23,8 +23,11 @@ func TestRepositoryGateKeepsHomebrewCTADark(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadGate: %v", err)
 	}
-	if gate.HomebrewCTAEnabled {
-		t.Fatal("homebrew CTA must remain dark until complete package evidence exists")
+	if !gate.HomebrewCTAEnabled {
+		t.Fatal("homebrew CTA must be enabled once the complete v3 index is bound")
+	}
+	if gate.RequiredEvidenceDocument != "packaging/evidence/release-evidence-index-v3.json" {
+		t.Fatalf("required evidence = %q", gate.RequiredEvidenceDocument)
 	}
 	if gate.HomebrewCommand != DefaultHomebrewCommand ||
 		gate.NextCommand != DefaultNextCommand ||
@@ -35,7 +38,7 @@ func TestRepositoryGateKeepsHomebrewCTADark(t *testing.T) {
 		t.Fatalf("evidence checklist = %q", gate.Links["evidence_checklist"])
 	}
 	if err := ValidateEnabledCTA(root, gate); err != nil {
-		t.Fatalf("ValidateEnabledCTA dark gate: %v", err)
+		t.Fatalf("ValidateEnabledCTA: %v", err)
 	}
 	if err := VerifyRepository(root); err != nil {
 		t.Fatalf("VerifyRepository: %v", err)

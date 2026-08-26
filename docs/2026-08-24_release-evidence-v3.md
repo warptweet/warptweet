@@ -79,6 +79,7 @@ Client error classes stay on the client and in evidence:
 
 ## Website gate
 
-`packaging/evidence/public-release.json` points at checklist-v3. The Homebrew
-CTA stays dark until a complete v3 index exists. Do not enable the CTA in this
-edition.
+`packaging/evidence/public-release.json` points at checklist-v3 and the
+first-edition Apple Silicon index
+`packaging/evidence/release-evidence-index-v3.json`. The Homebrew CTA is enabled
+against that index.

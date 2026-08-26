@@ -1,11 +1,11 @@
 {
   "kind": "warptweet.public-release-gate",
   "schema_version": 1,
-  "homebrew_cta_enabled": false,
+  "homebrew_cta_enabled": true,
   "homebrew_command": "brew install --cask warptweet/tap/warptweet",
   "next_command": "warptweet connect <invite-file>",
   "qualification_message": "Homebrew package in release qualification",
-  "required_evidence_document": "",
+  "required_evidence_document": "packaging/evidence/release-evidence-index-v3.json",
   "links": {
     "cask_template": "homebrew/Casks/warptweet.rb.tmpl",
     "evidence_checklist": "packaging/evidence/checklist-v3.json",
