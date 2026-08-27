@@ -1,5 +1,18 @@
 # WarpTweet
 
+This GitHub repository is the source tree and the place signed release assets
+will be published from. Tagged candidates are the only intended public
+artifacts.
+
+Invited testers, when a tap and matching GitHub release exist, install with:
+
+```sh
+brew install --cask warptweet/tap/warptweet
+```
+
+That command is not advertised on the website until public distribution is
+ready. Do not pass `--no-quarantine`.
+
 WarpTweet makes one TCP service on a Linux machine appear on localhost on an
 Apple Silicon Mac. It provides hybrid post-quantum tunneling without giving the
 client a shell, a subnet, or a general-purpose SSH credential.
