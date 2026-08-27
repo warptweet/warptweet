@@ -411,6 +411,29 @@ jobs:
             fi
           done
 
+      - name: Restore a production /opt ancestor
+        run: |
+          set -euo pipefail
+          # GitHub-hosted Ubuntu ships /opt as 0777 so hostedtoolcache can be
+          # populated. WarpTweet will not install /opt/warptweet under a
+          # world-writable parent. Tool setup has already finished; existing
+          # /opt/hostedtoolcache stays writable inside itself.
+          WT_OPT_METADATA=$(stat -c '%u:%g:%a' /opt)
+          printf 'before %s\n' "$WT_OPT_METADATA"
+          case "$WT_OPT_METADATA" in
+            0:0:755) ;;
+            0:0:*)
+              sudo chmod 0755 /opt
+              ;;
+            *)
+              echo "refusing to mutate a non-root /opt ($WT_OPT_METADATA)" >&2
+              exit 1
+              ;;
+          esac
+          WT_OPT_METADATA=$(stat -c '%u:%g:%a' /opt)
+          printf 'after %s\n' "$WT_OPT_METADATA"
+          test "$WT_OPT_METADATA" = "0:0:755"
+
       - name: Run the fixed-layout real server preflight gate
         env:
           WARPTWEET_CI_FIXED_LAYOUT: "1"
