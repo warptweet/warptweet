@@ -614,7 +614,6 @@ func TestReadinessDocumentationMatchesAnchoredUnlinkBoundary(t *testing.T) {
 
 	root := repositoryRoot(t)
 	paths := []string{
-		filepath.Join(root, "README.md"),
 		filepath.Join(root, "docs", "2026-08-09_architecture.md"),
 		filepath.Join(root, "docs", "2026-08-09_threat-model.md"),
 		filepath.Join(root, "docs", "2026-08-10_client-readiness.md"),
@@ -627,12 +626,12 @@ func TestReadinessDocumentationMatchesAnchoredUnlinkBoundary(t *testing.T) {
 	}
 	documentation := combined.String()
 	for _, required := range []string{
-		"remembers its inode",
+		"remembers the one-shot control-socket inode",
 		"require the exact `ssh -O check` PID to match the foreground child",
-		"same remembered socket inode",
+		"Remember that socket inode identity",
 		"relative to the retained directory descriptor",
 		"Close the retained directory descriptor",
-		"child remains alive before Ready",
+		"the child remains alive before Ready",
 		"does not send OpenSSH a mux request",
 		"does not signal the process",
 		"Target health is not checked",
