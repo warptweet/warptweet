@@ -84,12 +84,31 @@ func TestStaticOpenSSLBuildCIExercisesSupportedArchitectures(t *testing.T) {
 		"sudo",
 		"./scripts/provision-openssh-build-account.sh",
 		"sudo -u warptweet-build -H env",
+		"Allow the OpenSSH build account to read the checkout",
+		"chmod -R a+rX",
 		"./scripts/fetch-openssl.sh",
 		`"$WT_BUILD_HOME/warptweet-openssl-source/$OPENSSL_ARCHIVE"`,
 		"readelf -d --wide",
 	} {
 		if !strings.Contains(workflow, required) {
 			t.Errorf("static OpenSSL CI gate omits %q", required)
+		}
+	}
+}
+
+func TestLinuxGoCIPreparesProductionRuntime(t *testing.T) {
+	t.Parallel()
+
+	workflow := string(readFile(t, filepath.Join(repositoryRoot(t), ".github", "workflows", "ci.yml")))
+	for _, required := range []string{
+		"Prepare Linux production runtime for unprivileged tests",
+		`if: runner.os == 'Linux'`,
+		`sudo install -d -o "$(id -un)" -g "$(id -gn)" -m 0755 /run/warptweet`,
+		`sudo install -d -o "$(id -un)" -g "$(id -gn)" -m 0700 /run/warptweet/tunnels`,
+		"make check-go",
+	} {
+		if !strings.Contains(workflow, required) {
+			t.Errorf("Linux Go CI gate omits %q", required)
 		}
 	}
 }

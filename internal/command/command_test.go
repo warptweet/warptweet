@@ -101,6 +101,7 @@ func TestRenderClientContainsExactProfile(t *testing.T) {
 }
 
 func TestRunOnceExercisesCompleteLocalControlPlane(t *testing.T) {
+	requireWritableProductionRuntime(t)
 	manifestPath, enginePath := writeClientManifest(t, true)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -193,6 +194,7 @@ func TestProductionNetworkCommandsRequireFixedClientManifest(t *testing.T) {
 }
 
 func TestRunFailsClosedWhenServiceReadinessCannotBePublished(t *testing.T) {
+	requireWritableProductionRuntime(t)
 	manifestPath, enginePath := writeClientManifest(t, true)
 	dependencies := testCommandDependencies(t, enginePath, nil)
 	dependencies.newServiceNotifier = func() (serviceNotifier, error) {
@@ -232,6 +234,20 @@ func TestRejectsUnknownCommand(t *testing.T) {
 	if code != 2 || !strings.Contains(stderr.String(), "unknown command") {
 		t.Fatalf("code = %d, stderr = %q", code, stderr.String())
 	}
+}
+
+func requireWritableProductionRuntime(t *testing.T) {
+	t.Helper()
+
+	layout, err := productionClientLayout()
+	if err != nil {
+		t.Fatalf("productionClientLayout: %v", err)
+	}
+	directory := filepath.Join(layout.ClientRuntimeRoot, "database-primary")
+	if err := os.MkdirAll(directory, 0o700); err != nil {
+		t.Skipf("production client runtime %q is not writable: %v", layout.ClientRuntimeRoot, err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(directory) })
 }
 
 func writeClientManifest(t *testing.T, capableEngine bool) (string, string) {

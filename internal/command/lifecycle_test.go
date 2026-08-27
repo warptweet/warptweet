@@ -231,9 +231,13 @@ func TestRotateAndRevokeRequireEnrollmentReceipt(t *testing.T) {
 			continue
 		}
 		// Off-matrix hosts may fail layout resolution before receipt load.
+		// Linux returns EACCES ("permission denied") when /run/warptweet is
+		// root-owned; Darwin often returns EPERM ("operation not permitted")
+		// for the equivalent unprovisioned runtime root.
 		if strings.Contains(message, "artifact profile") ||
 			strings.Contains(message, "client layout") ||
 			strings.Contains(message, "operation not permitted") ||
+			strings.Contains(message, "permission denied") ||
 			strings.Contains(message, "provisioner_unavailable") {
 			continue
 		}

@@ -142,6 +142,13 @@ jobs:
           check-latest: false
           cache: false
 
+      - name: Prepare Linux production runtime for unprivileged tests
+        if: runner.os == 'Linux'
+        run: |
+          set -euo pipefail
+          sudo install -d -o "$(id -un)" -g "$(id -gn)" -m 0755 /run/warptweet
+          sudo install -d -o "$(id -un)" -g "$(id -gn)" -m 0700 /run/warptweet/tunnels
+
       - name: Run checks
         env:
           GOCACHE: ${{ runner.temp }}/warptweet-go-build
@@ -176,7 +183,11 @@ jobs:
       - name: Authenticate and fetch pinned OpenSSH and OpenSSL sources
         run: |
           set -euo pipefail
-          WT_BUILD_HOME="${RUNNER_TEMP}/warptweet-build"
+          # Short /tmp prefix: OpenSSH forward-control.sh plus its temporary
+          # control-socket suffix must fit Darwin's 104-byte sun_path.
+          # RUNNER_TEMP is /Users/runner/work/_temp and overflows that budget.
+          WT_BUILD_HOME=/tmp/wtb
+          test ! -e "$WT_BUILD_HOME"
           mkdir -m 0700 "$WT_BUILD_HOME" "$WT_BUILD_HOME/tmp"
           ./scripts/fetch-openssh.sh "$WT_BUILD_HOME/warptweet-openssh-source"
           ./scripts/fetch-openssl.sh "$WT_BUILD_HOME/warptweet-openssl-source"
@@ -186,7 +197,8 @@ jobs:
           set -euo pipefail
           . ./third_party/openssh/source.env
           . ./third_party/openssl/source.env
-          WT_BUILD_HOME="${RUNNER_TEMP}/warptweet-build"
+          WT_BUILD_HOME=/tmp/wtb
+          TMPDIR="$WT_BUILD_HOME/tmp" \
           ./scripts/build-openssh-darwin.sh \
             "$WT_BUILD_HOME/warptweet-openssh-source/$OPENSSH_ARCHIVE" \
             "$WT_BUILD_HOME/warptweet-openssl-source/$OPENSSL_ARCHIVE" \
@@ -195,7 +207,7 @@ jobs:
       - name: Verify staged macOS client inventory
         run: |
           set -euo pipefail
-          WT_STAGE="${RUNNER_TEMP}/warptweet-build/warptweet-openssh-darwin-stage"
+          WT_STAGE="/tmp/wtb/warptweet-openssh-darwin-stage"
           WT_ROOT="Library/Application Support/WarpTweet"
           for WT_EXECUTABLE in \
             "$WT_ROOT/libexec/openssh/bin/ssh" \
@@ -285,6 +297,21 @@ jobs:
             /var/empty/warptweet-sshd
           sudo env WARPTWEET_CI_OPENSSH_BUILD_ACCOUNT=1 \
             ./scripts/provision-openssh-build-account.sh
+
+      - name: Allow the OpenSSH build account to read the checkout
+        run: |
+          set -euo pipefail
+          # GitHub-hosted /home/runner/work is 770 runner:docker. sudo -u
+          # warptweet-build then cannot retain cwd, and fetch-openssh.sh dies
+          # on `cd ./scripts`. Open the path for traverse+read on this
+          # disposable runner only.
+          path="${GITHUB_WORKSPACE}"
+          while [ "$path" != "/" ]; do
+            sudo chmod a+x "$path"
+            path="$(dirname -- "$path")"
+          done
+          sudo chmod -R a+rX "${GITHUB_WORKSPACE}"
+          sudo -u warptweet-build -H test -x "${GITHUB_WORKSPACE}/scripts/fetch-openssh.sh"
 
       - name: Authenticate and fetch pinned OpenSSH and OpenSSL sources
         run: |

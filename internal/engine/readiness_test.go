@@ -313,6 +313,10 @@ func TestControlSocketRetirementRejectsReplacementAfterInitialValidation(t *test
 		t.Fatalf("prepareControlSocket: %v", err)
 	}
 	original := listenOnTestControlSocket(t, endpoint.Path)
+	originalInfo, err := os.Lstat(endpoint.Path)
+	if err != nil {
+		t.Fatalf("Lstat original socket: %v", err)
+	}
 	if err := endpoint.validateSocket(); err != nil {
 		t.Fatalf("validate original socket: %v", err)
 	}
@@ -322,8 +326,27 @@ func TestControlSocketRetirementRejectsReplacementAfterInitialValidation(t *test
 	if err := os.Remove(endpoint.Path); err != nil && !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("remove original socket: %v", err)
 	}
+	// Linux tmpfs recycles Unix-socket inodes immediately. Consume one so the
+	// replacement cannot be os.SameFile with the validated socket; that is the
+	// identity check retireSocket uses.
+	consumed, err := os.CreateTemp(directory, "inode-")
+	if err != nil {
+		t.Fatalf("CreateTemp inode consumer: %v", err)
+	}
+	consumedName := consumed.Name()
+	if err := consumed.Close(); err != nil {
+		t.Fatalf("close inode consumer: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Remove(consumedName) })
 	replacement := listenOnTestControlSocket(t, endpoint.Path)
 	defer replacement.Close()
+	replacementInfo, err := os.Lstat(endpoint.Path)
+	if err != nil {
+		t.Fatalf("Lstat replacement socket: %v", err)
+	}
+	if os.SameFile(originalInfo, replacementInfo) {
+		t.Fatal("replacement socket reused the validated inode")
+	}
 
 	err = endpoint.retireSocket()
 	if err == nil || !strings.Contains(err.Error(), "changed after initial validation") {

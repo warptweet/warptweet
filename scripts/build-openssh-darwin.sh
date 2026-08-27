@@ -405,6 +405,14 @@ tar -xzf "$WT_PRIVATE_OPENSSH_ARCHIVE" -C "$WT_OPENSSH_SOURCE_ROOT"
 tar -xzf "$WT_PRIVATE_OPENSSL_ARCHIVE" -C "$WT_OPENSSL_SOURCE_ROOT"
 WT_OPENSSH_SOURCE_DIRECTORY="$WT_OPENSSH_SOURCE_ROOT/openssh-$OPENSSH_VERSION"
 WT_OPENSSL_SOURCE_DIRECTORY="$WT_OPENSSL_SOURCE_ROOT/openssl-$OPENSSL_VERSION"
+WT_OPENSSH_REGRESSION_DIRECTORY="$WT_OPENSSH_SOURCE_DIRECTORY/regress"
+# forward-control.sh creates $OBJ/ctl-sock through a temporary name containing
+# a dot plus 16 random bytes. Darwin sun_path is 104 bytes including NUL, so
+# $OBJ may contain at most 77 bytes.
+if [ "${#WT_OPENSSH_REGRESSION_DIRECTORY}" -gt 77 ]; then
+    echo "private OpenSSH regression path exceeds the Darwin control-socket budget" >&2
+    exit 65
+fi
 if [ ! -x "$WT_OPENSSH_SOURCE_DIRECTORY/configure" ] ||
     [ ! -x "$WT_OPENSSH_SOURCE_DIRECTORY/config.guess" ]; then
     echo "OpenSSH archive did not contain the expected source tree" >&2
