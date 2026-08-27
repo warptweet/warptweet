@@ -400,6 +400,17 @@ jobs:
           set -euo pipefail
           go build -trimpath -o "$WARPTWEET_CONTROLLER" ./cmd/warptweet
 
+      - name: Record FHS ancestor metadata
+        run: |
+          set -euo pipefail
+          for path in /opt /etc /var /var/empty /run; do
+            if [ -e "$path" ] || [ -L "$path" ]; then
+              stat -c '%n uid=%u gid=%g mode=%a' "$path"
+            else
+              printf '%s: absent\n' "$path"
+            fi
+          done
+
       - name: Run the fixed-layout real server preflight gate
         env:
           WARPTWEET_CI_FIXED_LAYOUT: "1"

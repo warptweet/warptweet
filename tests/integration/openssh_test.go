@@ -75,7 +75,11 @@ func TestPinnedOpenSSHStagedCryptoAndRendering(t *testing.T) {
 	if err != nil {
 		t.Fatalf("render real authorized key: %v", err)
 	}
-	if !bytes.HasPrefix(authorizedKey, []byte("restrict,port-forwarding,permitopen=\"10.0.0.20:5432\",permitopen=\"127.0.0.1:29723\",expiry-time=\"20260915120000Z\" ")) ||
+	if _, err := server.ValidateAuthorizedKeys(serverManifest, authorizedKey); err != nil {
+		t.Fatalf("rendered authorized key failed production validation: %v (%q)", err, authorizedKey)
+	}
+	if !bytes.Contains(authorizedKey, []byte(`permitopen="10.0.0.20:5432"`)) ||
+		!bytes.Contains(authorizedKey, []byte(`permitopen="127.0.0.1:29723"`)) ||
 		!bytes.HasSuffix(authorizedKey, []byte(" warptweet-managed-client\n")) {
 		t.Fatalf("unexpected managed authorized key: %q", authorizedKey)
 	}

@@ -64,6 +64,15 @@ if [ "$(realpath -e -- "$WT_SOURCE_CONTROLLER_INPUT")" != "$WT_SOURCE_CONTROLLER
     fail "controller path must be clean, absolute, and physically resolved"
 fi
 
+directory_is_world_writable() {
+    # GNU stat %a is an octal mode such as 755 or 1777. Other-write is the
+    # 002 bit, visible as a last digit of 2, 3, 6, or 7.
+    case $1 in
+        *2|*3|*6|*7) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 require_root_directory() {
     WT_ROOT_DIRECTORY=$1
     if [ ! -d "$WT_ROOT_DIRECTORY" ] || [ -L "$WT_ROOT_DIRECTORY" ]; then
@@ -72,12 +81,26 @@ require_root_directory() {
     if [ "$(realpath -e -- "$WT_ROOT_DIRECTORY")" != "$WT_ROOT_DIRECTORY" ]; then
         fail "required root directory is not physically resolved: $WT_ROOT_DIRECTORY"
     fi
-    if [ "$(stat -c '%u:%g:%a' "$WT_ROOT_DIRECTORY")" != "0:0:755" ]; then
-        fail "required root directory has unexpected ownership or mode: $WT_ROOT_DIRECTORY"
+    WT_ROOT_METADATA=$(stat -c '%u:%g:%a' "$WT_ROOT_DIRECTORY") ||
+        fail "cannot stat required root directory: $WT_ROOT_DIRECTORY"
+    WT_ROOT_OWNER=${WT_ROOT_METADATA%%:*}
+    WT_ROOT_MODE=${WT_ROOT_METADATA##*:}
+    # GitHub-hosted Ubuntu is not a WarpTweet production host: /opt is often
+    # 775 because of hostedtoolcache. The install security property is
+    # root ownership, a real directory, and no world-write. Exact Debian 755
+    # is still required of trees this gate creates.
+    if [ "$WT_ROOT_OWNER" != 0 ]; then
+        fail "required root directory is not root-owned: $WT_ROOT_DIRECTORY ($WT_ROOT_METADATA)"
+    fi
+    if directory_is_world_writable "$WT_ROOT_MODE"; then
+        fail "required root directory is world-writable: $WT_ROOT_DIRECTORY ($WT_ROOT_METADATA)"
     fi
 }
 
 for WT_ROOT_DIRECTORY in /opt /etc /var /var/empty /run; do
+    if [ "$WT_ROOT_DIRECTORY" = /var/empty ] && [ ! -e /var/empty ]; then
+        install -d -o root -g root -m 0755 /var/empty
+    fi
     require_root_directory "$WT_ROOT_DIRECTORY"
 done
 

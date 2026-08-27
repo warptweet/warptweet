@@ -724,6 +724,9 @@ func TestFixedLayoutServerPreflightScriptIsCIOnlyAndNonListening(t *testing.T) {
 		`realpath -e -- "$WT_SOURCE_STAGE_DIRECTORY"`,
 		`realpath -e -- "$WT_SOURCE_CONTROLLER_INPUT"`,
 		`for WT_ROOT_DIRECTORY in /opt /etc /var /var/empty /run`,
+		`required root directory is not root-owned`,
+		`required root directory is world-writable`,
+		`install -d -o root -g root -m 0755 /var/empty`,
 		`[ -e /opt/warptweet ] || [ -L /opt/warptweet ]`,
 		`[ -e /etc/warptweet ] || [ -L /etc/warptweet ]`,
 		`bundle manifest does not contain the exact nine fixed files`,
@@ -794,6 +797,8 @@ func TestFixedLayoutServerPreflightScriptIsCIOnlyAndNonListening(t *testing.T) {
 	for _, declaration := range []string{
 		`WARPTWEET_CI_FIXED_LAYOUT: "1"`,
 		`go build -trimpath -o "$WARPTWEET_CONTROLLER" ./cmd/warptweet`,
+		`Record FHS ancestor metadata`,
+		`stat -c '%n uid=%u gid=%g mode=%a'`,
 		`WT_BUNDLE_MANIFEST_SHA256=`,
 		`WT_CONTROLLER_SHA256=`,
 		`sudo env WARPTWEET_CI_FIXED_LAYOUT="$WARPTWEET_CI_FIXED_LAYOUT"`,

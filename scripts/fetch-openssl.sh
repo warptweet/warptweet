@@ -8,7 +8,10 @@ if [ "$#" -ne 1 ]; then
     exit 64
 fi
 
-WT_SCRIPT_DIRECTORY=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+WT_SCRIPT_DIRECTORY=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd) || {
+    echo "cannot resolve script directory from \$0=$0 cwd=$(pwd)" >&2
+    exit 66
+}
 WT_REPOSITORY_ROOT=$(CDPATH= cd -- "$WT_SCRIPT_DIRECTORY/.." && pwd)
 . "$WT_REPOSITORY_ROOT/third_party/openssl/source.env"
 
