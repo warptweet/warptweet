@@ -101,6 +101,7 @@ WT_CLIENT_MANIFEST_CANDIDATE="$WT_TEST_CONFIG_DIRECTORY/client.candidate.wt"
 WT_RENDERED_CLIENT_CONFIG="$WT_TEST_CONFIG_DIRECTORY/client.conf"
 WT_RAW_CLIENT_CONFIG="$WT_TEST_CONFIG_DIRECTORY/client-raw.conf"
 WT_CLASSICAL_CLIENT_CONFIG="$WT_TEST_CONFIG_DIRECTORY/client-classical.conf"
+WT_CLASSICAL_KEX_CLIENT_CONFIG="$WT_TEST_CONFIG_DIRECTORY/client-classical-kex.conf"
 WT_WRONG_HOST_CLIENT_CONFIG="$WT_TEST_CONFIG_DIRECTORY/client-wrong-host.conf"
 
 WT_SERVER_LOG="$WT_STATE_DIRECTORY/sshd-debug.log"
@@ -760,6 +761,14 @@ capture_server_evidence() {
     fi
 }
 
+dump_negative_ssh_evidence() {
+    dump_live_gate_file "$WT_NEGATIVE_LOG" "$WT_NEGATIVE_NAME client log"
+    dump_live_gate_file "$WT_NEGATIVE_STDOUT" "$WT_NEGATIVE_NAME stdout"
+    if [ -n "${WT_SERVER_LOG:-}" ]; then
+        dump_live_gate_file "$WT_SERVER_LOG" "sshd log"
+    fi
+}
+
 expect_ssh_failure() {
     WT_NEGATIVE_NAME=$1
     WT_NEGATIVE_PATTERN=$2
@@ -771,12 +780,17 @@ expect_ssh_failure() {
         env -i LANG=C LC_ALL=C \
         "$WT_SSH" -vvv "$@" >"$WT_NEGATIVE_STDOUT" 2>"$WT_NEGATIVE_LOG" || WT_NEGATIVE_STATUS=$?
     if [ "$WT_NEGATIVE_STATUS" -eq 0 ]; then
+        dump_negative_ssh_evidence
         fail "$WT_NEGATIVE_NAME request unexpectedly succeeded"
     fi
     case "$WT_NEGATIVE_STATUS" in
-        124|137) fail "$WT_NEGATIVE_NAME request timed out instead of failing closed" ;;
+        124|137)
+            dump_negative_ssh_evidence
+            fail "$WT_NEGATIVE_NAME request timed out instead of failing closed"
+            ;;
     esac
-    if ! grep -E "$WT_NEGATIVE_PATTERN" "$WT_NEGATIVE_LOG" >/dev/null 2>&1; then
+    if ! grep -E "$WT_NEGATIVE_PATTERN" "$WT_NEGATIVE_LOG" "$WT_NEGATIVE_STDOUT" >/dev/null 2>&1; then
+        dump_negative_ssh_evidence
         fail "$WT_NEGATIVE_NAME failed without the expected fail-closed evidence"
     fi
     pass "$WT_NEGATIVE_NAME rejected"
@@ -1228,6 +1242,14 @@ grep -Fx "    PubkeyAcceptedAlgorithms \"$WT_COMPOSITE_KEY\"" "$WT_CLASSICAL_CLI
 grep -Fx "    PubkeyAcceptedAlgorithms \"$WT_CLASSICAL_KEY_TYPE\"" "$WT_CLASSICAL_CLIENT_CONFIG" >/dev/null ||
     fail "classical-key negative config does not offer only Ed25519 user authentication"
 
+sed -e "s#KexAlgorithms \"$WT_KEX\"#KexAlgorithms \"curve25519-sha256\"#" \
+    "$WT_RAW_CLIENT_CONFIG" >"$WT_CLASSICAL_KEX_CLIENT_CONFIG"
+chmod 0600 "$WT_CLASSICAL_KEX_CLIENT_CONFIG"
+grep -Fx "    KexAlgorithms \"$WT_KEX\"" "$WT_CLASSICAL_KEX_CLIENT_CONFIG" >/dev/null &&
+    fail "classical-kex negative config retained the exact-profile KEX"
+grep -Fx "    KexAlgorithms \"curve25519-sha256\"" "$WT_CLASSICAL_KEX_CLIENT_CONFIG" >/dev/null ||
+    fail "classical-kex negative config was not rewritten exactly once"
+
 WT_DYNAMIC_CLI_LOG="$WT_STATE_DIRECTORY/negative-controller-dynamic.log"
 if run_as_dedicated_client "$WT_CONTROLLER" run \
     --config "$WT_CLIENT_MANIFEST" \
@@ -1489,11 +1511,25 @@ verify_complete_kex_epochs "$WT_POSITIVE_SERVER_LOG" ||
     fail "controller transcript does not bind every complete KEX epoch to the exact profile"
 pass "controller transcript contains two complete exact-profile KEX epochs and one composite user authentication"
 
+WT_CLASSICAL_KEX_SERVER_START_LINE=$(server_log_line_count)
 expect_ssh_failure classical-kex \
     'no matching key exchange method found' \
-    -F "$WT_RAW_CLIENT_CONFIG" \
-    -o KexAlgorithms=curve25519-sha256 \
+    -F "$WT_CLASSICAL_KEX_CLIENT_CONFIG" \
     -N -T "$WT_HOST_ALIAS"
+capture_server_evidence "$WT_CLASSICAL_KEX_SERVER_START_LINE" classical-kex
+if ! grep -F "no matching key exchange method found" \
+    "$WT_STATE_DIRECTORY/negative-classical-kex.server.log" >/dev/null; then
+    dump_live_gate_file "$WT_STATE_DIRECTORY/negative-classical-kex.server.log" \
+        "classical-kex server transcript"
+    fail "server transcript does not prove rejection of an offered classical KEX"
+fi
+if grep -F "Accepted publickey for warptweet" \
+    "$WT_STATE_DIRECTORY/negative-classical-kex.server.log" >/dev/null; then
+    dump_live_gate_file "$WT_STATE_DIRECTORY/negative-classical-kex.server.log" \
+        "classical-kex server transcript"
+    fail "server transcript accepted a key during the classical-kex negative"
+fi
+pass "server rejected an offered classical KEX"
 
 expect_ssh_failure wrong-host-pin \
     'Host key verification failed|REMOTE HOST IDENTIFICATION HAS CHANGED' \
