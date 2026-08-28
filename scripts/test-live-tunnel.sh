@@ -823,15 +823,26 @@ verify_complete_kex_epochs() {
         }
         function proven() {
             # One connection, one Accepted, no violations, and two complete
-            # epochs (finished count, or one finished plus the current
-            # still-open complete epoch).
-            return connection_count == 1 && accepted_count == 1 && !bad &&
-                (epoch_count >= 2 ||
-                    (epoch_open && epoch_count >= 1 && complete_epoch()))
+            # epochs counted at NEWKEYS received (or one finished plus the
+            # current still-open complete epoch via epoch_count).
+            return ok || (connection_count == 1 && accepted_count == 1 && !bad &&
+                (complete_count >= 2 || epoch_count >= 2 ||
+                    (epoch_open && epoch_count >= 1 && complete_epoch())))
         }
-        function field_after(marker, value) {
+        function accept_proof() {
+            if (proven()) {
+                ok = 1
+                exit 0
+            }
+        }
+        function field_after(marker, line, value) {
+            # Copy the line so sub() never mutates $0 by reference.
+            value = line
+            # Runner logs may carry CR; GHA log downloads often strip it.
+            gsub(/\r/, "", value)
             sub("^.*" marker, "", value)
-            sub("[[:space:]]+\\[(preauth|postauth)\\]$", "", value)
+            # Strip optional [preauth]/[postauth] even when CR/spaces trail.
+            sub("[[:space:]]+\\[(preauth|postauth)\\][[:space:]]*$", "", value)
             sub("[[:space:]]+$", "", value)
             return value
         }
@@ -845,9 +856,9 @@ verify_complete_kex_epochs() {
                 return
             }
             if (complete_epoch()) {
-                # Count only fully observed epochs.
+                # Count only fully observed epochs closed by a later KEX.
                 epoch_count++
-            } else if (!from_end) {
+            } else if (!from_end && !ok) {
                 # An incomplete epoch closed by a later KEX start is broken.
                 bad = 1
             }
@@ -856,9 +867,11 @@ verify_complete_kex_epochs() {
             epoch_open = 0
             # Stop once the gate is proven. Later DEBUG3 teardown or an
             # in-flight 1K rekey must not revoke completed evidence.
-            if (proven()) {
-                exit 0
-            }
+            accept_proof()
+        }
+        {
+            # Normalize CRLF transcripts before field splits and matchers.
+            gsub(/\r/, "", $0)
         }
         index($0, "Connection from ") == 1 {
             connection_count++
@@ -867,7 +880,7 @@ verify_complete_kex_epochs() {
             next
         }
         /kex: algorithm:/ {
-            if (connection_count != 1) {
+            if (connection_count != 1 && !ok) {
                 bad = 1
             }
             finish_epoch(0)
@@ -875,12 +888,15 @@ verify_complete_kex_epochs() {
             phase = 1
             newkeys_sent = 0
             newkeys_received = 0
-            if (field_after("kex: algorithm: ", $0) != expected_kex) {
+            if (field_after("kex: algorithm: ", $0) != expected_kex && !ok) {
                 bad = 1
             }
             next
         }
         /kex: host key algorithm:/ {
+            if (ok) {
+                next
+            }
             if (!epoch_open || phase != 1 ||
                 field_after("kex: host key algorithm: ", $0) != expected_host_key) {
                 bad = 1
@@ -890,6 +906,9 @@ verify_complete_kex_epochs() {
             next
         }
         /kex: client->server cipher:/ {
+            if (ok) {
+                next
+            }
             if (!epoch_open || phase != 2 ||
                 !cipher_allowed("kex: client->server cipher: ")) {
                 bad = 1
@@ -899,6 +918,9 @@ verify_complete_kex_epochs() {
             next
         }
         /kex: server->client cipher:/ {
+            if (ok) {
+                next
+            }
             if (!epoch_open || phase != 3 ||
                 !cipher_allowed("kex: server->client cipher: ")) {
                 bad = 1
@@ -908,16 +930,23 @@ verify_complete_kex_epochs() {
             next
         }
         /SSH2_MSG_NEWKEYS sent/ {
+            if (ok) {
+                next
+            }
             if (!epoch_open || phase != 4 || ++newkeys_sent != 1) {
                 bad = 1
             }
             next
         }
         /SSH2_MSG_NEWKEYS received/ {
+            if (ok) {
+                next
+            }
             if (!epoch_open || phase != 4 || ++newkeys_received != 1) {
                 bad = 1
-            } else if (proven()) {
-                exit 0
+            } else if (complete_epoch()) {
+                complete_count++
+                accept_proof()
             }
             next
         }
@@ -925,17 +954,21 @@ verify_complete_kex_epochs() {
             accepted_count++
             # OpenSSH 10.4 auth_log uses sshkey_type() (MLDSA44-ED25519),
             # not the SSH algorithm name from KEX (ssh-mldsa44-ed25519@openssh.com).
-            if ($6 != connection_address || $8 != connection_port ||
+            if (($6 != connection_address || $8 != connection_port ||
                 (index($0, " ssh2: " expected_host_key " ") == 0 &&
                     index($0, " ssh2: " expected_host_key_short " ") == 0) ||
-                !epoch_open || !complete_epoch()) {
+                !epoch_open || !complete_epoch()) && !ok) {
                 bad = 1
-            } else if (proven()) {
-                exit 0
+            } else {
+                accept_proof()
             }
             next
         }
         END {
+            # Never let END overwrite a successful early accept_proof exit.
+            if (ok) {
+                exit 0
+            }
             finish_epoch(1)
             exit(proven() ? 0 : 1)
         }
@@ -1433,8 +1466,7 @@ if [ "$WT_KEX_EPOCHS_COMPLETE" -ne 1 ]; then
         /SSH2_MSG_NEWKEYS sent/ { sent++ }
         /SSH2_MSG_NEWKEYS received/ { recv++ }
         END {
-            printf "live tunnel gate: KEX verify counters conn=%d accepted=%d kex_alg=%d newkeys_sent=%d newkeys_recv=%d\n", \
-                conn + 0, acc + 0, alg + 0, sent + 0, recv + 0 > "/dev/stderr"
+            printf "live tunnel gate: KEX verify counters conn=%d accepted=%d kex_alg=%d newkeys_sent=%d newkeys_recv=%d\n",                 conn + 0, acc + 0, alg + 0, sent + 0, recv + 0 > "/dev/stderr"
         }
     ' "$WT_CURRENT_CONTROLLER_SERVER_LOG" || true
     fail "server DEBUG transcript did not contain two complete controller KEX epochs"
