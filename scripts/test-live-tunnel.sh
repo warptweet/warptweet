@@ -800,28 +800,26 @@ expect_session_channel_failure() {
     WT_SESSION_NAME=$1
     shift
     WT_SESSION_START_LINE=$(server_log_line_count)
+    # Packaged sshd disconnects non-direct-tcpip channels in serverloop.c
+    # before MaxSessions=0 can emit CHANNEL_OPEN_FAILURE. Require that
+    # stronger forward-only evidence, and that no session was executed.
     expect_ssh_failure "$WT_SESSION_NAME" \
-        'administratively prohibited|request failed|open failed' \
+        'WarpTweet allows only direct-tcpip channels' \
         "$@"
     capture_server_evidence "$WT_SESSION_START_LINE" "$WT_SESSION_NAME"
     WT_SESSION_SERVER_LOG="$WT_STATE_DIRECTORY/negative-$WT_SESSION_NAME.server.log"
     if ! awk '
         /server_input_channel_open: ctype session/ { channel_open++ }
-        /input_session_request/ { session_request++ }
-        /session_open: channel [0-9]+/ { session_open++ }
-        /no more sessions/ { exhausted++ }
-        /session open failed/ { rejected++ }
-        /server_input_channel_open: failure session/ { open_failure++ }
+        /WarpTweet refused channel type session/ { refused++ }
         /Starting session:/ || /subsystem request for/ { executed = 1 }
         END {
-            exit(channel_open == 1 && session_request == 1 &&
-                session_open == 1 && exhausted == 1 && rejected == 1 &&
-                open_failure == 1 && !executed ? 0 : 1)
+            exit(channel_open == 1 && refused == 1 && !executed ? 0 : 1)
         }
     ' "$WT_SESSION_SERVER_LOG"; then
-        fail "$WT_SESSION_NAME lacks isolated MaxSessions=0 rejection evidence"
+        dump_live_gate_file "$WT_SESSION_SERVER_LOG" "$WT_SESSION_NAME server transcript"
+        fail "$WT_SESSION_NAME lacks isolated forward-only session-channel disconnect evidence"
     fi
-    pass "$WT_SESSION_NAME reached sshd and was rejected at the session-channel boundary"
+    pass "$WT_SESSION_NAME reached sshd and was disconnected for a non-direct-tcpip session channel"
 }
 
 verify_complete_kex_epochs() {
