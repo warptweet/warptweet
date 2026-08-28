@@ -645,7 +645,7 @@ func productionGrantAuthority() *grantsession.Authority {
 		Root:        installlayout.GrantSessionsDirectory,
 		Clients:     installlayout.ClientsDirectory,
 		LockPath:    installlayout.GrantAuthorityLockPath,
-		ExpectedExe: installlayout.ControllerPath,
+		ExpectedExe: installlayout.SSHDSessionPath,
 	}
 }
 
@@ -657,6 +657,18 @@ func serveGrantSessions(ctx context.Context) {
 	if err := server.Serve(ctx); err != nil {
 		slog.Error("grant session authority stopped", "err", err)
 	}
+}
+
+func runServerGrantListen(ctx context.Context, arguments []string, stdout, stderr io.Writer) error {
+	if len(arguments) != 0 {
+		return errors.New("server grant-listen accepts no arguments")
+	}
+	listener := grantsession.Server{
+		Socket:    installlayout.GrantSessionSocket,
+		Authority: productionGrantAuthority(),
+	}
+	fmt.Fprintf(stdout, "grant session authority listening\nsocket   %s\n", installlayout.GrantSessionSocket)
+	return listener.Serve(ctx)
 }
 
 func enterBlockedClock(manifest server.Config, reason error) error {

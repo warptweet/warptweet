@@ -138,3 +138,32 @@ func TestEnrollmentAcceptDoesNotConsumeWhenHostLockHeld(t *testing.T) {
 		t.Fatal("accept consumed while host lock was held")
 	}
 }
+
+func TestProductionGrantAuthorityExpectsSSHDSession(t *testing.T) {
+	t.Parallel()
+
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller failed")
+	}
+	contents, err := os.ReadFile(filepath.Join(filepath.Dir(file), "enroll_server.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fn := string(contents)
+	start := strings.Index(fn, "func productionGrantAuthority")
+	if start < 0 {
+		t.Fatal("productionGrantAuthority is missing")
+	}
+	end := strings.Index(fn[start:], "func serveGrantSessions")
+	if end < 0 {
+		t.Fatal("serveGrantSessions is missing after productionGrantAuthority")
+	}
+	body := fn[start : start+end]
+	if !strings.Contains(body, "ExpectedExe: installlayout.SSHDSessionPath") {
+		t.Fatal("production grant authority must expect sshd-session")
+	}
+	if strings.Contains(body, "ExpectedExe: installlayout.ControllerPath") {
+		t.Fatal("production grant authority still expects the controller executable")
+	}
+}

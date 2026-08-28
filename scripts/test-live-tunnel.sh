@@ -109,6 +109,8 @@ WT_TARGET_LOG="$WT_STATE_DIRECTORY/target.log"
 WT_FORBIDDEN_TARGET_LOG="$WT_STATE_DIRECTORY/forbidden-target.log"
 WT_CONTROLLER_LOG="$WT_STATE_DIRECTORY/controller.log"
 WT_CONTROLLER_STDOUT="$WT_STATE_DIRECTORY/controller.stdout"
+WT_GRANT_LOG="$WT_STATE_DIRECTORY/grant-listen.log"
+WT_GRANT_SOCKET=/run/warptweet/server/grant-session.sock
 WT_PAYLOAD_DIRECTORY="$WT_STATE_DIRECTORY/http"
 WT_FORBIDDEN_PAYLOAD_DIRECTORY="$WT_STATE_DIRECTORY/http-forbidden"
 WT_PAYLOAD="$WT_PAYLOAD_DIRECTORY/rekey.bin"
@@ -126,6 +128,8 @@ WT_CLIENT_PID=''
 WT_CLIENT_ID=''
 WT_SOCKS_PID=''
 WT_SOCKS_ID=''
+WT_GRANT_PID=''
+WT_GRANT_ID=''
 
 process_identity() {
     WT_IDENTITY_PID=$1
@@ -261,6 +265,7 @@ cleanup() {
     stop_owned_process "$WT_CLIENT_PID" "$WT_CLIENT_ID" "$WT_SSH" "controller SSH child" || WT_CLEANUP_FAILED=1
     stop_owned_process "$WT_CONTROLLER_PID" "$WT_CONTROLLER_ID" "$WT_CONTROLLER" "controller" || WT_CLEANUP_FAILED=1
     stop_owned_process "$WT_SSHD_PID" "$WT_SSHD_ID" "$WT_SSHD" "sshd" || WT_CLEANUP_FAILED=1
+    stop_owned_process "$WT_GRANT_PID" "$WT_GRANT_ID" "$WT_CONTROLLER" "grant session authority" || WT_CLEANUP_FAILED=1
     stop_owned_process "$WT_FORBIDDEN_TARGET_PID" "$WT_FORBIDDEN_TARGET_ID" "$WT_PYTHON" "forbidden target" || WT_CLEANUP_FAILED=1
     stop_owned_process "$WT_TARGET_PID" "$WT_TARGET_ID" "$WT_PYTHON" "application target" || WT_CLEANUP_FAILED=1
     if [ "$WT_CLEANUP_STATUS" -eq 0 ] && [ "$WT_CLEANUP_FAILED" -ne 0 ]; then
@@ -683,6 +688,15 @@ wait_for_log() {
         fi
         if [ -n "$WT_WAIT_PID" ] && ! kill -0 "$WT_WAIT_PID" 2>/dev/null; then
             dump_live_gate_file "$WT_WAIT_LOG" "$WT_WAIT_LABEL log after process exit"
+            if [ -n "$WT_CONTROLLER_LOG" ] && [ "$WT_WAIT_LOG" != "$WT_CONTROLLER_LOG" ]; then
+                dump_live_gate_file "$WT_CONTROLLER_LOG" "controller log"
+            fi
+            if [ -n "$WT_SERVER_LOG" ] && [ "$WT_WAIT_LOG" != "$WT_SERVER_LOG" ]; then
+                dump_live_gate_file "$WT_SERVER_LOG" "sshd log"
+            fi
+            if [ -n "$WT_GRANT_LOG" ] && [ "$WT_WAIT_LOG" != "$WT_GRANT_LOG" ]; then
+                dump_live_gate_file "$WT_GRANT_LOG" "grant session authority log"
+            fi
             fail "$WT_WAIT_LABEL process $WT_WAIT_PID exited before evidence appeared in $WT_WAIT_LOG"
         fi
         WT_WAIT_ATTEMPT=$((WT_WAIT_ATTEMPT + 1))
@@ -694,6 +708,9 @@ wait_for_log() {
     fi
     if [ -n "$WT_SERVER_LOG" ] && [ "$WT_WAIT_LOG" != "$WT_SERVER_LOG" ]; then
         dump_live_gate_file "$WT_SERVER_LOG" "sshd log"
+    fi
+    if [ -n "$WT_GRANT_LOG" ] && [ "$WT_WAIT_LOG" != "$WT_GRANT_LOG" ]; then
+        dump_live_gate_file "$WT_GRANT_LOG" "grant session authority log"
     fi
     fail "$WT_WAIT_LABEL evidence did not appear in $WT_WAIT_LOG"
 }
@@ -1174,6 +1191,67 @@ curl --fail --silent --show-error --connect-timeout 1 --max-time 3 \
     "http://127.0.0.1:$WT_FORBIDDEN_TARGET_PORT/canary.txt" ||
     fail "forbidden-target canary did not become ready"
 
+install -d -o root -g warptweet-sshd -m 0770 /var/lib/warptweet/sessions
+install -d -o root -g warptweet-sshd -m 2750 /var/lib/warptweet/clients
+WT_LIVE_CLIENT_ID=cafef00ddeadbeef
+env -i LANG=C LC_ALL=C \
+    "$WT_PYTHON" -c '
+import hashlib, json, sys
+public_key = open(sys.argv[1], encoding="utf-8").read().strip()
+digest = hashlib.sha256(public_key.encode("utf-8")).hexdigest()
+record = {
+    "client_id": sys.argv[2],
+    "grant_id": "baddcafebeefdead",
+    "tunnel_id": "live",
+    "route_id": "live",
+    "invite_id": "0d15ea5ecafebabe",
+    "public_key": public_key,
+    "public_key_sha256": digest,
+    "management_token_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "principal": "warptweet",
+    "profile_id": sys.argv[3],
+    "published_endpoint_generation": 1,
+    "data": {"host": "127.0.0.1", "port": 2222},
+    "enrollment": {"host": "127.0.0.1", "port": 29722},
+    "target_address": "127.0.0.1",
+    "target_port": int(sys.argv[4]),
+    "status": "active",
+    "accepted_at": "2026-08-28T00:00:00Z",
+    "authorization_not_after": sys.argv[5],
+    "authorization_duration_seconds": 2592000,
+    "generation": "20260828T000000Z",
+}
+with open(sys.argv[6], "w", encoding="utf-8") as handle:
+    json.dump(record, handle, indent=2)
+    handle.write("\n")
+' "$WT_CLIENT_PUBLIC_KEY" "$WT_LIVE_CLIENT_ID" "$WT_PROFILE" "$WT_TARGET_PORT" "$WT_NOT_AFTER" "$WT_STATE_DIRECTORY/live-client.json" ||
+    fail "cannot render the live-gate grant client record"
+install -o root -g warptweet-sshd -m 0640 \
+    "$WT_STATE_DIRECTORY/live-client.json" "/var/lib/warptweet/clients/${WT_LIVE_CLIENT_ID}.json"
+install -o root -g root -m 0600 /dev/null "$WT_GRANT_LOG"
+env -i LANG=C LC_ALL=C \
+    "$WT_CONTROLLER" server grant-listen >"$WT_GRANT_LOG" 2>&1 &
+WT_GRANT_PID=$!
+WT_GRANT_ID=$(wait_for_owned_process "$WT_GRANT_PID" "$WT_CONTROLLER" "grant session authority")
+WT_GRANT_READY=0
+WT_GRANT_ATTEMPT=0
+while [ "$WT_GRANT_ATTEMPT" -lt 100 ]; do
+    if [ -S "$WT_GRANT_SOCKET" ]; then
+        WT_GRANT_READY=1
+        break
+    fi
+    if ! kill -0 "$WT_GRANT_PID" 2>/dev/null; then
+        dump_live_gate_file "$WT_GRANT_LOG" "grant session authority log after process exit"
+        fail "grant session authority process $WT_GRANT_PID exited before the grant socket appeared"
+    fi
+    WT_GRANT_ATTEMPT=$((WT_GRANT_ATTEMPT + 1))
+    sleep 0.1
+done
+[ "$WT_GRANT_READY" -eq 1 ] || fail "grant session socket did not appear"
+[ "$(stat -c '%u:%g:%a' "$WT_GRANT_SOCKET")" = "0:0:600" ] ||
+    fail "grant session socket has unexpected ownership or mode"
+pass "grant session authority is listening"
+
 install -o root -g root -m 0600 /dev/null "$WT_SERVER_LOG"
 install -o root -g root -m 0600 /dev/null "$WT_SERVER_STDERR"
 env -i LANG=C LC_ALL=C \
@@ -1400,6 +1478,10 @@ done
 stop_owned_process "$WT_SSHD_PID" "$WT_SSHD_ID" "$WT_SSHD" "sshd" || fail "could not stop the owned sshd"
 WT_SSHD_PID=''
 WT_SSHD_ID=''
+stop_owned_process "$WT_GRANT_PID" "$WT_GRANT_ID" "$WT_CONTROLLER" "grant session authority" ||
+    fail "could not stop the owned grant session authority"
+WT_GRANT_PID=''
+WT_GRANT_ID=''
 stop_owned_process "$WT_FORBIDDEN_TARGET_PID" "$WT_FORBIDDEN_TARGET_ID" "$WT_PYTHON" "forbidden target" ||
     fail "could not stop the owned forbidden target"
 WT_FORBIDDEN_TARGET_PID=''

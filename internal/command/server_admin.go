@@ -30,13 +30,15 @@ const (
 
 func runServer(ctx context.Context, arguments []string, stdout, stderr io.Writer) error {
 	if len(arguments) == 0 {
-		return errors.New("server requires an internal subcommand: enroll-listen, mgmt-listen, data-plane, host-sign, accept-enrollment, revoke, status, clock-recover")
+		return errors.New("server requires an internal subcommand: enroll-listen, mgmt-listen, grant-listen, data-plane, host-sign, accept-enrollment, revoke, status, clock-recover")
 	}
 	switch arguments[0] {
 	case "enroll-listen":
 		return runServerEnrollListen(ctx, arguments[1:], stdout, stderr)
 	case "mgmt-listen":
 		return runServerMgmtListen(ctx, arguments[1:], stdout, stderr)
+	case "grant-listen":
+		return runServerGrantListen(ctx, arguments[1:], stdout, stderr)
 	case "data-plane":
 		return runServerDataPlane(ctx, arguments[1:], stdout, stderr)
 	case "host-sign":

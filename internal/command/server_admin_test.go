@@ -29,6 +29,7 @@ func TestUsageKeepsInternalServerCommandsPrivate(t *testing.T) {
 		"warptweet server init",
 		"warptweet server invite",
 		"warptweet server enroll-listen",
+		"warptweet server grant-listen",
 		"warptweet server accept-enrollment",
 		"warptweet server revoke",
 		"warptweet server status",
