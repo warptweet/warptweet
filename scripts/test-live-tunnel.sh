@@ -77,7 +77,7 @@ WT_CLIENT_TRUST_DIRECTORY=/etc/warptweet/trust
 WT_KNOWN_HOSTS="$WT_CLIENT_TRUST_DIRECTORY/known_hosts"
 WT_GLOBAL_KNOWN_HOSTS="$WT_CLIENT_TRUST_DIRECTORY/known_hosts.empty"
 
-WT_PROFILE=warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519
+WT_PROFILE=warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519-chacha20
 WT_KEX=mlkem768x25519-sha256
 WT_COMPOSITE_KEY=ssh-mldsa44-ed25519@openssh.com
 WT_CLASSICAL_KEY_TYPE=ssh-ed25519

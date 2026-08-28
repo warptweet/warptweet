@@ -478,6 +478,7 @@ func TestLiveTunnelReleaseGateIsDisposableAndFailClosed(t *testing.T) {
 		`mknod -m 0600 /dev/net/tun c 10 200`,
 		`TUNSETIFF capability probe failed`,
 		`doctor-server --config "$WT_SERVER_MANIFEST"`,
+		`WT_PROFILE=warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519-chacha20`,
 		`"schema_version": 2`,
 		`"host": "127.0.0.1"`,
 		`prove_managed_client_state_immutable "$WT_CLIENT_USER" service`,
