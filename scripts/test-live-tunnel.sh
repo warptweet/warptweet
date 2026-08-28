@@ -26,7 +26,7 @@ if [ "$#" -ne 0 ]; then
     exit 64
 fi
 
-for WT_TOOL in awk chmod chown cmp curl date dd env getent grep id install kill mknod python3 realpath sed sha256sum sleep stat sudo timeout uname useradd; do
+for WT_TOOL in awk chmod chown cmp curl date dd env getent grep groupadd id install kill mknod python3 realpath sed sha256sum sleep stat sudo timeout uname useradd; do
     if ! command -v "$WT_TOOL" >/dev/null 2>&1; then
         fail "required tool is unavailable: $WT_TOOL"
     fi
@@ -144,6 +144,11 @@ process_effective_uid() {
     awk '/^Uid:/ { print $3; exit }' "/proc/$1/status" 2>/dev/null
 }
 
+process_state() {
+    awk '{ value = $0; sub(/^.*\) /, "", value); split(value, fields); print fields[1] }' \
+        "/proc/$1/stat" 2>/dev/null
+}
+
 wait_for_owned_process() {
     WT_WAIT_PID=$1
     WT_WAIT_EXECUTABLE=$2
@@ -151,6 +156,10 @@ wait_for_owned_process() {
     WT_WAIT_ATTEMPT=0
     while [ "$WT_WAIT_ATTEMPT" -lt 100 ]; do
         if kill -0 "$WT_WAIT_PID" 2>/dev/null; then
+            WT_WAIT_STATE=$(process_state "$WT_WAIT_PID" || true)
+            if [ "$WT_WAIT_STATE" = Z ]; then
+                fail "$WT_WAIT_LABEL process exited before ownership was established"
+            fi
             WT_WAIT_CURRENT_EXECUTABLE=$(process_executable "$WT_WAIT_PID" || true)
             if [ "$WT_WAIT_CURRENT_EXECUTABLE" = "$WT_WAIT_EXECUTABLE" ]; then
                 process_identity "$WT_WAIT_PID" || fail "cannot identify $WT_WAIT_LABEL process"
@@ -162,6 +171,11 @@ wait_for_owned_process() {
         WT_WAIT_ATTEMPT=$((WT_WAIT_ATTEMPT + 1))
         sleep 0.1
     done
+    echo "live tunnel gate: $WT_WAIT_LABEL pid=$WT_WAIT_PID want=$WT_WAIT_EXECUTABLE got=$(process_executable "$WT_WAIT_PID" || true) state=$(process_state "$WT_WAIT_PID" || true) uid=$(process_effective_uid "$WT_WAIT_PID" || true)" >&2
+    if [ -f "$WT_CONTROLLER_LOG" ]; then
+        echo "live tunnel gate: controller log:" >&2
+        cat "$WT_CONTROLLER_LOG" >&2 || true
+    fi
     fail "$WT_WAIT_LABEL process did not become the expected executable"
 }
 
@@ -331,9 +345,12 @@ provision_dedicated_client_account() {
         getent group "$WT_CLIENT_GROUP" >/dev/null 2>&1; then
         fail "dedicated client account or group already exists; refusing to reuse host identity"
     fi
+    # warptweet run only authorizes the packaged client UID/GID 920.
+    groupadd --system --gid 920 "$WT_CLIENT_GROUP"
     useradd \
         --system \
-        --user-group \
+        --uid 920 \
+        --gid 920 \
         --no-create-home \
         --home-dir /nonexistent \
         --shell /usr/sbin/nologin \
@@ -351,8 +368,8 @@ $WT_CLIENT_GROUP_ENTRY
 EOF
     if [ "$WT_CLIENT_ACCOUNT_NAME" != "$WT_CLIENT_USER" ] ||
         [ "$WT_CLIENT_ACCOUNT_PASSWORD" != x ] ||
-        [ "$WT_CLIENT_UID" = 0 ] ||
-        [ "$WT_CLIENT_GID" = 0 ] ||
+        [ "$WT_CLIENT_UID" != 920 ] ||
+        [ "$WT_CLIENT_GID" != 920 ] ||
         [ "$WT_CLIENT_HOME" != /nonexistent ] ||
         [ "$WT_CLIENT_SHELL" != /usr/sbin/nologin ] ||
         [ "$WT_CLIENT_GROUP_NAME" != "$WT_CLIENT_GROUP" ] ||
