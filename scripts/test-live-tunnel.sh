@@ -153,6 +153,32 @@ process_state() {
         "/proc/$1/stat" 2>/dev/null
 }
 
+# Linux records children per thread. Go os/exec forks from a runtime thread, so
+# the packaged SSH child is under task/<tid>/children, not necessarily the main
+# thread (tid == pid).
+process_children() {
+    WT_CHILDREN_PARENT=$1
+    for WT_TASK_CHILDREN in "/proc/$WT_CHILDREN_PARENT/task/"*/children; do
+        [ -f "$WT_TASK_CHILDREN" ] || continue
+        awk '{ for (i = 1; i <= NF; i++) print $i }' "$WT_TASK_CHILDREN" 2>/dev/null || true
+    done | awk 'NF && !seen[$0]++'
+}
+
+dump_process_children() {
+    WT_DUMP_PARENT=$1
+    WT_DUMP_LABEL=$2
+    WT_DUMP_MAIN=$(awk '{ print }' "/proc/$WT_DUMP_PARENT/task/$WT_DUMP_PARENT/children" 2>/dev/null || true)
+    echo "live tunnel gate: $WT_DUMP_LABEL pid=$WT_DUMP_PARENT main-thread children=$WT_DUMP_MAIN" >&2
+    WT_DUMP_CHILDREN=$(process_children "$WT_DUMP_PARENT")
+    if [ -z "$WT_DUMP_CHILDREN" ]; then
+        echo "live tunnel gate: $WT_DUMP_LABEL has no thread children" >&2
+        return 0
+    fi
+    for WT_DUMP_CHILD in $WT_DUMP_CHILDREN; do
+        echo "live tunnel gate: $WT_DUMP_LABEL child pid=$WT_DUMP_CHILD exe=$(process_executable "$WT_DUMP_CHILD" || true) state=$(process_state "$WT_DUMP_CHILD" || true) uid=$(process_effective_uid "$WT_DUMP_CHILD" || true)" >&2
+    done
+}
+
 wait_for_owned_process() {
     WT_WAIT_PID=$1
     WT_WAIT_EXECUTABLE=$2
@@ -1322,8 +1348,7 @@ pass "controller carried deterministic HTTP payload"
 
 WT_CHILD_ATTEMPT=0
 while [ "$WT_CHILD_ATTEMPT" -lt 100 ]; do
-    WT_CHILDREN=$(awk '{ for (i = 1; i <= NF; i++) print $i }' \
-        "/proc/$WT_CONTROLLER_PID/task/$WT_CONTROLLER_PID/children" 2>/dev/null || true)
+    WT_CHILDREN=$(process_children "$WT_CONTROLLER_PID")
     WT_MATCHED_CHILD=''
     WT_MATCHED_COUNT=0
     for WT_CHILD in $WT_CHILDREN; do
@@ -1340,11 +1365,17 @@ while [ "$WT_CHILD_ATTEMPT" -lt 100 ]; do
         fi
         break
     fi
-    [ "$WT_MATCHED_COUNT" -eq 0 ] || fail "controller owns more than one packaged SSH child"
+    if [ "$WT_MATCHED_COUNT" -ne 0 ]; then
+        dump_process_children "$WT_CONTROLLER_PID" "controller"
+        fail "controller owns more than one packaged SSH child"
+    fi
     WT_CHILD_ATTEMPT=$((WT_CHILD_ATTEMPT + 1))
     sleep 0.1
 done
-[ -n "$WT_CLIENT_PID" ] || fail "controller packaged SSH child was not observed"
+if [ -z "$WT_CLIENT_PID" ]; then
+    dump_process_children "$WT_CONTROLLER_PID" "controller"
+    fail "controller packaged SSH child was not observed"
+fi
 
 WT_REKEY_ATTEMPT=0
 WT_KEX_EPOCHS_COMPLETE=0
