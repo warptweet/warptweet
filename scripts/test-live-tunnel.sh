@@ -96,7 +96,7 @@ WT_CLIENT_PUBLIC_KEY="$WT_CLIENT_KEY_CANDIDATE.pub"
 WT_WRONG_HOST_KEY="$WT_TEST_CONFIG_DIRECTORY/wrong_host_mldsa44_ed25519_key"
 WT_CLASSICAL_KEY="$WT_TEST_CONFIG_DIRECTORY/classical_ed25519_key"
 WT_WRONG_KNOWN_HOSTS="$WT_TEST_CONFIG_DIRECTORY/known_hosts.wrong"
-WT_CLIENT_MANIFEST_CANDIDATE="$WT_TEST_CONFIG_DIRECTORY/client.v1.candidate.wt"
+WT_CLIENT_MANIFEST_CANDIDATE="$WT_TEST_CONFIG_DIRECTORY/client.candidate.wt"
 WT_RENDERED_CLIENT_CONFIG="$WT_TEST_CONFIG_DIRECTORY/client.conf"
 WT_RAW_CLIENT_CONFIG="$WT_TEST_CONFIG_DIRECTORY/client-raw.conf"
 WT_CLASSICAL_CLIENT_CONFIG="$WT_TEST_CONFIG_DIRECTORY/client-classical.conf"
@@ -964,11 +964,11 @@ WT_SSH_SHA256=$(sha256sum "$WT_SSH" | awk '{print $1}')
 {
     printf '%s\n' '{'
     printf '%s\n' '  "kind": "warptweet.client-tunnels",'
-    printf '%s\n' '  "schema_version": 1,'
+    printf '%s\n' '  "schema_version": 2,'
     printf '  "profile_id": "%s",\n' "$WT_PROFILE"
     printf '  "ssh_binary_sha256": "%s",\n' "$WT_SSH_SHA256"
     printf '%s\n' '  "server": {'
-    printf '    "address": "127.0.0.1", "port": %s, "user": "warptweet"\n' "$WT_SERVER_PORT"
+    printf '    "host": "127.0.0.1", "port": %s, "user": "warptweet"\n' "$WT_SERVER_PORT"
     printf '%s\n' '  },'
     printf '%s\n' '  "tunnels": ['
     printf '%s\n' '    {'
