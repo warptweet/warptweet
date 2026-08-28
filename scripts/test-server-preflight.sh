@@ -36,7 +36,7 @@ for WT_DIGEST in "$WT_EXPECTED_BUNDLE_MANIFEST_SHA256" "$WT_EXPECTED_CONTROLLER_
     esac
 done
 
-for WT_TOOL in awk chmod cmp cp getent id install mktemp realpath rm sed sha256sum stat uname useradd; do
+for WT_TOOL in awk chmod cmp cp date getent id install mktemp realpath rm sed sha256sum stat uname useradd; do
     if ! command -v "$WT_TOOL" >/dev/null 2>&1; then
         fail "required tool is unavailable: $WT_TOOL"
     fi
@@ -411,9 +411,12 @@ chmod 0644 "$WT_SERVER_MANIFEST"
     --config "$WT_SERVER_MANIFEST" \
     >/etc/warptweet/sshd_config
 chmod 0644 /etc/warptweet/sshd_config
+WT_NOT_AFTER=$(date -u -d '+30 days' +%Y-%m-%dT%H:%M:%SZ) ||
+    fail "cannot compute authorization expiry"
 /opt/warptweet/bin/warptweet render-authorized-key \
     --config "$WT_SERVER_MANIFEST" \
     --public-key "$WT_CLIENT_KEY.pub" \
+    --not-after "$WT_NOT_AFTER" \
     >/var/lib/warptweet/authorized_keys/warptweet
 chmod 0644 /var/lib/warptweet/authorized_keys/warptweet
 

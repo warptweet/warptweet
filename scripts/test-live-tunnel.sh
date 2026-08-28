@@ -26,7 +26,7 @@ if [ "$#" -ne 0 ]; then
     exit 64
 fi
 
-for WT_TOOL in awk chmod chown cmp curl dd env getent grep id install kill mknod python3 realpath sed sha256sum sleep stat sudo timeout uname useradd; do
+for WT_TOOL in awk chmod chown cmp curl date dd env getent grep id install kill mknod python3 realpath sed sha256sum sleep stat sudo timeout uname useradd; do
     if ! command -v "$WT_TOOL" >/dev/null 2>&1; then
         fail "required tool is unavailable: $WT_TOOL"
     fi
@@ -1004,9 +1004,12 @@ require_client_state_layout
 prove_managed_client_state_immutable "$WT_CLIENT_USER" service
 prove_managed_client_state_immutable "$WT_SECONDARY_UNPRIVILEGED_USER" secondary
 
+WT_NOT_AFTER=$(date -u -d '+30 days' +%Y-%m-%dT%H:%M:%SZ) ||
+    fail "cannot compute authorization expiry"
 "$WT_CONTROLLER" render-authorized-key \
     --config "$WT_SERVER_MANIFEST" \
-    --public-key "$WT_CLIENT_PUBLIC_KEY" >"$WT_STATE_DIRECTORY/authorized_keys.new"
+    --public-key "$WT_CLIENT_PUBLIC_KEY" \
+    --not-after "$WT_NOT_AFTER" >"$WT_STATE_DIRECTORY/authorized_keys.new"
 install -o root -g root -m 0644 "$WT_STATE_DIRECTORY/authorized_keys.new" "$WT_AUTHORIZED_KEYS"
 
 WT_FINAL_SERVER_REPORT="$WT_STATE_DIRECTORY/server-doctor-live.json"

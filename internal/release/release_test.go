@@ -745,6 +745,8 @@ func TestFixedLayoutServerPreflightScriptIsCIOnlyAndNonListening(t *testing.T) {
 		`-t mldsa44-ed25519`,
 		`render-server`,
 		`render-authorized-key`,
+		`--not-after "$WT_NOT_AFTER"`,
+		`date -u -d '+30 days'`,
 		`doctor-server --config "$WT_SERVER_MANIFEST"`,
 		`'"status":"preflight_ready"'`,
 		`'"role":"server"'`,
