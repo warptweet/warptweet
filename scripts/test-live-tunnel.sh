@@ -822,6 +822,56 @@ expect_session_channel_failure() {
     pass "$WT_SESSION_NAME reached sshd and was disconnected for a non-direct-tcpip session channel"
 }
 
+expect_global_request_failure() {
+    WT_GLOBAL_NAME=$1
+    WT_GLOBAL_RTYPE=$2
+    shift 2
+    WT_GLOBAL_START_LINE=$(server_log_line_count)
+    # Packaged sshd disconnects unapproved global requests in serverloop.c
+    # before AllowTcpForwarding=no can emit "Server has disabled port forwarding".
+    expect_ssh_failure "$WT_GLOBAL_NAME" \
+        'WarpTweet refused SSH global request' \
+        "$@"
+    capture_server_evidence "$WT_GLOBAL_START_LINE" "$WT_GLOBAL_NAME"
+    WT_GLOBAL_SERVER_LOG="$WT_STATE_DIRECTORY/negative-$WT_GLOBAL_NAME.server.log"
+    if ! awk -v rtype="$WT_GLOBAL_RTYPE" '
+        index($0, "server_input_global_request: rtype " rtype " ") { request++ }
+        index($0, "WarpTweet refused global request " rtype) { refused++ }
+        END {
+            exit(request == 1 && refused == 1 ? 0 : 1)
+        }
+    ' "$WT_GLOBAL_SERVER_LOG"; then
+        dump_live_gate_file "$WT_GLOBAL_SERVER_LOG" "$WT_GLOBAL_NAME server transcript"
+        fail "$WT_GLOBAL_NAME lacks isolated forward-only global-request disconnect evidence"
+    fi
+    pass "$WT_GLOBAL_NAME reached sshd and was disconnected for global request $WT_GLOBAL_RTYPE"
+}
+
+expect_non_direct_tcpip_channel_failure() {
+    WT_CHANNEL_NAME=$1
+    WT_CHANNEL_TYPE=$2
+    shift 2
+    WT_CHANNEL_START_LINE=$(server_log_line_count)
+    # Packaged sshd disconnects non-direct-tcpip channels in serverloop.c
+    # before PermitTunnel=no can emit "Server has rejected tunnel device forwarding".
+    expect_ssh_failure "$WT_CHANNEL_NAME" \
+        'WarpTweet allows only direct-tcpip channels' \
+        "$@"
+    capture_server_evidence "$WT_CHANNEL_START_LINE" "$WT_CHANNEL_NAME"
+    WT_CHANNEL_SERVER_LOG="$WT_STATE_DIRECTORY/negative-$WT_CHANNEL_NAME.server.log"
+    if ! awk -v ctype="$WT_CHANNEL_TYPE" '
+        index($0, "server_input_channel_open: ctype " ctype) { channel_open++ }
+        index($0, "WarpTweet refused channel type " ctype) { refused++ }
+        END {
+            exit(channel_open == 1 && refused == 1 ? 0 : 1)
+        }
+    ' "$WT_CHANNEL_SERVER_LOG"; then
+        dump_live_gate_file "$WT_CHANNEL_SERVER_LOG" "$WT_CHANNEL_NAME server transcript"
+        fail "$WT_CHANNEL_NAME lacks isolated forward-only channel disconnect evidence"
+    fi
+    pass "$WT_CHANNEL_NAME reached sshd and was disconnected for a non-direct-tcpip $WT_CHANNEL_TYPE channel"
+}
+
 verify_complete_kex_epochs() {
     WT_KEX_TRANSCRIPT=$1
     awk \
@@ -1582,15 +1632,13 @@ expect_session_channel_failure scp-style-exec \
     -o SessionType=default \
     -T "$WT_HOST_ALIAS" "scp -t /tmp/warptweet-live-gate"
 
-expect_ssh_failure reverse-forward \
-    'Server has disabled port forwarding' \
+expect_global_request_failure reverse-forward tcpip-forward \
     -F "$WT_RAW_CLIENT_CONFIG" \
     -N -T \
     -R "127.0.0.1:25432:127.0.0.1:$WT_TARGET_PORT" \
     "$WT_HOST_ALIAS"
 
-expect_ssh_failure tun-forward \
-    'Server has rejected tunnel device forwarding' \
+expect_non_direct_tcpip_channel_failure tun-forward 'tun@openssh.com' \
     -F "$WT_RAW_CLIENT_CONFIG" \
     -N -T -w any:any "$WT_HOST_ALIAS"
 
