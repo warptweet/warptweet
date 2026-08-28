@@ -506,6 +506,7 @@ func TestLiveTunnelReleaseGateIsDisposableAndFailClosed(t *testing.T) {
 		`SSH2_MSG_NEWKEYS sent`,
 		`SSH2_MSG_NEWKEYS received`,
 		`Accepted publickey for warptweet`,
+		`WT_COMPOSITE_KEY_SHORT=MLDSA44-ED25519`,
 		`controller carried deterministic HTTP payload`,
 		`expect_ssh_failure classical-kex`,
 		`expect_ssh_failure wrong-host-pin`,

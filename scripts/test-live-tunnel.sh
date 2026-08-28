@@ -80,6 +80,7 @@ WT_GLOBAL_KNOWN_HOSTS="$WT_CLIENT_TRUST_DIRECTORY/known_hosts.empty"
 WT_PROFILE=warptweet-tcp1-openssh10.4p1-openssl3.5.7-mlkem768x25519-mldsa44-ed25519-chacha20
 WT_KEX=mlkem768x25519-sha256
 WT_COMPOSITE_KEY=ssh-mldsa44-ed25519@openssh.com
+WT_COMPOSITE_KEY_SHORT=MLDSA44-ED25519
 WT_CLASSICAL_KEY_TYPE=ssh-ed25519
 WT_APPROVED_CIPHER_ONE=chacha20-poly1305@openssh.com
 WT_APPROVED_CIPHER_TWO=aes256-gcm@openssh.com
@@ -814,6 +815,7 @@ verify_complete_kex_epochs() {
     awk \
         -v expected_kex="$WT_KEX" \
         -v expected_host_key="$WT_COMPOSITE_KEY" \
+        -v expected_host_key_short="$WT_COMPOSITE_KEY_SHORT" \
         -v cipher_one="$WT_APPROVED_CIPHER_ONE" \
         -v cipher_two="$WT_APPROVED_CIPHER_TWO" '
         function complete_epoch() {
@@ -901,8 +903,11 @@ verify_complete_kex_epochs() {
         }
         index($0, "Accepted publickey for warptweet from ") == 1 {
             accepted_count++
+            # OpenSSH 10.4 auth_log uses sshkey_type() (MLDSA44-ED25519),
+            # not the SSH algorithm name from KEX (ssh-mldsa44-ed25519@openssh.com).
             if ($6 != connection_address || $8 != connection_port ||
-                index($0, " ssh2: " expected_host_key " ") == 0 ||
+                (index($0, " ssh2: " expected_host_key " ") == 0 &&
+                    index($0, " ssh2: " expected_host_key_short " ") == 0) ||
                 !epoch_open || !complete_epoch()) {
                 bad = 1
             }
@@ -1387,11 +1392,21 @@ while [ "$WT_REKEY_ATTEMPT" -lt 200 ]; do
         WT_KEX_EPOCHS_COMPLETE=1
         break
     fi
+    # OpenSSH only checks RekeyLimit while packets are in flight. Keep a
+    # tunneled transfer moving so the 1K test-daemon override can complete
+    # a second exact-profile epoch instead of going idle after the first GET.
+    curl --silent --show-error --connect-timeout 1 --max-time 5 \
+        --noproxy '*' \
+        --output /dev/null \
+        "http://127.0.0.1:$WT_FORWARD_PORT/rekey.bin" || true
     WT_REKEY_ATTEMPT=$((WT_REKEY_ATTEMPT + 1))
     sleep 0.1
 done
-[ "$WT_KEX_EPOCHS_COMPLETE" -eq 1 ] ||
+if [ "$WT_KEX_EPOCHS_COMPLETE" -ne 1 ]; then
+    dump_live_gate_file "$WT_CURRENT_CONTROLLER_SERVER_LOG" \
+        "controller server DEBUG transcript after missing KEX epochs"
     fail "server DEBUG transcript did not contain two complete controller KEX epochs"
+fi
 install -o root -g root -m 0600 \
     "$WT_CURRENT_CONTROLLER_SERVER_LOG" "$WT_POSITIVE_SERVER_LOG"
 
