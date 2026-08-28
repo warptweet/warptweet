@@ -494,6 +494,7 @@ func TestLiveTunnelReleaseGateIsDisposableAndFailClosed(t *testing.T) {
 		`controller is not running as the dedicated client UID`,
 		`controller SSH child is not running as the dedicated client UID`,
 		`"msg":"WarpTweet tunnel authenticated forward ready"`,
+		`dump_live_gate_file`,
 		`one-shot readiness control socket still exists after authenticated readiness`,
 		`authenticated SSH readiness was logged before tunneled payload transit`,
 		`WT_RAW_CLIENT_CONFIG="$WT_TEST_CONFIG_DIRECTORY/client-raw.conf"`,

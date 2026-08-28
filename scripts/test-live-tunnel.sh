@@ -660,18 +660,41 @@ assert_port_free() {
         fail "required loopback port is already in use: $1"
 }
 
+dump_live_gate_file() {
+    WT_DUMP_PATH=$1
+    WT_DUMP_LABEL=$2
+    echo "live tunnel gate: $WT_DUMP_LABEL ($WT_DUMP_PATH):" >&2
+    if [ -f "$WT_DUMP_PATH" ]; then
+        cat "$WT_DUMP_PATH" >&2 || true
+    else
+        echo "live tunnel gate: $WT_DUMP_PATH is absent" >&2
+    fi
+}
+
 wait_for_log() {
     WT_WAIT_LOG=$1
     WT_WAIT_TEXT=$2
     WT_WAIT_LABEL=$3
+    WT_WAIT_PID=${4:-}
     WT_WAIT_ATTEMPT=0
     while [ "$WT_WAIT_ATTEMPT" -lt 200 ]; do
         if grep -F "$WT_WAIT_TEXT" "$WT_WAIT_LOG" >/dev/null 2>&1; then
             return 0
         fi
+        if [ -n "$WT_WAIT_PID" ] && ! kill -0 "$WT_WAIT_PID" 2>/dev/null; then
+            dump_live_gate_file "$WT_WAIT_LOG" "$WT_WAIT_LABEL log after process exit"
+            fail "$WT_WAIT_LABEL process $WT_WAIT_PID exited before evidence appeared in $WT_WAIT_LOG"
+        fi
         WT_WAIT_ATTEMPT=$((WT_WAIT_ATTEMPT + 1))
         sleep 0.1
     done
+    dump_live_gate_file "$WT_WAIT_LOG" "$WT_WAIT_LABEL log after timeout"
+    if [ -n "$WT_CONTROLLER_LOG" ] && [ "$WT_WAIT_LOG" != "$WT_CONTROLLER_LOG" ]; then
+        dump_live_gate_file "$WT_CONTROLLER_LOG" "controller log"
+    fi
+    if [ -n "$WT_SERVER_LOG" ] && [ "$WT_WAIT_LOG" != "$WT_SERVER_LOG" ]; then
+        dump_live_gate_file "$WT_SERVER_LOG" "sshd log"
+    fi
     fail "$WT_WAIT_LABEL evidence did not appear in $WT_WAIT_LOG"
 }
 
@@ -1191,7 +1214,8 @@ fi
 wait_for_log \
     "$WT_CONTROLLER_LOG" \
     '"msg":"WarpTweet tunnel authenticated forward ready"' \
-    "controller authenticated-forward readiness"
+    "controller authenticated-forward readiness" \
+    "$WT_CONTROLLER_PID"
 if [ -e "$WT_CONTROLLER_RUNTIME_DIRECTORY/c" ] || [ -L "$WT_CONTROLLER_RUNTIME_DIRECTORY/c" ]; then
     fail "one-shot readiness control socket still exists after authenticated readiness"
 fi
