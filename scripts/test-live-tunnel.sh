@@ -821,6 +821,14 @@ verify_complete_kex_epochs() {
         function complete_epoch() {
             return phase == 4 && newkeys_sent == 1 && newkeys_received == 1
         }
+        function proven() {
+            # One connection, one Accepted, no violations, and two complete
+            # epochs (finished count, or one finished plus the current
+            # still-open complete epoch).
+            return connection_count == 1 && accepted_count == 1 && !bad &&
+                (epoch_count >= 2 ||
+                    (epoch_open && epoch_count >= 1 && complete_epoch()))
+        }
         function field_after(marker, value) {
             sub("^.*" marker, "", value)
             sub("[[:space:]]+\\[(preauth|postauth)\\]$", "", value)
@@ -846,6 +854,11 @@ verify_complete_kex_epochs() {
             # A trailing in-progress rekey at END is expected under the
             # test-only RekeyLimit=1K override while payload keeps moving.
             epoch_open = 0
+            # Stop once the gate is proven. Later DEBUG3 teardown or an
+            # in-flight 1K rekey must not revoke completed evidence.
+            if (proven()) {
+                exit 0
+            }
         }
         index($0, "Connection from ") == 1 {
             connection_count++
@@ -903,6 +916,8 @@ verify_complete_kex_epochs() {
         /SSH2_MSG_NEWKEYS received/ {
             if (!epoch_open || phase != 4 || ++newkeys_received != 1) {
                 bad = 1
+            } else if (proven()) {
+                exit 0
             }
             next
         }
@@ -915,13 +930,14 @@ verify_complete_kex_epochs() {
                     index($0, " ssh2: " expected_host_key_short " ") == 0) ||
                 !epoch_open || !complete_epoch()) {
                 bad = 1
+            } else if (proven()) {
+                exit 0
             }
             next
         }
         END {
             finish_epoch(1)
-            exit(connection_count == 1 && accepted_count == 1 &&
-                epoch_count >= 2 && !bad ? 0 : 1)
+            exit(proven() ? 0 : 1)
         }
     ' "$WT_KEX_TRANSCRIPT"
 }
@@ -1410,6 +1426,17 @@ done
 if [ "$WT_KEX_EPOCHS_COMPLETE" -ne 1 ]; then
     dump_live_gate_file "$WT_CURRENT_CONTROLLER_SERVER_LOG" \
         "controller server DEBUG transcript after missing KEX epochs"
+    awk '
+        /Connection from / { conn++ }
+        /Accepted publickey for warptweet from / { acc++ }
+        /kex: algorithm:/ { alg++ }
+        /SSH2_MSG_NEWKEYS sent/ { sent++ }
+        /SSH2_MSG_NEWKEYS received/ { recv++ }
+        END {
+            printf "live tunnel gate: KEX verify counters conn=%d accepted=%d kex_alg=%d newkeys_sent=%d newkeys_recv=%d\n", \
+                conn + 0, acc + 0, alg + 0, sent + 0, recv + 0 > "/dev/stderr"
+        }
+    ' "$WT_CURRENT_CONTROLLER_SERVER_LOG" || true
     fail "server DEBUG transcript did not contain two complete controller KEX epochs"
 fi
 install -o root -g root -m 0600 \

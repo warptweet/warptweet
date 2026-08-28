@@ -509,6 +509,8 @@ func TestLiveTunnelReleaseGateIsDisposableAndFailClosed(t *testing.T) {
 		`WT_COMPOSITE_KEY_SHORT=MLDSA44-ED25519`,
 		`finish_epoch(1)`,
 		`trailing in-progress rekey`,
+		`function proven()`,
+		`Later DEBUG3 teardown`,
 		`controller carried deterministic HTTP payload`,
 		`expect_ssh_failure classical-kex`,
 		`expect_ssh_failure wrong-host-pin`,
