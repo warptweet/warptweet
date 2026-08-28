@@ -471,6 +471,8 @@ func TestLiveTunnelReleaseGateIsDisposableAndFailClosed(t *testing.T) {
 		`[ "$(id -G "$WT_CLIENT_USER")" != "$WT_CLIENT_GID" ]`,
 		`install -d -o root -g "$WT_CLIENT_GROUP" -m 0750`,
 		`install -o root -g "$WT_CLIENT_GROUP" -m 0440`,
+		`install -o "$WT_CLIENT_USER" -g "$WT_CLIENT_GROUP" -m 0600`,
+		`"$WT_CLIENT_UID:$WT_CLIENT_GID:600"`,
 		`fixed client readiness directory is not service-owned mode 0700`,
 		`require_empty_client_runtime_directory`,
 		`fixed client readiness directory contains an unexpected persistent entry`,

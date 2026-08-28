@@ -411,7 +411,7 @@ EOF
 require_client_state_layout() {
     if [ "$(stat -c '%u:%g:%a' "$WT_CLIENT_MANIFEST")" != "0:$WT_CLIENT_GID:440" ] ||
         [ "$(stat -c '%u:%g:%a' "$WT_CLIENT_IDENTITY_DIRECTORY")" != "0:$WT_CLIENT_GID:750" ] ||
-        [ "$(stat -c '%u:%g:%a' "$WT_CLIENT_KEY")" != "0:$WT_CLIENT_GID:440" ] ||
+        [ "$(stat -c '%u:%g:%a' "$WT_CLIENT_KEY")" != "$WT_CLIENT_UID:$WT_CLIENT_GID:600" ] ||
         [ "$(stat -c '%u:%g:%a' "$WT_CLIENT_TRUST_DIRECTORY")" != "0:$WT_CLIENT_GID:750" ] ||
         [ "$(stat -c '%u:%g:%a' "$WT_KNOWN_HOSTS")" != "0:$WT_CLIENT_GID:440" ] ||
         [ "$(stat -c '%u:%g:%a' "$WT_GLOBAL_KNOWN_HOSTS")" != "0:$WT_CLIENT_GID:440" ]; then
@@ -496,8 +496,19 @@ for index, path in enumerate(managed_files):
         finally:
             os.close(descriptor)
 
-    expect_permission_denied(f"{label} append {path}", append_file)
-    expect_permission_denied(f"{label} chmod {path}", lambda path=path: os.chmod(path, 0o600))
+    # OpenSSH requires the private identity to be 0600 and service-owned.
+    # That UID may rewrite the file; it still cannot replace it in the
+    # root-owned identity directory.
+    try:
+        metadata = os.lstat(path)
+        owner_writable = (
+            metadata.st_uid == os.getuid() and (metadata.st_mode & 0o777) == 0o600
+        )
+    except OSError:
+        owner_writable = False
+    if not owner_writable:
+        expect_permission_denied(f"{label} append {path}", append_file)
+        expect_permission_denied(f"{label} chmod {path}", lambda path=path: os.chmod(path, 0o600))
     expect_permission_denied(
         f"{label} rename {path}",
         lambda path=path: os.rename(path, path + ".warptweet-mutation"),
@@ -995,7 +1006,7 @@ install -o root -g root -m 0600 "$WT_STATE_DIRECTORY/known_hosts.wrong.new" "$WT
 
 install -o root -g "$WT_CLIENT_GROUP" -m 0440 \
     "$WT_CLIENT_MANIFEST_CANDIDATE" "$WT_CLIENT_MANIFEST"
-install -o root -g "$WT_CLIENT_GROUP" -m 0440 \
+install -o "$WT_CLIENT_USER" -g "$WT_CLIENT_GROUP" -m 0600 \
     "$WT_CLIENT_KEY_CANDIDATE" "$WT_CLIENT_KEY"
 install -o root -g "$WT_CLIENT_GROUP" -m 0440 \
     "$WT_STATE_DIRECTORY/known_hosts.new" "$WT_KNOWN_HOSTS"
