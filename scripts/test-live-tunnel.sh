@@ -832,14 +832,19 @@ verify_complete_kex_epochs() {
             suffix = " MAC: <implicit> compression: none"
             return value == cipher_one suffix || value == cipher_two suffix
         }
-        function finish_epoch() {
+        function finish_epoch(from_end) {
             if (!epoch_open) {
                 return
             }
-            if (!complete_epoch()) {
+            if (complete_epoch()) {
+                # Count only fully observed epochs.
+                epoch_count++
+            } else if (!from_end) {
+                # An incomplete epoch closed by a later KEX start is broken.
                 bad = 1
             }
-            epoch_count++
+            # A trailing in-progress rekey at END is expected under the
+            # test-only RekeyLimit=1K override while payload keeps moving.
             epoch_open = 0
         }
         index($0, "Connection from ") == 1 {
@@ -852,7 +857,7 @@ verify_complete_kex_epochs() {
             if (connection_count != 1) {
                 bad = 1
             }
-            finish_epoch()
+            finish_epoch(0)
             epoch_open = 1
             phase = 1
             newkeys_sent = 0
@@ -914,7 +919,7 @@ verify_complete_kex_epochs() {
             next
         }
         END {
-            finish_epoch()
+            finish_epoch(1)
             exit(connection_count == 1 && accepted_count == 1 &&
                 epoch_count >= 2 && !bad ? 0 : 1)
         }
