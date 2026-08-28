@@ -518,6 +518,7 @@ func TestLiveTunnelReleaseGateIsDisposableAndFailClosed(t *testing.T) {
 		`expect_ssh_failure classical-kex`,
 		`WT_CLASSICAL_KEX_CLIENT_CONFIG=`,
 		`KexAlgorithms \"curve25519-sha256\"`,
+		`ProxyCommand none`,
 		`dump_negative_ssh_evidence`,
 		`server rejected an offered classical KEX`,
 		`expect_ssh_failure wrong-host-pin`,

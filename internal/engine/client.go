@@ -343,7 +343,15 @@ func RenderClientConfig(spec ClientSpec) (string, error) {
 	output.WriteString("# WarpTweet policy view. Runtime execution uses closed -o arguments.\n")
 	output.WriteString("Host " + hostAlias + "\n")
 	for _, option := range policy.options {
-		fmt.Fprintf(&output, "    %s %s\n", option.name, renderConfigTokens(option.values))
+		// ProxyCommand/KnownHostsCommand use OpenSSH parse_command: the rest of
+		// the line is kept literally, so ProxyCommand "none" becomes the command
+		// named "none" instead of disabling the proxy. Keep bare keywords bare.
+		tokens := renderConfigTokens(option.values)
+		switch option.name {
+		case "ProxyCommand", "KnownHostsCommand":
+			tokens = renderArgumentTokens(option.values)
+		}
+		fmt.Fprintf(&output, "    %s %s\n", option.name, tokens)
 	}
 
 	return output.String(), nil

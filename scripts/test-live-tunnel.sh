@@ -1212,13 +1212,19 @@ if grep -E '^[[:space:]]*(RemoteForward|DynamicForward)[[:space:]]' \
     fail "rendered client contains a forbidden forwarding mode"
 fi
 
-sed "s#IdentityFile \"$WT_CLIENT_KEY\"#IdentityFile \"$WT_CLIENT_KEY_CANDIDATE\"#" \
+sed -e "s#IdentityFile \"$WT_CLIENT_KEY\"#IdentityFile \"$WT_CLIENT_KEY_CANDIDATE\"#" \
+    -e 's/^    ProxyCommand "none"$/    ProxyCommand none/' \
+    -e 's/^    KnownHostsCommand "none"$/    KnownHostsCommand none/' \
     "$WT_RENDERED_CLIENT_CONFIG" >"$WT_RAW_CLIENT_CONFIG"
 chmod 0600 "$WT_RAW_CLIENT_CONFIG"
 grep -Fx "    IdentityFile \"$WT_CLIENT_KEY\"" "$WT_RAW_CLIENT_CONFIG" >/dev/null &&
     fail "raw negative-test config retained the installed group-readable identity path"
 grep -Fx "    IdentityFile \"$WT_CLIENT_KEY_CANDIDATE\"" "$WT_RAW_CLIENT_CONFIG" >/dev/null ||
     fail "raw negative-test config does not use the root-only staging identity"
+grep -Fx '    ProxyCommand "none"' "$WT_RAW_CLIENT_CONFIG" >/dev/null &&
+    fail "raw negative-test config quotes ProxyCommand none (OpenSSH would exec it)"
+grep -Fx '    ProxyCommand none' "$WT_RAW_CLIENT_CONFIG" >/dev/null ||
+    fail "raw negative-test config does not disable ProxyCommand with bare none"
 
 sed "s#UserKnownHostsFile \"$WT_KNOWN_HOSTS\"#UserKnownHostsFile \"$WT_WRONG_KNOWN_HOSTS\"#" \
     "$WT_RAW_CLIENT_CONFIG" >"$WT_WRONG_HOST_CLIENT_CONFIG"

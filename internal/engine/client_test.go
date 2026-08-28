@@ -31,7 +31,7 @@ func TestRenderClientConfigIsFailClosed(t *testing.T) {
 		`PasswordAuthentication "no"`,
 		`SessionType "none"`,
 		`ForwardAgent "no"`,
-		`ProxyCommand "none"`,
+		`ProxyCommand none`,
 		`ProxyJump "none"`,
 		`RekeyLimit "512M" "1h"`,
 		`LocalForward "[127.0.0.1]:15432" "[10.0.0.10]:5432"`,
@@ -149,6 +149,10 @@ func TestOrderedClientPolicyDrivesRenderAndArguments(t *testing.T) {
 	}
 	for index, option := range policy.options {
 		renderedValue := renderConfigTokens(option.values)
+		switch option.name {
+		case "ProxyCommand", "KnownHostsCommand":
+			renderedValue = renderArgumentTokens(option.values)
+		}
 		argumentValue := renderArgumentTokens(option.values)
 		wantLine := "    " + option.name + " " + renderedValue
 		if lines[index+2] != wantLine {
