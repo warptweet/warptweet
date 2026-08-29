@@ -33,7 +33,7 @@ import (
 )
 
 const (
-	Version      = "0.1.0-dev"
+	Version      = "0.1.0"
 	manifestSize = 1 << 20
 )
 
