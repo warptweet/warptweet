@@ -150,7 +150,8 @@ jobs:
             "$WT_BUILD_HOME/warptweet" \
             "$WT_BUILD_HOME/out/pkg"
           sudo install -d -m 0755 artifacts
-          sudo cp -a "$WT_BUILD_HOME/out/pkg"/*.deb artifacts/
+          # Glob must expand as root: warptweet-build's out dir is 0700.
+          sudo sh -c 'cp -a /var/lib/warptweet-build/out/pkg/*.deb artifacts/'
           sudo chown "$(id -un):$(id -gn)" artifacts/*.deb
           ls -l artifacts/*.deb
 
