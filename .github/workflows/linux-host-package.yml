@@ -1,0 +1,163 @@
+name: Linux host package
+
+# Native Ubuntu package assembly for a signed GitHub Release.
+# Not part of the per-push CI gate. QEMU user-mode is not a substitute:
+# OpenSSH t-exec connect tests fail under qemu-user.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: linux-host-package-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  deb:
+    name: Linux host .deb (${{ matrix.runner }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        runner:
+          - ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go from go.mod
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          check-latest: false
+          cache: false
+
+      - name: Provision OpenSSH build and packaging prerequisites
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends \
+            acl \
+            autoconf \
+            automake \
+            binutils \
+            build-essential \
+            ca-certificates \
+            curl \
+            dpkg-dev \
+            fakeroot \
+            gpg \
+            gpg-agent \
+            libcbor-dev \
+            libedit-dev \
+            libfido2-dev \
+            libkrb5-dev \
+            libpam0g-dev \
+            libselinux1-dev \
+            libtext-template-perl \
+            libtool \
+            passwd \
+            perl \
+            pkg-config \
+            python3-minimal \
+            rsync \
+            sudo \
+            zlib1g-dev
+          sudo useradd \
+            --system \
+            --user-group \
+            --no-create-home \
+            --home-dir /var/empty/warptweet-sshd \
+            --shell /usr/sbin/nologin \
+            warptweet-sshd
+          sudo install -d -o root -g root -m 0755 /var/empty/warptweet-sshd
+          sudo env WARPTWEET_CI_OPENSSH_BUILD_ACCOUNT=1 \
+            ./scripts/provision-openssh-build-account.sh
+
+      - name: Allow the OpenSSH build account to read the checkout
+        run: |
+          set -euo pipefail
+          path="${GITHUB_WORKSPACE}"
+          while [ "$path" != "/" ]; do
+            sudo chmod a+x "$path"
+            path="$(dirname -- "$path")"
+          done
+          sudo chmod -R a+rX "${GITHUB_WORKSPACE}"
+          sudo -u warptweet-build -H test -x "${GITHUB_WORKSPACE}/scripts/fetch-openssh.sh"
+
+      - name: Authenticate and fetch pinned OpenSSH and OpenSSL sources
+        run: |
+          set -euo pipefail
+          WT_BUILD_HOME=/var/lib/warptweet-build
+          sudo -u warptweet-build -H env \
+            HOME="$WT_BUILD_HOME" \
+            TMPDIR="$WT_BUILD_HOME/tmp" \
+            ./scripts/fetch-openssh.sh \
+            "$WT_BUILD_HOME/warptweet-openssh-source"
+          sudo -u warptweet-build -H env \
+            HOME="$WT_BUILD_HOME" \
+            TMPDIR="$WT_BUILD_HOME/tmp" \
+            ./scripts/fetch-openssl.sh \
+            "$WT_BUILD_HOME/warptweet-openssl-source"
+
+      - name: Build and test static OpenSSL and OpenSSH
+        run: |
+          set -euo pipefail
+          . ./third_party/openssh/source.env
+          . ./third_party/openssl/source.env
+          WT_BUILD_HOME=/var/lib/warptweet-build
+          sudo -u warptweet-build -H env \
+            HOME="$WT_BUILD_HOME" \
+            TMPDIR="$WT_BUILD_HOME/tmp" \
+            SUDO=sudo \
+            ./scripts/build-openssh.sh \
+            "$WT_BUILD_HOME/warptweet-openssh-source/$OPENSSH_ARCHIVE" \
+            "$WT_BUILD_HOME/warptweet-openssl-source/$OPENSSL_ARCHIVE" \
+            "$WT_BUILD_HOME/warptweet-openssh-stage"
+
+      - name: Build controller and assemble the host package
+        env:
+          GOCACHE: /var/lib/warptweet-build/go-build
+        run: |
+          set -euo pipefail
+          WT_VERSION=$(sed -n 's/^[[:space:]]*Version[[:space:]]*=[[:space:]]*"\([^"]*\)".*/\1/p' internal/command/command.go)
+          test "$WT_VERSION" = "0.1.0"
+          WT_BUILD_HOME=/var/lib/warptweet-build
+          sudo install -d -o warptweet-build -g warptweet-build -m 0755 \
+            "$WT_BUILD_HOME/go-build" "$WT_BUILD_HOME/out"
+          sudo -u warptweet-build -H env \
+            HOME="$WT_BUILD_HOME" \
+            GOCACHE="$GOCACHE" \
+            go build -trimpath -buildvcs=false -o "$WT_BUILD_HOME/warptweet" ./cmd/warptweet
+          sudo -u warptweet-build -H env \
+            HOME="$WT_BUILD_HOME" \
+            GOCACHE="$GOCACHE" \
+            go build -trimpath -buildvcs=false -o "$WT_BUILD_HOME/warptweet-provisioner" ./cmd/warptweet-provisioner
+          sudo -u warptweet-build -H env \
+            HOME="$WT_BUILD_HOME" \
+            WARPTWEET_VERSION="$WT_VERSION" \
+            ./scripts/build-linux-packages.sh \
+            "$WT_BUILD_HOME/warptweet-openssh-stage" \
+            "$WT_BUILD_HOME/warptweet" \
+            "$WT_BUILD_HOME/out/pkg"
+          sudo install -d -m 0755 artifacts
+          sudo cp -a "$WT_BUILD_HOME/out/pkg"/*.deb artifacts/
+          sudo chown "$(id -un):$(id -gn)" artifacts/*.deb
+          ls -l artifacts/*.deb
+
+      - name: Upload unsigned host package
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: warptweet-linux-amd64-deb
+          path: artifacts/*.deb
+          if-no-files-found: error
+          retention-days: 7
